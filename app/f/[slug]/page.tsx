@@ -26,5 +26,5 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
 
 export default function ForumRoute({ params }: { params: { slug: string } }) {
   const snap = loadSnapshot()
-  return <ForumClient slug={params.slug} snapshot={snap} />
+  return <ForumClient key={params.slug} slug={params.slug} snapshot={snap} />
 }

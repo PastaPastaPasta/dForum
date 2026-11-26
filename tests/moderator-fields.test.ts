@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { stripModeratorFields, buildAuthorUpdate, MODERATOR_FIELDS } from '@/lib/services/moderator-fields'
+import { buildContract as _buildContract } from '../contracts/build.mjs'
+
+// The generator is plain JS — cast away the unhelpful structural types; the
+// tests that follow assert the shape they rely on.
+const buildContract = _buildContract as (opts: { moderation?: string; deployer?: string | null }) => any
 
 describe('stripModeratorFields — author writes never carry moderator fields', () => {
   it('drops moderator-owned fields per type', () => {
@@ -48,6 +53,30 @@ describe('buildAuthorUpdate — stored moderator fields pass through unchanged',
   it('refuses a change that tries to set a moderator-owned field via the changes object', () => {
     const out = buildAuthorUpdate('profile', {}, { modState: 99 })
     expect(out.modState).toBeUndefined()
+  })
+})
+
+describe('MODERATOR_FIELDS — mirrors the contract changeFields (team mode)', () => {
+  // The app-side moderator field list and the contract's moderatorAbilities.
+  // changeFields must agree — a mismatch means the app refuses writes the
+  // contract would allow, or allows ones it would refuse.
+  // The deployer only affects the appointed-moderator list, never the
+  // moderatorAbilities.changeFields — any syntactically valid identity works.
+  const team = buildContract({ moderation: 'team', deployer: '6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM' })
+
+  for (const type of Object.keys(MODERATOR_FIELDS)) {
+    it(`${type}: app fields == contract changeFields`, () => {
+      const schema = team.documentSchemas[type]
+      expect(schema, `contract has a ${type} schema`).toBeDefined()
+      const changeFields = schema.moderatorAbilities?.changeFields ?? []
+      expect([...MODERATOR_FIELDS[type]].sort()).toEqual([...changeFields].sort())
+    })
+  }
+
+  it('thread/post/profile/report all carry a moderated schema (none mode drops them)', () => {
+    for (const type of Object.keys(MODERATOR_FIELDS)) {
+      expect(team.documentSchemas[type].moderatorAbilities, `${type} has moderatorAbilities`).toBeTruthy()
+    }
   })
 })
 

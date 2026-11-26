@@ -6,7 +6,8 @@ import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
 import { useSession } from '@/lib/session'
-import { query } from '@/lib/services/document-service'
+import { query, queryRaw, get } from '@/lib/services/document-service'
+import { earliestOwnerPost } from '@/lib/services/orphan'
 import { useLive } from '@/components/LiveFeed'
 import { useProfileNames } from '@/lib/use-profiles'
 import { filterListable } from '@/lib/services/orphan'
@@ -20,6 +21,9 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   // Errors propagate — useLive catches and flips the badge to "unavailable";
   // the snapshot stays visible and the stale note shows.
   const { live, loading, error } = useLive(() => loadLive(snap), 'home')
+  // "+" means the shown window filled without running dry — a window that
+  // ran dry (fewer threads exist than the window) shows no suffix.
+  const threadsWindowFilled = (live?.threadsWindowFilled) ?? snap.threads.length >= HOME_TARGET
   const byStickyThenRecent = (a: SnapshotThread, b: SnapshotThread) =>
     a.sticky !== b.sticky ? (a.sticky ? -1 : 1) : b.createdAt - a.createdAt
   // First paint shows the snapshot (build-time listed surface). Once live
@@ -28,7 +32,8 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   const liveThreads = (live?.threads ?? []).filter((t) => t.modState == null)
   const threads = live != null ? liveThreads : snap.threads.filter((t) => t.modState == null)
   const listedThreads = threads.slice().sort(byStickyThenRecent)
-  const forumCategoryTitle = new Map(snap.categories.map((c) => [c.id, c.title || c.slug || null]))
+  const categories = (live?.categories ?? snap.categories)
+  const forumCategoryTitle = new Map(categories.map((c) => [c.id, c.title || c.slug || null]))
   const forums = (live?.forums ?? snap.forums)
     .filter((f) => !f.archived)
     .map((f) => ({ ...f, categoryLabel: forumCategoryTitle.get(f.categoryId ?? '') ?? null }))
@@ -40,11 +45,14 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
 
   // Honest counts — every tile is derived from the same listed surface the
   // page shows. Hidden/orphaned threads are deliberately not public numbers,
-  // so raw chain totals are never displayed.
+  // so raw chain totals are never displayed. The threads tile is marked "+"
+  // when the recent window filled: the honest claim is "at least this many".
+  const listed = listedThreads.length
   const counts = {
-    categories: snap.categories.length,
+    categories: categories.length,
     forums: forums.length,
-    threads: listedThreads.length,
+    threads: listed,
+    threadsWindowFull: threadsWindowFilled,
   }
 
   return (
@@ -108,7 +116,7 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   )
 }
 
-function Hero({ counts, session, loading, error }: { counts: { categories: number; forums: number; threads: number }; session: { identityId: string } | null; loading: boolean; error: boolean }) {
+function Hero({ counts, session, loading, error }: { counts: { categories: number; forums: number; threads: number; threadsWindowFull: boolean }; session: { identityId: string } | null; loading: boolean; error: boolean }) {
   return (
     <section className="border-b border-[#22304e] bg-gradient-to-b from-[#101b31] to-[#0b1220]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
@@ -132,21 +140,12 @@ function Hero({ counts, session, loading, error }: { counts: { categories: numbe
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {session ? (
-              <Link
-                href="/search"
-                className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] bg-[#111a2e] px-4 py-2.5 font-medium text-sm hover:border-[#008CE7] transition"
-              >
-                Explore threads
-              </Link>
-            ) : (
-              <a
-                href="#latest-threads"
-                className="btn-primary px-4 py-2.5 font-medium"
-              >
-                Explore threads
-              </a>
-            )}
+            <Link
+              href="/search"
+              className="btn-secondary px-4 py-2.5 font-medium"
+            >
+              Explore threads
+            </Link>
             {session && (
               <Link
                 href="/new"
@@ -157,24 +156,24 @@ function Hero({ counts, session, loading, error }: { counts: { categories: numbe
             )}
           </div>
         </div>
-        <dl className="mt-8 flex gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible">
+        <dl className="mt-8 grid grid-cols-3 gap-2 sm:gap-3">
           <Stat icon={<FolderOpen className="w-4 h-4" />} value={counts.categories} label="Categories" />
           <Stat icon={<MessageSquare className="w-4 h-4" />} value={counts.forums} label="Forums" />
-          <Stat icon={<TrendingUp className="w-4 h-4" />} value={counts.threads} label="Threads" />
+          <Stat icon={<TrendingUp className="w-4 h-4" />} value={counts.threads} label="Recent threads" suffix={counts.threadsWindowFull ? '+' : ''} />
         </dl>
       </div>
     </section>
   )
 }
 
-function Stat({ icon, value, label }: { icon: React.ReactNode; value: number; label: string }) {
+function Stat({ icon, value, label, suffix }: { icon: React.ReactNode; value: number; label: string; suffix?: string }) {
   return (
-    <div className="shrink-0 min-w-[140px] sm:min-w-0 rounded-xl border border-[#22304e] bg-[#111a2e] p-3">
-      <dt className="flex items-center gap-2 text-[#4db3ff]">
+    <div className="rounded-xl border border-[#22304e] bg-[#111a2e] p-2.5 sm:p-3">
+      <dt className="flex items-center gap-1.5 sm:gap-2 text-[#4db3ff]">
         {icon}
-        <span className="text-xs uppercase tracking-wider text-[#93a1bd]">{label}</span>
+        <span className="text-[10px] sm:text-xs uppercase tracking-wider text-[#93a1bd]">{label}</span>
       </dt>
-      <dd className="mt-1 text-2xl font-bold tabular-nums">{value.toLocaleString('en-US')}</dd>
+      <dd className="mt-1 text-lg sm:text-2xl font-bold tabular-nums">{value.toLocaleString('en-US')}{suffix}</dd>
     </div>
   )
 }
@@ -210,6 +209,7 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
   const snap = snapshot
   const forumById = new Map(snap.forums.map((f) => [f.id, f.slug ?? null]))
   const forumDocs = await query('forum', { limit: 50 })
+  const categoryDocs = await query('category', { limit: 50 })
   // Paginate through the thread index until HOME_TARGET listable threads are
   // found or the page budget is exhausted — so orphan spam cannot push real
   // threads out of the window.
@@ -218,15 +218,16 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
   let after: string | null = null
   let scanned = 0
   let page = 0
+  let indexExhausted = false
   while (listed.length < HOME_TARGET && scanned < HOME_HARD_CAP && page < 4) {
     page += 1
-    const docs = await query('thread', {
+    const { docs, rawCount, lastId } = await queryRaw('thread', {
       orderBy: [['$createdAt', 'desc']],
       limit: HOME_LIMIT,
       ...(after ? { startAfter: after } : {}),
     })
-    if (docs.length === 0) break
-    scanned += docs.length
+    if (rawCount === 0) { indexExhausted = true; break }
+    scanned += rawCount
     const candidates = docs.filter((t) => {
       if (t.properties?.modState != null) return false
       if (seenIds.has(t.id)) return false
@@ -251,7 +252,45 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
       if (listed.length >= HOME_TARGET) break
       listed.push(t)
     }
-    after = docs[docs.length - 1].id
+    if (lastId == null) { indexExhausted = true; break } // cannot continue — stop honestly
+    after = lastId
+  }
+  // "+" is claimed only when the window filled because we stopped at the target,
+  // not because the index was exhausted.
+  const windowFilled = !indexExhausted && listed.length >= HOME_TARGET
+  // Pinned snapshot threads can sit outside the recent live window — re-verify
+  // each against the chain and merge the verified ones (never resurrect a
+  // since-hidden thread). A failed check is treated as "not visible", which
+  // is the honest answer: the thread simply does not appear.
+  for (const snapThread of snap.threads) {
+    if (!snapThread.sticky || snapThread.modState != null) continue
+    if (seenIds.has(snapThread.id)) continue
+    seenIds.add(snapThread.id)
+    try {
+      const full = await get('thread', snapThread.id)
+      if (!full || (full.properties?.modState as number | null) != null) continue
+      const ownerId = full.ownerId || null
+      if (!ownerId) continue
+      const opening = await earliestOwnerPost(full.id, ownerId, full.createdAt)
+      if (!opening || opening.modState != null) continue
+      const lockedAt = (full.properties?.lockedAt as number | null) ?? null
+      if (lockedAt != null && opening.createdAt > lockedAt) continue
+      listed.push({
+        id: full.id,
+        forumId: (full.properties.forumId as string) ?? null,
+        forumSlug: forumById.get((full.properties.forumId as string) ?? '') ?? snapThread.forumSlug ?? null,
+        title: (full.properties.title as string) ?? '',
+        tags: Array.isArray(full.properties.tags) ? (full.properties.tags as string[]) : [],
+        sticky: true,
+        lockedAt,
+        modState: (full.properties.modState as number | null) ?? null,
+        ownerId: full.ownerId || null,
+        createdAt: full.createdAt,
+        updatedAt: full.updatedAt,
+      })
+    } catch {
+      // Unverifiable — do not show it.
+    }
   }
   const forums = forumDocs.map((f) => ({
     id: f.id,
@@ -263,9 +302,18 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
     sort: Number(f.properties.sort ?? 0),
     archived: Boolean(f.properties.archived),
   }))
+  const categories = categoryDocs.map((c) => ({
+    id: c.id,
+    slug: (c.properties.slug as string) ?? null,
+    title: (c.properties.title as string) ?? '',
+    description: (c.properties.description as string) ?? '',
+    sort: Number(c.properties.sort ?? 0),
+  }))
   return {
     ...snap,
     threads: listed,
     forums,
+    categories,
+    threadsWindowFilled: windowFilled,
   }
 }

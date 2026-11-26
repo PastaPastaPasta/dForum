@@ -62,7 +62,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
 
   useEffect(() => {
     let cancelled = false
-    query('thread', { orderBy: [['$createdAt', 'desc']], limit: 100 })
+    query('thread', { orderBy: [['$createdAt', 'desc']], limit: MAX_LIST })
       .then(async (docs) => {
         if (cancelled) return
         const forumById = new Map(snap.forums.map((f) => [f.id, f.slug ?? null]))
@@ -77,8 +77,9 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
           ownerId: t.ownerId || null,
           createdAt: t.createdAt,
         }))
-        // Orphan rule — bounded (the threads we'd show).
-        const { listed } = await filterListableWithFailures(mapped.slice(0, MAX_LIST), 4)
+        // Same orphan cache the per-keystroke filter uses — one verdict
+        // per thread, not two.
+        const listed = await cachedFilter(mapped)
         if (cancelled) return
         setLiveThreads(listed)
         setLoading(false)
@@ -170,7 +171,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
       <main id="main" tabIndex={-1} className="flex-1">
         <section className="border-b border-[#22304e]">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-            <h1 className="text-2xl font-bold tracking-tight">Search dForum</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Search dForum</h1>
             <p className="mt-1 text-sm text-[#93a1bd]">Search threads by title, tag, or forum — shows the latest {MAX_LIST} threads</p>
 
             <form role="search" aria-label="Search threads" onSubmit={(e) => e.preventDefault()} className="relative mt-5">
@@ -183,8 +184,8 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
                 className="w-full rounded-xl border border-input bg-[#111a2e] pl-10 pr-20 py-3 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7]"
               />
               {loading && (
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 text-xs text-[#93a1bd]" aria-live="polite">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Loading…
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 text-xs text-[#93a1bd]" aria-hidden="true">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Refreshing…
                 </span>
               )}
             </form>
@@ -195,8 +196,8 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
         <section className="max-w-3xl mx-auto px-4 sm:px-6 mt-6">
           {results.length === 0 ? (
             <div className="rounded-xl border border-dashed border-[#22304e] p-8 text-center fade-up">
-              {loading ? (
-                <p className="text-[#93a1bd]">Loading…</p>
+              {failed ? (
+                <p className="text-[#93a1bd]">Couldn&apos;t load threads — the snapshot above is still shown.</p>
               ) : allThreads.length === 0 ? (
                 <p className="text-[#93a1bd]">No threads yet — be the first to start one.</p>
               ) : q.trim() ? (
@@ -213,7 +214,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
             </div>
           )}
           <p className="mt-3 text-xs text-[#93a1bd]" role="status">
-            {loading ? 'Loading…' : `${results.length} ${results.length === 1 ? 'thread' : 'threads'}`}
+            {failed ? "Couldn't load threads — the snapshot above is still shown." : loading ? `${results.length} ${results.length === 1 ? 'thread' : 'threads'} · refreshing…` : `${results.length} ${results.length === 1 ? 'thread' : 'threads'}`}
           </p>
         </section>
       </main>

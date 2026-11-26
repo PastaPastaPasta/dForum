@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { MessageSquare, KeyRound, ShieldCheck, Sparkles, Loader2, ShieldAlert, ExternalLink } from 'lucide-react'
+import { MessageSquare, KeyRound, ShieldCheck, Loader2, ExternalLink } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { KeyExchangeModal } from '@/components/KeyExchangeModal'
@@ -16,7 +16,6 @@ export default function LoginPage() {
   const { session, ready, authError } = useSession()
   const [showModal, setShowModal] = useState(false)
   const [host, setHost] = useState('')
-  const [hostAcknowledged, setHostAcknowledged] = useState(false)
   const [nextPath, setNextPath] = useState<string | null>(null)
   const signedInRef = useRef<HTMLDivElement>(null)
   const modalOpenedRef = useRef(false)
@@ -30,7 +29,6 @@ export default function LoginPage() {
   }, [])
 
   const canonical = hostIsCanonical(host)
-  const hostGateOpen = canonical || hostAcknowledged
 
   const openModal = useCallback(() => {
     modalOpenedRef.current = true
@@ -80,7 +78,7 @@ export default function LoginPage() {
             <p className="text-sm text-[#93a1bd] mt-2">
               The login flow holds key material — it only runs on its own top-level page.
             </p>
-            <a href={`https://${canonicalHost()}/login`} className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
+            <a href={`https://${canonicalHost()}/login`} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
               Open in a new tab <ExternalLink className="w-4 h-4" />
             </a>
           </div>
@@ -97,9 +95,8 @@ export default function LoginPage() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
           <div className="grid md:grid-cols-2 gap-8 items-center">
             <div className="fade-up">
-              <p className="inline-flex items-center gap-2 rounded-full border border-[#22304e] bg-[#111a2e] px-3 py-1 text-xs text-[#4db3ff]">
-                <Sparkles className="w-3.5 h-3.5" />
-                Login with Dash
+              <p className="inline-flex items-center rounded-full border border-[#22304e] bg-[#111a2e] px-3 py-1 text-xs text-[#4db3ff]">
+                App Connect v2 — wallet-native sign-in
               </p>
               <h1 className="mt-4 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
                 Sign in with your<br />Dash identity
@@ -111,7 +108,7 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — dForum is a static site over the Dash Platform" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level signing key that lives in this tab only — it can post on your behalf, but it cannot move funds" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level signing key stored in this tab's session storage — it can post on your behalf, but it cannot move funds" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="Posts, profiles, forums and settings all live on-chain" />
               </div>
 
@@ -126,42 +123,39 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() => window.location.assign(nextPath)}
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30 transition"
+                      className="mt-3 inline-flex items-center gap-2 btn-primary px-4 py-2 text-sm font-medium"
                     >
                       Continue to your page
                     </button>
                   ) : (
-                    <Link href="/" className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30 transition">
+                    <Link href="/" className="mt-3 inline-flex items-center gap-2 btn-primary px-4 py-2 text-sm font-medium">
                       Go to dForum
                     </Link>
                   )}
                 </div>
+              ) : !canonical ? (
+                <div className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-200">
+                  <p className="font-medium text-amber-300">Login is not available on this host</p>
+                  <p className="mt-2 text-amber-200/80">
+                    This page is served from <code className="text-[#c4cfe0]">{host}</code>. The login flow and its
+                    key material are designed for <code className="text-[#c4cfe0]">{canonicalHost()}</code> only —
+                    the key lives in this tab&apos;s session storage, so a shared hosting origin would expose it to
+                    every other site on it. Open {canonicalHost()} to sign in.
+                  </p>
+                  <a
+                    href={`https://${canonicalHost()}/login`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-4 inline-flex items-center gap-2 btn-primary px-4 py-2"
+                  >
+                    Open {canonicalHost()} <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                  </a>
+                </div>
               ) : (
                 <>
-                  {!canonical && host && (
-                    <div className="mt-6 flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-xs text-amber-200">
-                      <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" aria-hidden="true" />
-                      <div>
-                        <p className="font-medium text-amber-300">Untrusted host — login</p>
-                        <p className="mt-1 text-amber-200/80">
-                          This page is served from <code>{host}</code>. The login flow and its keys are designed for{' '}
-                          <code>{canonicalHost()}</code>. Continue on hosts you control only.
-                        </p>
-                        <label className="mt-2 flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={hostAcknowledged}
-                            onChange={(e) => setHostAcknowledged(e.target.checked)}
-                            className="accent-[#008CE7]"
-                          />
-                          I understand the risk and want to log in on this host
-                        </label>
-                      </div>
-                    </div>
-                  )}
                   <button
                     onClick={openModal}
-                    disabled={!ready || !hostGateOpen}
+                    disabled={!ready}
                     className="mt-8 btn-primary px-5 py-3 font-semibold"
                   >
                     {!ready ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
@@ -179,7 +173,7 @@ export default function LoginPage() {
                 <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dash-key: code shown in the login modal." />
                 <Step number={2} title="Approve the request" body="Confirm the key-exchange request in your wallet." />
                 <Step number={3} title="Keys registered (first login)" body="On first login you'll register auth keys with dForum — scan a second code." />
-                <Step number={4} title="You're in" body="Your session lives in this tab only — your wallet key never leaves your wallet. Logging out clears it from this browser." />
+                <Step number={4} title="You're in" body="Your session lives in this tab's session storage until you log out or the browser session ends — your wallet key never leaves your wallet. Logging out clears it from this browser." />
               </ol>
             </div>
           </div>

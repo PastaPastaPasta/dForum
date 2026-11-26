@@ -7,7 +7,7 @@ import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
-import { get, query, createDocument } from '@/lib/services/document-service'
+import { get, query, queryRaw, createDocument } from '@/lib/services/document-service'
 import { shortId, isModerated } from '@/lib/utils'
 import { useProfileNames } from '@/lib/use-profiles'
 import { useSession } from '@/lib/session'
@@ -51,10 +51,12 @@ const POST_LIMIT = 99
 export default function ThreadClient({
   threadId,
   snapshotThread,
+  snapshotForumTitle,
   initialPosts,
 }: {
   threadId: string
   snapshotThread: SnapshotThread | null
+  snapshotForumTitle?: string | null
   initialPosts: StaticPost[]
 }) {
   const { session } = useSession()
@@ -71,16 +73,6 @@ export default function ThreadClient({
   const loadMoreTokenRef = useRef(0)
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
-  // Reset the paging state when the thread changes; any in-flight loadMore
-  // for the previous thread is abandoned.
-  useEffect(() => {
-    loadMoreTokenRef.current += 1
-    setMorePosts([])
-    setMoreCursor(null)
-    setMoreError(false)
-    setMoreLoading(false)
-  }, [threadId])
-
   // Arm the load-more cursor once the live window comes back.
   useEffect(() => {
     if (live?.status !== 'ok') { setMoreCursor(null); return }
@@ -94,7 +86,7 @@ export default function ThreadClient({
     ? {
         ...live!.thread,
         forumSlug: live!.thread.forumSlug ?? snapshotThread?.forumSlug ?? null,
-        forumTitle: live!.thread.forumTitle ?? snapshotThread?.forumSlug ?? null,
+        forumTitle: live!.thread.forumTitle ?? snapshotForumTitle ?? snapshotThread?.forumSlug ?? null,
       }
     : snapshotThread
       ? snapshotThreadToLive(snapshotThread)
@@ -119,7 +111,14 @@ export default function ThreadClient({
   // a missing opening post means the thread is not listed at all.
   const openingKnown = opening !== undefined
   const hiddenOpening = opening?.modState != null
-  const hidden = isModerated(thread?.modState) || hiddenOpening || (openingKnown && opening === null)
+  // The listing rule: a thread whose opening post is after the lock is not
+  // listable either.
+  const lockExcluded = (thread?.lockedAt ?? null) != null && opening != null && opening.createdAt > (thread?.lockedAt ?? 0)
+  const hidden =
+    isModerated(thread?.modState) ||
+    hiddenOpening ||
+    (openingKnown && opening === null) ||
+    lockExcluded
 
   const lockedAt = thread?.lockedAt ?? null
   const locked = lockedAt != null
@@ -146,13 +145,12 @@ export default function ThreadClient({
     setMoreLoading(true)
     setMoreError(false)
     try {
-      const docs = await query('post', {
+      const { docs, rawCount, lastId } = await queryRaw('post', {
         where: [['threadId', '==', threadId]],
         orderBy: [['$createdAt', 'asc']],
         limit: POST_LIMIT,
         startAfter: moreCursor,
       })
-      const last = docs[docs.length - 1] ?? null
       const mapped = docs.map((p) => ({
         id: p.id,
         body: (p.properties.body as string) ?? '',
@@ -165,7 +163,7 @@ export default function ThreadClient({
       // A thread change or newer loadMore supersedes this response — drop it.
       if (token !== loadMoreTokenRef.current || expected !== threadId) return
       setMorePosts((prev) => [...prev, ...mapped.filter((m) => !prev.some((x) => x.id === m.id))])
-      setMoreCursor(docs.length === POST_LIMIT && last ? last.id : null)
+      setMoreCursor(rawCount === POST_LIMIT && lastId ? lastId : null)
     } catch {
       if (token !== loadMoreTokenRef.current || expected !== threadId) return
       setMoreError(true)
@@ -289,11 +287,17 @@ export default function ThreadClient({
           </Link>
           {hidden ? (
             <div className="mt-6 rounded-xl border border-amber-400/40 bg-amber-400/10 p-6 text-center">
-              {openingKnown && opening === null ? (
+              {lockExcluded ? (
                 <>
-                  <p className="text-sm uppercase tracking-widest text-amber-400">Unavailable</p>
-                  <h1 className="mt-2 text-2xl font-bold">This thread no longer exists</h1>
-                  <p className="mt-2 text-sm text-amber-400/80">Its opening post is gone — the thread is no longer listed.</p>
+                  <p className="text-sm uppercase tracking-widest text-amber-400">Not listed</p>
+                  <h1 className="mt-2 text-2xl font-bold">This thread isn&apos;t listed</h1>
+                  <p className="mt-2 text-sm text-amber-400/80">The lock was applied before this thread&apos;s opening post — the forum won&apos;t list it.</p>
+                </>
+              ) : openingKnown && opening === null ? (
+                <>
+                  <p className="text-sm uppercase tracking-widest text-amber-400">Not listed</p>
+                  <h1 className="mt-2 text-2xl font-bold">This thread isn&apos;t listed</h1>
+                  <p className="mt-2 text-sm text-amber-400/80">It has no opening post — the text you followed points at a thread the forum won&apos;t list.</p>
                 </>
               ) : (
                 <>
@@ -308,12 +312,12 @@ export default function ThreadClient({
               <h1 className="mt-3 text-2xl sm:text-3xl font-bold tracking-tight break-words">{thread?.title ?? '…'}</h1>
               <div className="mt-3 flex items-center gap-3 text-sm text-[#93a1bd] flex-wrap">
                 {(isLiveOk || staticPosts.length > 0) && (
-                  <span className="inline-flex items-center gap-1.5"><MessageSquare className="w-4 h-4" aria-hidden="true" />{shownPosts.length} post{shownPosts.length === 1 ? '' : 's'}</span>
+                  <span className="inline-flex items-center gap-1.5"><MessageSquare className="w-4 h-4" aria-hidden="true" />{shownPosts.length}{moreCursor ? '+' : ''} post{shownPosts.length === 1 ? '' : 's'}</span>
                 )}
                 {liveLoading && staticPosts.length === 0 && <span className="inline-flex items-center gap-1.5"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Loading posts…</span>}
                 {locked && <span className="inline-flex items-center gap-1 text-amber-400"><Lock className="w-3.5 h-3.5" aria-hidden="true" /> locked</span>}
                 {thread?.tags.map((tag) => (
-                  <span key={tag} className="rounded bg-[#18233c] px-2 py-0.5">#{tag}</span>
+                  <Link key={tag} href={`/search?q=${encodeURIComponent(tag)}`} className="rounded bg-[#18233c] px-2 py-0.5 hover:bg-[#22304e] hover:text-white transition">#{tag}</Link>
                 ))}
               </div>
 
@@ -338,8 +342,8 @@ export default function ThreadClient({
                     {isLiveOk ? 'No visible posts in this thread.' : 'Posts unavailable — the live read failed and the snapshot had none.'}
                   </p>
                 )}
-                {truncated && moreCursor != null && (
-                  <p className="text-xs text-[#93a1bd]">Showing the first {visiblePosts.length} posts of this thread — load more below.</p>
+                {moreCursor != null && (
+                  <p className="text-xs text-[#93a1bd]">Showing {shownPosts.length} of the visible posts — load more below. Older posts are not loaded yet.</p>
                 )}
                 {isLiveOk && moreCursor && (
                   <div className="mt-2">
@@ -414,7 +418,7 @@ export default function ThreadClient({
       title: t.title,
       forumId: t.forumId ?? '',
       forumSlug: t.forumSlug,
-      forumTitle: t.forumSlug,
+      forumTitle: snapshotForumTitle ?? t.forumSlug,
       tags: t.tags,
       sticky: t.sticky,
       lockedAt: t.lockedAt,

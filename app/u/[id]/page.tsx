@@ -30,5 +30,5 @@ export function generateMetadata({ params }: { params: { id: string } }): Metada
 
 export default function ProfileRoute({ params }: { params: { id: string } }) {
   const snap = loadSnapshot()
-  return <ProfileClient identityId={params.id} snapshot={snap} />
+  return <ProfileClient key={params.id} identityId={params.id} snapshot={snap} />
 }

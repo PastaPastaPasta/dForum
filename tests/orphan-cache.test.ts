@@ -105,9 +105,21 @@ describe('earliestOwnerPost — raw-count paging (malformed docs must not end th
     expect(opening).toBeNull()
   })
 
-  it('returns null when the opening post is hidden (modState set)', async () => {
-    // Note: earliestOwnerPost returns the opening post regardless of
-    // modState — the visibility check is the caller's job (hasOpeningPost).
+  it('throws (not null) when the page budget is exhausted', async () => {
+    const page = Array.from({ length: 25 }, (_, i) =>
+      doc(idOf([i]), 'owner', 100 + i, 'other-thread'))
+    mocked.mockImplementation(async () => ({
+      docs: page.slice(0, 25),
+      rawCount: 25,
+      lastId: idOf([24]),
+    }))
+    const { earliestOwnerPost, OrphanScanExhaustedError } = await import('@/lib/services/orphan')
+    await expect(earliestOwnerPost('t', 'owner', 0)).rejects.toThrow(OrphanScanExhaustedError)
+    // 12 pages attempted (the budget), then the error — never a silent null.
+    expect(mocked).toHaveBeenCalledTimes(12)
+  })
+
+  it('returns the opening post regardless of its hidden state (visibility is the caller’s job)', async () => {
     mocked.mockImplementation(async () => ({
       docs: [doc(idOf([0x01]), 'owner', 100, 't', 1)],
       rawCount: 1,

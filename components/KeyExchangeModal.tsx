@@ -28,6 +28,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   const [completing, setCompleting] = useState(false)
   const [completeError, setCompleteError] = useState<string | null>(null)
   const registrationStartedRef = useRef(false)
+  const completingRef = useRef(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const previouslyFocused = useRef<HTMLElement | null>(null)
 
@@ -48,8 +49,11 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   }, [login.state, login.result])
 
   const handleComplete = useCallback(async () => {
-    if (completing) return
+    // Ref guard — the two completion effects fire on the same state change
+    // with stale closures over `completing`; the ref is the single source.
+    if (completingRef.current) return
     if (!login.result) return
+    completingRef.current = true
     setCompleting(true)
     setCompleteError(null)
     try {
@@ -62,14 +66,15 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
       registration.cancel()
       onClose?.()
     } catch (err) {
+      completingRef.current = false
       setCompleting(false)
       setCompleteError(redactWif(err instanceof Error ? err.message : 'Signing you in failed — try again'))
     }
-  }, [completing, controller, login, registration, onClose])
+  }, [controller, login, registration, onClose])
 
   // Finish login when the login exchange completes (keys already registered)
   useEffect(() => {
-    if (login.state === 'complete' && login.result && !completing) {
+    if (login.state === 'complete' && login.result && !completingRef.current) {
       handleComplete()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,7 +82,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
   // Finish login after registration completes
   useEffect(() => {
-    if (registration.state === 'complete' && login.result && !completing) {
+    if (registration.state === 'complete' && login.result && !completingRef.current) {
       handleComplete()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -144,7 +149,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     setCompleteError(null)
     // Sign-in itself failed after the exchange completed — retry in place,
     // no QR rescan needed.
-    if ((login.state === 'complete' || registration.state === 'complete') && login.result && !completing) {
+    if ((login.state === 'complete' || registration.state === 'complete') && login.result && !completingRef.current) {
       void handleComplete()
       return
     }
@@ -236,6 +241,13 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
               </div>
               {displayUri && (
                 <>
+                  <a
+                    href={displayUri}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-xs text-[#4db3ff] hover:border-[#008CE7] hover:text-white transition"
+                    aria-label="Open login URI in wallet"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> Open in wallet
+                  </a>
                   <button
                     onClick={copy}
                     className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
@@ -272,7 +284,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   <AlertTriangle className="w-4 h-4" aria-hidden="true" /> Key registration failed
                 </p>
                 <p className="text-xs text-[#93a1bd] mt-2">
-                  {registration.error ?? 'Something went wrong — your keys were not registered.'}
+                  {redactWif(registration.error ?? 'Something went wrong — your keys were not registered.')}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -282,7 +294,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                 {onClose && (
                   <button
                     onClick={onClose}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm hover:bg-[#18233c] transition"
+                    className="btn-secondary"
                   >
                     Close
                   </button>
@@ -351,7 +363,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
               </div>
               {login.result?.identityId && (
                 <div className="text-center">
-                  <p className="text-xs text-[#93a1bd]">Signed in as</p>
+                  <p className="text-xs text-[#93a1bd]">Signing in as</p>
                   <p className="text-xs font-mono text-white break-all max-w-xs">{login.result.identityId}</p>
                 </div>
               )}
@@ -374,7 +386,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                 {onClose && (
                   <button
                     onClick={onClose}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm hover:bg-[#18233c] transition"
+                    className="btn-secondary"
                   >
                     Close
                   </button>

@@ -15,17 +15,18 @@ import {
   changeDocumentFields, deleteDocument, type ModerationIdentity, type Roster,
 } from '@/lib/services/moderation-service'
 import { earliestOwnerPost } from '@/lib/services/orphan'
-import { CONTRACT_ID, NETWORK } from '@/lib/constants'
+import { CONTRACT_ID, NETWORK, STORAGE_KEY_PREFIX } from '@/lib/constants'
 import { shortId, formatDate, formatRelativeTime } from '@/lib/utils'
 import { hostIsLocal, hostIsCanonical, canonicalHost } from '@/lib/host'
 import { redactWif } from '@/lib/redact'
 import { useFrameBuster } from '@/lib/use-frame-buster'
+import { useSession } from '@/lib/session'
 
 // The CRITICAL key lives only in this tab's memory — never in storage, never
 // written anywhere except the platform's request. “Dropped from app state”,
 // not a guarantee about memory: JS strings can't be zeroed, and the WASM
 // signer is freed on wipe (free()) and on navigation.
-const CRITICAL_ID_STORAGE = 'dforum:moderator:identityId'
+const CRITICAL_ID_STORAGE = `${STORAGE_KEY_PREFIX}:moderator:identityId`
 const DOC_PAGE_SIZE = 12
 const IDLE_WIPE_MS = 10 * 60 * 1000
 
@@ -55,11 +56,14 @@ export default function ModerationPage() {
   const [validating, setValidating] = useState(false)
   const [validation, setValidation] = useState<{ ok: boolean; reason?: string } | null>(null)
 
+  const { session } = useSession()
   const [host, setHost] = useState('')
   const [roster, setRoster] = useState<Roster | null>(null)
   const [rosterError, setRosterError] = useState(false)
+  const freshRosterLandedRef = useRef(false)
   const [targetId, setTargetId] = useState('')
   const [status, setStatus] = useState<StatusData | null>(null)
+  const pendingFreeRef = useRef(false)
   const [statusLoading, setStatusLoading] = useState(false)
   const [banReason, setBanReason] = useState('')
   const [warnReason, setWarnReason] = useState('')
@@ -100,6 +104,10 @@ export default function ModerationPage() {
   const internalWipe = useCallback((reason?: string) => {
     wipeGenRef.current += 1
     if (inFlightRef.current > 0) {
+      // The wipe intent is recorded unconditionally — a key the user explicitly
+      // cleared must be released too, not only on idle-wipe/pagehide. The
+      // notice is shown only for deliberate wipes with a reason.
+      pendingFreeRef.current = true
       if (reason != null) pendingWipeRef.current = reason
       setWif('')
       setAdmin(null)
@@ -121,11 +129,28 @@ export default function ModerationPage() {
     setActionSuccess(null)
   }, [])
 
+  // Signing out while the console is armed must drop the key material —
+  // the moderation console holds a CRITICAL key.
+  const prevSessionRef = useRef(session)
+  useEffect(() => {
+    if (prevSessionRef.current && !session) {
+      internalWipe('cleared on sign-out')
+      sessionStorage.removeItem(CRITICAL_ID_STORAGE)
+    }
+    prevSessionRef.current = session
+  }, [session, internalWipe])
+
   // Decrement the in-flight counter after an action settles; when the last
-  // call returns, honour any deferred wipe.
+  // call returns, honour the deferred free.
   const finishInFlight = useCallback(() => {
     inFlightRef.current = Math.max(0, inFlightRef.current - 1)
-    if (inFlightRef.current === 0 && pendingWipeRef.current != null) {
+    if (inFlightRef.current !== 0) return
+    if (pendingFreeRef.current) {
+      try { signerRef.current?.free() } catch { /* already freed */ }
+      signerRef.current = null
+      pendingFreeRef.current = false
+    }
+    if (pendingWipeRef.current != null) {
       const reason = pendingWipeRef.current
       pendingWipeRef.current = null
       internalWipe()
@@ -263,8 +288,16 @@ export default function ModerationPage() {
 
   useEffect(() => {
     getRoster()
-      .then((r) => { if (mountedRef.current) { setRoster(r); setRosterError(false) } })
-      .catch(() => { if (mountedRef.current) { setRoster(null); setRosterError(true) } })
+      .then((r) => {
+        if (!mountedRef.current) return
+        if (freshRosterLandedRef.current) return // a forced fresh read already landed — keep it
+        setRoster(r); setRosterError(false)
+      })
+      .catch(() => {
+        if (!mountedRef.current) return
+        if (freshRosterLandedRef.current) return
+        setRoster(null); setRosterError(true)
+      })
     loadDocs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -314,6 +347,7 @@ export default function ModerationPage() {
         setAdmin(null)
         return
       }
+      freshRosterLandedRef.current = true
       setRoster(freshRoster)
       const ownerNow = freshRoster.ownerId === identity
       const memberNow = freshRoster.appointed.includes(identity)
@@ -351,6 +385,9 @@ export default function ModerationPage() {
   }
 
   async function handleClearAdmin() {
+    // In the middle of an action, "clear" must only drop the WIF and
+    // admin state — the signer is released when the in-flight call settles
+    // (finishInFlight). It is not safe to free mid-flight.
     internalWipe()
     setWipedNotice(null)
     sessionStorage.removeItem(CRITICAL_ID_STORAGE)
@@ -460,7 +497,7 @@ export default function ModerationPage() {
     const gen = wipeGenRef.current
     const hiding = doc.modState == null
     const label = doc.type === 'post' ? 'post' : 'thread'
-    if (!window.confirm(hiding ? `Hide this ${label}? It will be hidden from everyone.` : `Unhide this ${label}? It will be shown again.`)) return
+    if (!window.confirm(hiding ? `Hide this ${label}? It disappears from live view immediately; the static page and search index keep serving it until the next snapshot rebuild (≤1h).` : `Unhide this ${label}? It will be shown again.`)) return
     setDocActionBusy(`${doc.id}:hide`)
     setActionError(null)
     void trackInFlight(async () => {
@@ -625,7 +662,7 @@ export default function ModerationPage() {
         <section className="border-b border-[#22304e]">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
             <div className="flex items-center gap-3">
-              <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#0070c0]/15 text-[#4db3ff]"><Shield className="w-5 h-5" /></span>
+              <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#0070c0]/15 text-[#4db3ff] shrink-0"><Shield className="w-5 h-5" /></span>
               <div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Moderator console</h1>
                 <p className="text-sm text-[#93a1bd]">
@@ -715,7 +752,11 @@ export default function ModerationPage() {
                   Validate &amp; sign in as admin
                 </button>
                 {(identityId || wif) && (
-                  <button onClick={handleClearAdmin} className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition">
+                  <button
+                    onClick={handleClearAdmin}
+                    disabled={actionBusy != null || docActionBusy != null}
+                    className="btn-secondary"
+                  >
                     Clear admin
                   </button>
                 )}
@@ -791,7 +832,7 @@ export default function ModerationPage() {
                     <button
                       onClick={refreshStatus}
                       disabled={statusLoading || !targetId.trim()}
-                      className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                      className="btn-secondary p-2 disabled:opacity-50"
                       aria-label="Refresh status"
                     >
                       {statusLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -912,7 +953,7 @@ export default function ModerationPage() {
                 <button
                   onClick={lookupDocument}
                   disabled={lookupBusy || !lookupId.trim()}
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                  className="btn-secondary gap-2 disabled:opacity-50"
                 >
                   {lookupBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                   Find
@@ -937,7 +978,7 @@ export default function ModerationPage() {
                 ))}
               </div>
               {(threadsMore || postsMore) && !docsLoading && (threadsAfter || postsAfter) && (
-                <button onClick={() => loadDocs(true)} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition">
+                <button onClick={() => loadDocs(true)} className="btn-secondary mt-3">
                   <RefreshCw className="w-3.5 h-3.5" /> Load more
                 </button>
               )}
@@ -1080,7 +1121,7 @@ function FramedNotice({ what }: { what: string }) {
         <p className="text-sm text-[#93a1bd] mt-2">
           This surface holds key material — it only runs on its own top-level page.
         </p>
-        <a href={`https://${canonicalHost()}/moderation`} className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
+        <a href={`https://${canonicalHost()}/moderation`} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
           Open in a new tab <ExternalLink className="w-4 h-4" />
         </a>
       </div>

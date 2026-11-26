@@ -117,6 +117,7 @@ export default function SettingsPage() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (saving) return // a save is in flight — never start a duplicate write
     if (!session || !session.authKeyWif) {
       setError('Your session has no signable key. Try logging in again.')
       return
@@ -161,6 +162,7 @@ export default function SettingsPage() {
           properties,
         )
         setRevision(updated.revision)
+        setExistingProps({ ...updated.properties })
       } else {
         const created = await createDocument('profile', identityId ?? '', session.authKeyWif, properties)
         setProfileId(created.id)
@@ -223,7 +225,7 @@ export default function SettingsPage() {
                   maxLength={LIMITS.displayName}
                   aria-invalid={Boolean(fieldError?.displayName)}
                   aria-describedby={fieldError?.displayName ? 'displayName-error' : undefined}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
                   placeholder="Your display name"
                 />
                 {fieldError?.displayName ? (
@@ -240,7 +242,7 @@ export default function SettingsPage() {
                   onChange={(e) => { setDraft((d) => ({ ...d, bio: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.bio}
                   rows={4}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] p-3 text-sm focus:border-[#008CE7] w-full resize-y"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] p-3 text-base sm:text-sm focus:border-[#008CE7] w-full resize-y"
                   placeholder="A short bio — what you post about."
                 />
                 <CharCount count={draft.bio.length} max={LIMITS.bio} />
@@ -256,7 +258,7 @@ export default function SettingsPage() {
                   maxLength={LIMITS.website}
                   aria-invalid={Boolean(fieldError?.website)}
                   aria-describedby={fieldError?.website ? 'website-error' : 'website-hint'}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
                   placeholder="https://yoursite.com"
                 />
                 {fieldError?.website ? (
@@ -272,7 +274,7 @@ export default function SettingsPage() {
                   value={draft.signature}
                   onChange={(e) => { setDraft((d) => ({ ...d, signature: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.signature}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
                   placeholder="Shown on your profile"
                 />
                 <CharCount count={draft.signature.length} max={LIMITS.signature} />
@@ -303,7 +305,7 @@ export default function SettingsPage() {
 
           <div className="mt-10 border-t border-[#22304e] pt-6">
             <h2 className="text-sm font-medium text-[#93a1bd] uppercase tracking-wider">Session</h2>
-            <p className="mt-2 text-sm text-[#93a1bd]">Your session lives in this tab only. Signing out clears your keys from this browser.</p>
+            <p className="mt-2 text-sm text-[#93a1bd]">Your session is held in this tab&apos;s session storage until you log out or the browser session ends — signing out clears your keys from this browser.</p>
             <button
               onClick={handleSignOut}
               disabled={signingOut}

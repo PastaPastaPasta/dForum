@@ -12,7 +12,10 @@ if (existsSync('data/snapshot.json')) process.exit(0);
 const record = (() => {
   try {
     const r = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'));
-    return { network: r.network, contractId: r.contracts?.team?.contractId ?? null };
+    return {
+      network: r.network,
+      contractId: r.contracts?.team?.contractId ?? r.contracts?.none?.contractId ?? r.contracts?.network?.contractId ?? null,
+    };
   } catch {
     return { network: 'testnet', contractId: null };
   }

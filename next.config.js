@@ -67,10 +67,11 @@ const nextConfig = {
     return config
   },
   // Note: `headers()` does not apply to `output: 'export'` (and GitHub Pages
-  // ignores response headers) — CSP lives in a <meta> tag in app/layout.tsx
-  // instead. COOP/COEP are deliberately NOT set here; a hostile same-origin
-  // page is the real exposure and is mitigated by the moderation console's
-  // host gate and the CSP, not by headers GH Pages cannot serve.
+  // ignores response headers) — CSP is a meta tag written into the static
+  // pages by scripts/csp.mjs after the build (hashed per-page). COOP/COEP are
+  // deliberately NOT set here; a hostile same-origin page is the real exposure
+  // and is mitigated by the moderation console's host gate and the CSP, not by
+  // headers GH Pages cannot serve.
 }
 
 module.exports = nextConfig

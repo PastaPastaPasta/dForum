@@ -55,6 +55,8 @@ export interface Snapshot {
   threads: SnapshotThread[]
   /** Resolved display names for listed-thread owners (hidden → "Hidden profile"). */
   profiles: Record<string, string>
+  /** True when the live thread scan filled the window before the index ran dry. */
+  threadsWindowFilled?: boolean
 }
 
 export interface StaticPost {

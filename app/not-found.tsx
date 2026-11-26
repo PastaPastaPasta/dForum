@@ -83,9 +83,9 @@ export default function NotFound() {
   if (mode) {
     // The SPA fallback renders the same client components with no prerendered
     // data — they fall back to live queries (and their not-found states).
-    if (mode.kind === 'thread') return <ThreadClient threadId={mode.value} snapshotThread={null} initialPosts={[]} />
-    if (mode.kind === 'forum') return <ForumClient slug={mode.value} snapshot={null} />
-    return <ProfileClient identityId={mode.value} snapshot={null} />
+    if (mode.kind === 'thread') return <ThreadClient key={mode.value} threadId={mode.value} snapshotThread={null} initialPosts={[]} />
+    if (mode.kind === 'forum') return <ForumClient key={mode.value} slug={mode.value} snapshot={null} />
+    return <ProfileClient key={mode.value} identityId={mode.value} snapshot={null} />
   }
 
   return (

@@ -13,6 +13,10 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ''
 export function Navbar() {
   const { session, ready, signOut } = useSession()
   const pathname = usePathname()
+  // Hidden on the login page — the navbar login CTA dishonestly doubles the
+  // page's own sign-in affordance.
+  const showLogin = !pathname.startsWith('/login')
+  const [searchQuery, setSearchQuery] = useState('')
   const [isModerator, setIsModerator] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -34,7 +38,7 @@ export function Navbar() {
           if (cancelled) return
           setIsModerator(Boolean(roster && (roster.ownerId === sessionIdentityId || roster.appointed.includes(sessionIdentityId))))
         })
-        .catch(() => setIsModerator(false))
+        .catch(() => { if (!cancelled) setIsModerator(false) })
     }, 0)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [sessionIdentityId])
@@ -44,6 +48,10 @@ export function Navbar() {
   // disclosure (no arrow-key nav exists), so no menu/menuitem roles.
   useEffect(() => {
     setMenuOpen(false)
+    // Show the current search query in the nav box — the page's search input
+    // is the authoritative control while on /search.
+    const params = new URLSearchParams(window.location.search)
+    setSearchQuery(params.get('q') ?? '')
   }, [pathname])
   useEffect(() => {
     if (!menuOpen) return
@@ -76,14 +84,16 @@ export function Navbar() {
           <form
             action={`${BASE_PATH}/search/`}
             method="get"
-            role="search"
+            aria-label="Search dForum"
             className="group flex items-center gap-2 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 h-9 w-full max-w-md text-sm text-[#93a1bd] hover:border-[#008CE7] transition"
           >
             <Search className="w-4 h-4 shrink-0" aria-hidden="true" />
             <input
               type="search"
               name="q"
-              aria-label="Search threads"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Search dForum"
               placeholder="Search dForum…"
               className="bg-transparent flex-1 min-w-0 outline-none placeholder:text-[#93a1bd] text-left"
             />
@@ -148,7 +158,7 @@ export function Navbar() {
                 )}
               </div>
             </>
-          ) : (
+          ) : showLogin ? (
             <Link
               href="/login"
               className="btn-primary px-3 sm:px-4 h-9 flex items-center font-medium"
@@ -156,6 +166,8 @@ export function Navbar() {
               <span className="hidden sm:inline">Login with Dash</span>
               <span className="sm:hidden">Sign in</span>
             </Link>
+          ) : (
+            <span className="inline-block w-24 h-9 rounded-lg bg-[#18233c] animate-pulse" aria-hidden="true" />
           )}
         </nav>
       </div>

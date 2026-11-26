@@ -2,13 +2,16 @@
 
 import Link from 'next/link'
 import { useEffect } from 'react'
+import { redactWif } from '@/lib/redact'
 
 // Minimal, deliberately Navbar-free: if the error is caused by the header
 // materializing (e.g. a navbar component that throws), the boundary must
 // still render something that can recover. A loop here would be unrecoverable.
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error(error)
+    // The error surface is keyMaterial-adjacent — scrub before it lands in
+    // any log sink.
+    console.error(redactWif(error?.message ?? error))
   }, [error])
   return (
     <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">

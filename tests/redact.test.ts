@@ -38,4 +38,20 @@ describe('redactWif — any key-looking string is scrubbed', () => {
     expect(redactWif(undefined)).toBe('')
     expect(redactWif(42)).toBe('42')
   })
+
+  it('redacts a WIF glued to a word character (missing underscore boundary)', () => {
+    // The old \b regex missed these — _ is a word character in JS regexes.
+    const key = new Uint8Array(32).fill(0xab)
+    const w = wif(key, 0xef, true)
+    expect(redactWif(`_${w}`)).toContain('<redacted-wif>')
+    expect(redactWif(`start-${w}`)).toContain('<redacted-wif>')
+    expect(redactWif(`${w}-end`)).toContain('<redacted-wif>')
+  })
+
+  it('does NOT redact a longer base58 string that merely starts with a WIF prefix', () => {
+    // A 60-char base58 token starting with 'c' is not a WIF — the lookahead
+    // must reject it rather than scrub the whole token.
+    const long = `c${'A'.repeat(59)}`
+    expect(redactWif(`note ${long}`)).toContain(long)
+  })
 })

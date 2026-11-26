@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Users, Pencil, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
-import { query } from '@/lib/services/document-service'
+import { query, queryRaw } from '@/lib/services/document-service'
 import { getRoster } from '@/lib/services/moderation-service'
 import { filterListable } from '@/lib/services/orphan'
 import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
@@ -59,15 +59,6 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   const [moreLoading, setMoreLoading] = useState(false)
   const [moreError, setMoreError] = useState(false)
 
-  // Reset the paging state when the slug changes — the 404 fallback can
-  // reuse this component with a new slug.
-  useEffect(() => {
-    setMoreThreads([])
-    setMoreCursor(null)
-    setMoreError(false)
-    setMoreLoading(false)
-  }, [slug])
-
   // Arm load-more once the live window comes back: anything past the recent
   // page is unreachable without a button.
   useEffect(() => {
@@ -81,7 +72,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
     setMoreLoading(true)
     setMoreError(false)
     try {
-      const docs = await query('thread', {
+      const { docs, rawCount, lastId } = await queryRaw('thread', {
         where: [['forumId', '==', forumId]],
         orderBy: [['$createdAt', 'desc']],
         limit: 25,
@@ -91,9 +82,8 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
       const seenIds = new Set([...initial, ...moreThreads].map((t) => t.id))
       const mapped = docs.map(docToThread).filter((t) => !seenIds.has(t.id))
       const listed = await filterListable(mapped, 4)
-      const last = docs[docs.length - 1] ?? null
       setMoreThreads((prev) => [...prev, ...listed])
-      setMoreCursor(docs.length === 25 && last ? last.id : null)
+      setMoreCursor(rawCount === 25 && lastId ? lastId : null)
     } catch {
       setMoreError(true)
     } finally {
@@ -178,7 +168,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
             {showStaleNote && <LiveUnavailable className="mt-4" />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
-              <span>{listed.length} thread{listed.length === 1 ? '' : 's'}</span>
+              <span>{listed.length}{moreCursor != null ? '+' : ''} thread{listed.length === 1 ? '' : 's'}</span>
               {!session && <Link href="/login" className="text-[#4db3ff] hover:underline">Login to post</Link>}
             </div>
           </div>

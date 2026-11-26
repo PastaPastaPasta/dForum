@@ -36,13 +36,15 @@ export function safeNextPath(raw: string | null, origin: string): string | null 
     let path = url.pathname
     // The raw path may or may not already carry the base path — on the Pages
     // deploy, app-relative paths (`/t/<id>`) must be re-rooted under it.
-    if (base && path !== base && !path.startsWith(base + '/')) {
+    // A bare base (`/dForum`) is the home page — the slash boundary is
+    // normalized so `/dForum` and `/dForum/` can never collide differently.
+    if (base && path !== base && path !== base + '/' && !path.startsWith(base + '/')) {
       path = base + path
     }
 
     const result = path + url.search + url.hash
     if (result.startsWith('//')) return null
-    if (base && !result.startsWith(base + '/')) return null
+    if (base && !result.startsWith(base + '/') && result !== base) return null
     return result
   } catch {
     return null

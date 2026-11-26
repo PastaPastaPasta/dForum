@@ -30,6 +30,7 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, unlinkSync, existsSync } from 'node:fs';
 import { EvoSDK } from '@dashevo/evo-sdk';
 import bs58 from 'bs58';
+import { redactWif } from './lib/redact.mjs';
 
 const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readContractId();
 const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
@@ -408,6 +409,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', parts.join(' | '));
+  console.error('ERROR:', redactWif(parts.join(' | ')));
   process.exit(1);
 });

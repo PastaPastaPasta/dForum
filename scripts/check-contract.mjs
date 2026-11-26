@@ -15,7 +15,7 @@ async function main() {
       console.log('  version:', v.version, 'status:', v.status ?? v.contractStatus ?? '?', 'json:', JSON.stringify(v.toJSON?.() ?? v));
     }
   } catch (e) {
-    console.error('getLatestVersions failed:', e?.message ?? e);
+    console.error('getLatestVersions failed:', redactWif(e?.message ?? e));
   }
   const id = 'ozZNp21WNWLx79aJXFo2ScEaMtBc9vvfUonqmzADM16';
   for (let i = 0; i < 4; i++) {
@@ -30,7 +30,7 @@ async function main() {
         break;
       } else console.log('  fetch returned undefined (attempt', i, ')');
     } catch (e) {
-      console.log('  fetch failed (attempt', i, '):', e?.message ?? e);
+      console.log('  fetch failed (attempt', i, '):', redactWif(e?.message ?? e));
     }
     await new Promise((r) => setTimeout(r, 5000));
   }
@@ -39,7 +39,7 @@ async function main() {
     console.log('identity nonce:', await sdk.identities.nonce(id2));
     console.log('identity balance:', await sdk.identities.balance(id2));
   } catch (e) {
-    console.error('identity reads failed:', e?.message ?? e);
+    console.error('identity reads failed:', redactWif(e?.message ?? e));
   }
   process.exit(0);
 }

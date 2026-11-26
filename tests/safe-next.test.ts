@@ -49,6 +49,15 @@ describe('safeNextPath', () => {
     expect(safeNextPath('/t/abc123', ORIGIN)).toBe('/dForum/t/abc123')
   })
 
+  it('accepts a bare base path and never returns a malformed one', () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = '/dForum'
+    // Bare base = home page — allowed and normalized.
+    expect(safeNextPath('/dForum', ORIGIN)).toBe('/dForum')
+    expect(safeNextPath('/dForum/', ORIGIN)).toBe('/dForum/')
+    // A sibling-repo path with no base prefix is re-rooted under the base.
+    expect(safeNextPath('/', ORIGIN)).toBe('/dForum/')
+  })
+
   it('rejects paths that would escape the base path on the Pages deploy', () => {
     process.env.NEXT_PUBLIC_BASE_PATH = '/dForum'
     // A sibling-repo path on the shared GitHub Pages origin would read

@@ -7,9 +7,10 @@
  * Covers testnet/mainnet Bitcoin-style prefixes (5/K/L), Dash mainnet keys
  * (X/7), and raw 64-char hex private keys.
  */
+// Base58-aware boundaries (same reasoning as lib/redact.ts): \b misses a WIF
+// glued to a word character.
+const WIF_RE = /(?<![1-9A-HJ-NP-Za-km-z])[c9][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|(?<![1-9A-HJ-NP-Za-km-z])[5KL][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|(?<![1-9A-HJ-NP-Za-km-z])[X7][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|(?<![1-9A-HJ-NP-Za-km-z])[0-9a-fA-F]{64}(?![1-9A-HJ-NP-Za-km-z])/g;
+
 export function redactWif(text) {
-  return String(text ?? '').replace(
-    /\b[c9][1-9A-HJ-NP-Za-km-z]{50,51}\b|\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b|\b[X7][1-9A-HJ-NP-Za-km-z]{50,51}\b|\b[0-9a-fA-F]{64}\b/g,
-    '<redacted-wif>',
-  );
+  return String(text ?? '').replace(WIF_RE, '<redacted-wif>');
 }

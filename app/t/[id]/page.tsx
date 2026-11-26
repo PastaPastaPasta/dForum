@@ -29,5 +29,17 @@ export default function ThreadRoute({ params }: { params: { id: string } }) {
   const snap = loadSnapshot()
   const thread = snap.threads.find((t) => t.id === params.id) ?? null
   const initialPosts = getStaticPosts(params.id)
-  return <ThreadClient threadId={params.id} snapshotThread={thread} initialPosts={initialPosts} />
+  // The client component takes the forum's title (not the slug) for its
+  // back link — the snapshot carries the forum list so the title is frozen
+  // into the prerendered HTML.
+  const forum = thread?.forumId ? snap.forums.find((f) => f.id === thread.forumId) : null
+  return (
+    <ThreadClient
+      key={params.id}
+      threadId={params.id}
+      snapshotThread={thread}
+      snapshotForumTitle={forum?.title ?? null}
+      initialPosts={initialPosts}
+    />
+  )
 }

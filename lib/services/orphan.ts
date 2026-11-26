@@ -11,9 +11,9 @@
  * depth of pre-opening spam. The pure tie-break compares decoded id bytes,
  * not base58 strings (those order by string, not by the chain's byte order).
  *
- * Fails open (keeps the thread) on read errors — a flaky network must not
- * silently drop threads from a live view; the static index is the guarded
- * path (scripts/snapshot.mjs, which throws).
+ * Throws on read errors and when the page budget is exhausted — the caller
+ * decides (fail open, fail closed, or refuse) rather than reading a
+ * legitimate thread as "no opening post".
  */
 import bs58 from 'bs58'
 import { queryRaw } from '@/lib/services/document-service'
@@ -29,6 +29,16 @@ export interface OpeningPost {
   id: string
   createdAt: number
   modState: number | null
+}
+
+/** Thrown when the post-scan hits the page budget. Distinct from "no
+ * opening post" (a legitimate null) so callers never mistake one for the
+ * other. */
+export class OrphanScanExhaustedError extends Error {
+  constructor() {
+    super('orphan scan exhausted its page budget')
+    this.name = 'OrphanScanExhaustedError'
+  }
 }
 
 function idBytes(id: string): Uint8Array | null {
@@ -72,8 +82,9 @@ export function openingPostFromPosts<T extends { createdAt: number; id: string; 
 /** The opening post of a thread (see the orphan rule) — located via the
  * post.byAuthor index, paginating so neither pre-opening spam nor a long
  * thread's early pages hide it. Returns null when the thread has no
- * owner-owned post. Fails open on any read error (the static index is the
- * guarded path). */
+ * owner-owned post. Throws OrphanScanExhaustedError when the page budget is
+ * exhausted, and any read error otherwise — the static index is the guarded
+ * path (scripts/snapshot.mjs); live callers decide fail-open vs fail-closed. */
 export async function earliestOwnerPost(
   threadId: string,
   ownerId: string,
@@ -93,7 +104,6 @@ export async function earliestOwnerPost(
       limit: 25,
       ...(after ? { startAfter: after } : {}),
     })
-    if (posts.length === 0) break
     const mine = posts.filter((p) => p.properties?.threadId === threadId)
     const opening = openingPostFromPosts(mine, ownerId)
     if (opening) {
@@ -103,11 +113,12 @@ export async function earliestOwnerPost(
         modState: (opening.properties?.modState as number | null) ?? null,
       }
     }
-    if (rawCount < 25) break // short raw page — the author's index is exhausted
+    if (rawCount < 25) return null // index exhausted — the thread has no opening post
     if (lastId == null) break // could not compute a cursor — refuse to loop forever
     after = lastId
   }
-  return null
+  // Budget exhausted (or untrackable cursor): unknown, not "no opening post".
+  throw new OrphanScanExhaustedError()
 }
 
 export async function hasOpeningPost(thread: Listable): Promise<boolean> {

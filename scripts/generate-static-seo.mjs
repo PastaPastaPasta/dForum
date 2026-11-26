@@ -33,26 +33,31 @@ function readSnapshot() {
 
 function sitemap() {
   const snap = readSnapshot();
+  const snapDate = snap.generatedAt ? snap.generatedAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const urls = [`${SITE_PREFIX}/`, `${SITE_PREFIX}/search/`];
   for (const f of snap.forums || []) {
     if (f.slug && !f.archived) urls.push(`${SITE_PREFIX}/f/${encodeURIComponent(f.slug)}/`);
   }
   const forumById = new Map((snap.forums || []).map((f) => [f.id, f]));
+  const entries = [];
   for (const t of snap.threads || []) {
     if (!t.id || t.modState) continue;
     const forum = t.forumId ? forumById.get(t.forumId) : null;
     if (!forum) continue; // no forum → nothing to index (same rule as llms.txt)
     if (forum.archived) continue;
-    urls.push(`${SITE_PREFIX}/t/${encodeURIComponent(t.id)}/`);
+    const updated = t.updatedAt ? new Date(t.updatedAt) : null;
+    const lastmod = updated && !isNaN(updated.getTime()) ? updated.toISOString().slice(0, 10) : snapDate;
+    entries.push({ loc: `${SITE_PREFIX}/t/${encodeURIComponent(t.id)}/`, lastmod });
   }
-  const body = urls
-    .map((loc) => `  <url><loc>${loc}</loc><lastmod>${snap.generatedAt ? snap.generatedAt.slice(0, 10) : new Date().toISOString().slice(0, 10)}</lastmod></url>`)
-    .join('\n');
+  const body = [
+    ...urls.map((loc) => `  <url><loc>${loc}</loc><lastmod>${snapDate}</lastmod></url>`),
+    ...entries.map((e) => `  <url><loc>${e.loc}</loc><lastmod>${e.lastmod}</lastmod></url>`),
+  ].join('\n');
   writeFileSync(
     join(OUT, 'sitemap.xml'),
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`,
   );
-  console.log(`sitemap.xml: ${urls.length} URLs`);
+  console.log(`sitemap.xml: ${urls.length + entries.length} URLs`);
 }
 
 function robots() {
@@ -122,7 +127,10 @@ function manifest() {
         network: snap.network,
         contractId: snap.contractId,
         snapshotAt: snap.generatedAt,
-        counts: snap.counts,
+        listedThreads: snap.counts?.threads ?? (snap.threads || []).length,
+        staticPostsShipped: snap.counts?.posts ?? 0,
+        forums: snap.counts?.forums ?? (snap.forums || []).filter((f) => !f.archived).length,
+        categories: snap.counts?.categories ?? (snap.categories || []).length,
       },
       null,
       2,

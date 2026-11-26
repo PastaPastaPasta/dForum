@@ -6,6 +6,7 @@
  * beyond Node 18+ fetch.
  */
 import { createHash } from 'node:crypto';
+import { redactWif } from './redact.mjs';
 
 const SERVICE = 'org.dash.platform.dapi.v0.Core';
 export const TESTNET_NODE_LIST = 'https://quorums.testnet.networks.dash.org/masternodes';
@@ -223,7 +224,7 @@ export async function broadcastRaw(raw, { nodeListUrl = TESTNET_NODE_LIST, maxAt
       return { txid, node };
     } catch (e) {
       lastErr = e;
-      log(`broadcast via ${node} refused: ${e?.message ?? e}`);
+      log(`broadcast via ${node} refused: ${redactWif(e?.message ?? e)}`);
     }
   }
   throw lastErr ?? new Error('all nodes refused the broadcast');

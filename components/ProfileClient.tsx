@@ -8,7 +8,7 @@ import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
 import { useSession } from '@/lib/session'
-import { query, count } from '@/lib/services/document-service'
+import { query, queryRaw, count } from '@/lib/services/document-service'
 import { useProfileNames } from '@/lib/use-profiles'
 import type { Snapshot } from '@/lib/services/snapshot-server'
 import { shortId, isModerated, safeHttpUrl } from '@/lib/utils'
@@ -81,31 +81,15 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
       return
     }
     let cancelled = false
-    // Re-fill from the snapshot on identity change (first paint) before the
-    // live read resolves.
-    setMoreThreads([])
-    setMoreCursor(null)
-    setMoreError(false)
-    setThreads((snap?.threads ?? []).filter((t) => t.ownerId === identityId).map((t) => ({
-      id: t.id,
-      title: t.title,
-      tags: t.tags,
-      forumSlug: t.forumSlug,
-      sticky: t.sticky,
-      lockedAt: t.lockedAt ?? null,
-      modState: t.modState,
-      ownerId: t.ownerId ?? null,
-      createdAt: t.createdAt,
-    })))
 
     // Every read is tracked individually — a failure must surface honestly,
     // never masquerade as "no profile" or "0 posts".
     const profileQ = query('profile', { where: [['$ownerId', '==', identityId]], limit: 1 })
       .then((d) => ({ ok: true as const, docs: d }))
       .catch(() => ({ ok: false as const, docs: null }))
-    const threadsQ = query('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: THREAD_WINDOW })
-      .then((d) => ({ ok: true as const, docs: d }))
-      .catch(() => ({ ok: false as const, docs: null }))
+    const threadsQ = queryRaw('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: THREAD_WINDOW })
+      .then(({ docs, rawCount, lastId }) => ({ ok: true as const, docs, rawCount, lastId }))
+      .catch(() => ({ ok: false as const, docs: null, rawCount: 0, lastId: null }))
     // Visible posts only — raw counts include moderated/hidden posts and the
     // orphaned threads they were posted in, which is not an honest number.
     const postsQ = query('post', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: 100 })
@@ -165,14 +149,15 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                 createdAt: t.createdAt,
               })),
           )
-          setMoreCursor(docs.length === THREAD_WINDOW ? docs[docs.length - 1].id : null)
+          setMoreCursor(threadsRes.rawCount === THREAD_WINDOW && threadsRes.lastId ? threadsRes.lastId : null)
         }
         if (postsRes.ok) {
+          // Only the modState filter — orphan status is deliberately NOT
+          // applied here (it would make a single count of two different
+          // surfaces); the threads list below carries that filter.
           const visible = postsRes.docs.filter((p) => p.properties?.modState == null)
-          // The window is 100 posts — honest about the bound rather than
-          // claiming an exact total.
           setPostCount(visible.length)
-          setPostCountCapped(postsRes.docs.length === 100)
+          setPostCountCapped(postsRes.docs.length >= 100)
         }
         if (anyFailed) {
           if (snapThreads.length === 0 && !snap?.profiles?.[identityId]) {
@@ -204,13 +189,12 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
   }, [identityId])
 
   async function loadMoreThreads() {
-    const expected = identityId
-    if (moreLoading || !moreCursor || !expected) return
+    if (moreLoading || !moreCursor) return
     setMoreLoading(true)
     setMoreError(false)
     try {
-      const docs = await query('thread', {
-        where: [['$ownerId', '==', expected]],
+      const { docs, rawCount, lastId } = await queryRaw('thread', {
+        where: [['$ownerId', '==', identityId]],
         orderBy: [['$createdAt', 'desc']],
         limit: THREAD_WINDOW,
         startAfter: moreCursor,
@@ -241,7 +225,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
             createdAt: t.createdAt,
           })),
       ])
-      setMoreCursor(docs.length === THREAD_WINDOW ? docs[docs.length - 1].id : null)
+      setMoreCursor(rawCount === THREAD_WINDOW && lastId ? lastId : null)
     } catch {
       setMoreError(true)
     } finally {
@@ -252,9 +236,9 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
   const isHidden = isModerated(modState)
   const isSelf = session?.identityId === identityId
   const isEmptySelf = isSelf && status === 'ok' && !staleNote && !profile && threads.length === 0 && postCount === 0
-  const displayName = profile?.displayName || snapProfileName || (identityId ? shortId(identityId, 20) : 'Unknown')
+  const displayName = profile?.displayName || snapProfileName || null
+  const headingName = isHidden ? 'Hidden profile' : displayName ?? 'Unnamed identity'
   const visibleThreads = [...threads, ...moreThreads].filter((t) => !isModerated(t.modState))
-  const threadsReady = status !== 'loading'
   const authorIds = visibleThreads.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
   const nameOf = (id: string): string => snap?.profiles?.[id] ?? profiles[id] ?? shortId(id, 16)
@@ -305,13 +289,13 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
         <section className="border-b border-[#22304e]">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 fade-up">
             <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-              <Avatar name={isHidden ? 'Hidden' : displayName} id={identityId || null} size="lg" />
+              <Avatar name={headingName} id={identityId || null} size="lg" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{isHidden ? 'Hidden profile' : displayName}</h1>
+                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{headingName}</h1>
                   {isHidden && <span className="text-[11px] uppercase tracking-wider text-amber-400 border border-amber-400/40 rounded px-2 py-0.5">hidden</span>}
                   {isSelf && (
-                    <Link href="/settings" className="ml-1 inline-flex items-center gap-1.5 rounded-lg border border-[#22304e] px-3 py-1.5 text-xs text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition">
+                    <Link href="/settings" className="ml-1 btn-secondary px-3 py-1.5 text-xs">
                       <Pencil className="w-3.5 h-3.5" /> Edit profile
                     </Link>
                   )}
@@ -342,8 +326,8 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                     </>
                   ) : (
                     <>
-                      <span>{staleNote ? '—' : `${visibleThreads.length} thread${visibleThreads.length === 1 ? '' : 's'}`}</span>
-                      <span>{staleNote ? '—' : postCountCapped ? '100+ posts' : `${postCount} post${postCount === 1 ? '' : 's'}`}</span>
+                      <span>{staleNote ? '—' : `${visibleThreads.length}${moreCursor != null ? '+' : ''} thread${visibleThreads.length === 1 ? '' : 's'}`}</span>
+                      <span>{staleNote ? '—' : postCountCapped ? `${postCount}+ posts` : `${postCount} post${postCount === 1 ? '' : 's'}`}</span>
                     </>
                   )}
                 </div>
@@ -370,13 +354,13 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
 
         {isHidden ? (
           <section className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
-            <p className="text-sm text-amber-400 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3">Threads by this user are hidden along with the profile.</p>
+            <p className="text-sm text-amber-400 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3">This profile is hidden; its thread list isn&apos;t shown here.</p>
           </section>
         ) : (
         <section className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
           <h2 className="text-lg font-bold tracking-tight">Threads by this user</h2>
           <div className="mt-3 space-y-3">
-            {status === 'loading' ? (
+            {status === 'loading' && visibleThreads.length === 0 ? (
               <>
                 <span className="sr-only" role="status">Loading threads…</span>
                 {[0, 1].map((i) => <div key={i} aria-hidden="true" className="h-16 rounded-xl border border-[#22304e] bg-[#111a2e] animate-pulse" />)}
@@ -400,7 +384,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                 <button
                   onClick={() => loadMoreThreads()}
                   disabled={moreLoading}
-                  className="btn-secondary inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                  className="btn-secondary px-3 py-2 text-sm disabled:opacity-50"
                 >
                   {moreLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
                   {moreLoading ? 'Loading…' : 'Load older threads'}
