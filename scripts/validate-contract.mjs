@@ -14,6 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { DataContract, EvoSDK } from '@dashevo/evo-sdk';
+import { redactWif } from './lib/redact.mjs';
 
 const args = process.argv.slice(2);
 let dir = 'contracts/generated';
@@ -73,7 +74,7 @@ for (const file of files) {
     console.log(`OK  ${file}  (${types.length} types: ${types.join(', ')})  ${moderation ? `moderated (${moderation.moderators?.$type ?? 'unknown'})` : 'unmoderated'}`);
   } catch (e) {
     failed = true;
-    console.error(`FAIL  ${file}: ${e?.message ?? e}`);
+    console.error(`FAIL  ${file}: ${redactWif(e?.message ?? e)}`);
   }
 }
 process.exit(failed ? 1 : 0);

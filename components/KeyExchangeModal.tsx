@@ -210,6 +210,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
         <p className="text-sm text-[#93a1bd] mt-1">Sign in to dForum with your Dash identity</p>
 
         <div aria-live="polite" className="sr-only">{stepText}</div>
+        <div aria-live="polite" className="sr-only">{copied ? 'URI copied' : ''}</div>
 
         <div className="mt-6 flex flex-col items-center gap-4">
           {(login.state === 'idle' || login.state === 'generating') && (
@@ -219,7 +220,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             </>
           )}
 
-          {(login.state === 'waiting' || login.state === 'decrypting' || login.state === 'checking') && (
+          {login.state === 'waiting' && (
             <>
               <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
                 {displayUri && (
@@ -247,12 +248,20 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                       <input readOnly value={displayUri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-[10px] font-mono text-[#93a1bd]" aria-label="Login URI" />
                     </div>
                   )}
-                  <p className="text-[11px] text-[#93a1bd] text-center">
+                  <p className="text-xs text-[#93a1bd] text-center">
                     Scan the QR with your wallet, or paste the URI into it.
                   </p>
                 </>
               )}
             </>
+          )}
+
+          {(login.state === 'decrypting' || login.state === 'checking') && (
+            <div className="flex flex-col items-center gap-3 py-2">
+              <Loader2 className="w-8 h-8 animate-spin text-[#4db3ff]" aria-hidden="true" />
+              <p className="text-sm font-medium">Wallet responded — verifying…</p>
+              <p className="text-xs text-[#93a1bd]">Checking the registration and keys…</p>
+            </div>
           )}
 
           {login.state === 'registering' && registration.state === 'error' ? (
@@ -313,6 +322,12 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
               <div className="flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/15">
                 <ShieldCheck className="w-8 h-8 text-emerald-400" aria-hidden="true" />
               </div>
+              {login.result?.identityId && (
+                <div className="text-center">
+                  <p className="text-xs text-[#93a1bd]">Signed in as</p>
+                  <p className="text-xs font-mono text-white break-all max-w-xs">{login.result.identityId}</p>
+                </div>
+              )}
               <p className="text-sm font-medium text-emerald-400">Signing you in…</p>
             </>
           )}

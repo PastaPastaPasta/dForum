@@ -10,7 +10,8 @@
  */
 import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
-import { CONTRACT_ID } from '@/lib/constants'
+import { CONTRACT_ID, NETWORK } from '@/lib/constants'
+import { decodeWif, decodeKeyDataBytes } from '@/lib/auth/decoder'
 
 export interface ModerationIdentity {
   identityId: string
@@ -34,22 +35,12 @@ export async function validateCriticalKey(identityId: string, criticalWif: strin
     const sdk = await getSdk()
     const identity = await sdk.identities.fetch(identityId)
     if (!identity) return { ok: false, reason: 'Identity not found' }
+    const wif = decodeWif(criticalWif, NETWORK)
+    if (!wif) return { ok: false, reason: `Not a ${NETWORK} secp256k1 WIF` }
     const crypto = await import('@noble/secp256k1')
-    const bs58check = (await import('bs58check')).default
-    let decoded: Uint8Array
-    try {
-      decoded = bs58check.decode(criticalWif)
-    } catch {
-      return { ok: false, reason: 'Not a valid WIF' }
-    }
-    // WIF version byte (Dash): mainnet 0xcc, testnet 0xef. Anything else is not a secp256k1 WIF.
-    if (decoded[0] !== 0xcc && decoded[0] !== 0xef) return { ok: false, reason: 'Not a secp256k1 WIF (unknown version byte)' }
-    if (decoded.length !== 34 && decoded.length !== 33) return { ok: false, reason: 'Not a valid secp256k1 WIF' }
-    const compressed = decoded.length === 34
-    const privateKey = decoded.slice(1, 33)
-    const publicKey = crypto.getPublicKey(privateKey, compressed)
+    const publicKey = crypto.getPublicKey(wif.privateKey, wif.compressed)
     for (const key of identity.publicKeys as Array<{ purpose: string; securityLevel: string; keyType: string; data: Uint8Array | string; disabledAt?: bigint | number | null }>) {
-      const raw = key.data instanceof Uint8Array ? key.data : hexToBytes(String(key.data))
+      const raw = decodeKeyDataBytes(key.data)
       if (raw.length !== publicKey.length) continue
       if (!bytesEqual(raw, publicKey)) continue
       if (String(key.keyType).toUpperCase() !== 'ECDSA_SECP256K1') return { ok: false, reason: 'Key is not ECDSA_SECP256K1' }
@@ -66,25 +57,27 @@ export async function validateCriticalKey(identityId: string, criticalWif: strin
   }
 }
 
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex
-  const bytes = new Uint8Array(clean.length / 2)
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16)
-  return bytes
-}
-
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
 }
 
-let rosterCache: { value: { ownerId: string | null; appointed: string[] } | null; at: number } | null = null
+export interface Roster {
+  ownerId: string | null
+  appointed: string[]
+  /** 'team' | 'network' | 'none' — from the contract's moderation config. */
+  mode: string | null
+}
+
+let rosterCache: { value: Roster; at: number } | null = null
 const ROSTER_TTL_MS = 60 * 1000
 
 /** Cached contract roster — each page mount shares one fetch (and the link
- * stops flickering on navigation). `force` bypasses the cache. */
-export async function getRoster(force = false): Promise<{ ownerId: string | null; appointed: string[] } | null> {
+ * stops flickering on navigation). `force` bypasses the cache. Throws on a
+ * chain failure so callers can fail closed; returns null only when the
+ * contract cannot be read at all. */
+export async function getRoster(force = false): Promise<Roster | null> {
   if (!force && rosterCache && Date.now() - rosterCache.at < ROSTER_TTL_MS) return rosterCache.value
   const sdk = await getSdk()
   const contract = await sdk.contracts.fetch(CONTRACT_ID)
@@ -95,7 +88,18 @@ export async function getRoster(force = false): Promise<{ ownerId: string | null
   const moderators = mod?.moderators as Record<string, unknown> | undefined
   const identities = moderators?.identities
   const appointed = Array.isArray(identities) ? identities.map((x) => String(x)) : []
-  const value = { ownerId, appointed }
+  const configType = typeof moderators?.$type === 'string' ? moderators.$type : null
+  // Elected mode: the interim appointed set — the deployer's team — is what
+  // moderates while the election rotates. The elected team itself is
+  // derived from the chain and cannot be listed from the roster read.
+  let interimAppointed: string[] = []
+  if (configType === 'elected') {
+    const interim = (moderators as Record<string, unknown>)?.interim as Record<string, unknown> | undefined
+    const identities = interim?.identities
+    if (Array.isArray(identities)) interimAppointed = identities.map((x) => String(x))
+  }
+  const mode = configType === 'appointedModerators' ? 'team' : configType === 'elected' ? 'network' : null
+  const value: Roster = { ownerId, appointed: configType === 'elected' ? interimAppointed : appointed, mode }
   rosterCache = { value, at: Date.now() }
   return value
 }
@@ -138,7 +142,6 @@ export async function deleteDocument(
   })
 }
 
-/** Restore a moderator-deleted document. */
 /** Ban an identity on the contract. */
 export async function banUser(moderator: ModerationIdentity, targetIdentityId: string, reasonText: string): Promise<void> {
   const sdk = await getSdk()

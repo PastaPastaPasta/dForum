@@ -75,15 +75,38 @@ export default function SettingsPage() {
     }
   }, [identityId, ready])
 
-  if (ready && !session) {
+  if (!ready) {
+    // Session unresolved — a neutral skeleton, not the real page behind a
+    // half-loaded session (the navbar shows not-signed-in for a moment).
     return (
       <>
         <Navbar />
-        <main className="flex-1 flex items-center justify-center px-6">
+        <main id="main" tabIndex={-1} className="flex-1">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12" aria-busy="true" aria-live="polite">
+            <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Loading…</p>
+            <div className="mt-6 rounded-xl border border-[#22304e] bg-[#111a2e] p-4 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-[#18233c] animate-pulse" aria-hidden="true" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 w-40 rounded bg-[#18233c] animate-pulse" aria-hidden="true" />
+                <div className="h-3 w-24 rounded bg-[#18233c] animate-pulse" aria-hidden="true" />
+              </div>
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </>
+    )
+  }
+
+  if (!session) {
+    return (
+      <>
+        <Navbar />
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Login required</p>
             <h1 className="text-2xl font-bold mt-2">Sign in to manage your profile</h1>
-            <Link href="/login" className="mt-6 btn-primary">Login with Dash</Link>
+            <Link href="/login?next=/settings" className="mt-6 btn-primary">Login with Dash</Link>
           </div>
         </main>
         <Footer />
@@ -118,10 +141,9 @@ export default function SettingsPage() {
         signature: draft.signature.trim().slice(0, LIMITS.signature),
       }
       if (profileId) {
-        // Strip moderator-owned fields before merging — the author cannot
-        // set them (consensus rejects with 41124), so sending them back in
-        // the replace would make a profile a moderator has touched unsaveable.
-        const { customTitle: _customTitle, modState: _modState, modNote: _modNote, ...authorProps } = existingProps as Record<string, unknown>
+        // Moderator-owned fields (customTitle, modState, modNote) are never
+        // sent by the author — the contract rejects them, and document-service
+        // strips them regardless (41124 / field-ownership rules).
         const updated = await replaceDocument(
           {
             id: profileId,
@@ -131,7 +153,7 @@ export default function SettingsPage() {
             revision,
             createdAt: 0,
             updatedAt: 0,
-            properties: authorProps,
+            properties: existingProps as Record<string, unknown>,
           },
           identityId ?? '',
           session.authKeyWif,
@@ -164,9 +186,11 @@ export default function SettingsPage() {
   return (
     <>
       <Navbar />
-      <main className="flex-1">
+      <main id="main" tabIndex={-1} className="flex-1">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-          <Link href={`/u/${encodeURIComponent(identityId ?? '')}`} className="text-sm text-[#93a1bd] hover:text-white transition">← Profile</Link>
+          {identityId && (
+            <Link href={`/u/${encodeURIComponent(identityId)}`} className="text-sm text-[#93a1bd] hover:text-white transition">← Profile</Link>
+          )}
           <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">Settings</h1>
           <p className="mt-1 text-sm text-[#93a1bd]">Your profile lives on-chain — every save is a platform write.</p>
 
@@ -221,7 +245,7 @@ export default function SettingsPage() {
                 <CharCount count={draft.bio.length} max={LIMITS.bio} />
               </div>
               <div>
-                <label htmlFor="website" className="text-sm font-medium text-[#c7d0e4]">Website <span className="text-[#93a1bd] font-normal">(optional)</span></label>
+                <label htmlFor="website" className="text-sm font-medium text-[#93a1bd]">Website <span className="text-[#93a1bd] font-normal">(optional)</span></label>
                 <input
                   id="website"
                   type="url"

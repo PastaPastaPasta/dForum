@@ -5,12 +5,15 @@ import { Users, Pencil, AlertTriangle, Loader2 } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { query } from '@/lib/services/document-service'
-import { loadSnapshot, type SnapshotThread } from '@/lib/services/snapshot-service'
+import { getRoster } from '@/lib/services/moderation-service'
+import { filterListable } from '@/lib/services/orphan'
+import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
 import { useSession } from '@/lib/session'
 import { useLive } from '@/components/LiveFeed'
 import { useProfileNames } from '@/lib/use-profiles'
 import { isModerated } from '@/lib/utils'
 import { ThreadRow } from '@/components/ThreadRow'
+import { LiveUnavailable } from '@/components/LiveUnavailable'
 
 interface LiveThread {
   id: string
@@ -27,9 +30,10 @@ interface LiveForum {
   title?: string
   description?: string
   threads: LiveThread[]
+  truncated: boolean
 }
 
-/** Sticky-first, newest-first ordering — matches the forum contract's
+/** Sticky-first, newest-first ordering — mirrors the forum contract's
  * byForumSticky index intent. */
 function byStickyThenRecent(a: LiveThread, b: LiveThread): number {
   if (a.sticky !== b.sticky) return a.sticky ? -1 : 1
@@ -41,34 +45,41 @@ type LoadResult =
   | { status: 'missing' }
   | { status: 'error' }
 
+const MAX_LIST = 25
 
-export default function ForumClient({ slug }: { slug: string }) {
-  const snap = loadSnapshot()
+export default function ForumClient({ slug, snapshot }: { slug: string; snapshot: Snapshot | null }) {
+  const snap = snapshot
   const { session } = useSession()
-  const forum = snap.forums.find((f) => f.slug === slug)
+  const forum = snap?.forums.find((f) => f.slug === slug) ?? null
 
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
-  const snapThreads = snap.threads.filter((t) => t.forumSlug === slug).map(snapshotThreadToLive)
+  const snapThreads = (snap?.threads ?? []).filter((t) => t.forumSlug === slug).map(snapshotThreadToLive)
   const rawThreads = live?.status === 'ok' ? live.forum.threads : snapThreads
-  const liveThreads = rawThreads.filter((t) => !isModerated(t.modState)).sort(byStickyThenRecent)
+  const listed = rawThreads.filter((t) => !isModerated(t.modState)).sort(byStickyThenRecent).slice(0, MAX_LIST)
   const forumTitle = forum?.title ?? (live?.status === 'ok' ? live.forum.title : null) ?? slug
   const forumDesc = forum?.description ?? (live?.status === 'ok' ? live.forum.description : null) ?? ''
   const status = live?.status ?? null
   const showStaleNote = status === 'error' && forum != null && !liveLoading
+  const showHardError = status === 'error' && !forum && !liveLoading
 
-  const authorIds = liveThreads.map((t) => t.ownerId)
+  const authorIds = listed.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
+  const snapProfiles = snapshot?.profiles ?? {}
+  const nameOf = (id: string): string => snapProfiles[id] ?? profiles[id] ?? id.slice(0, 12)
 
-  if (status === 'error' && !forum && !liveLoading && snap.threads.length === 0) {
+  // Live results are already orphan-filtered (see loadLiveForum); the
+  // snapshot fallback is orphan-filtered by the snapshot itself.
+  
+  if (showHardError) {
     return (
       <>
         <Navbar />
-        <main className="flex-1 flex items-center justify-center px-6">
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="text-center fade-up">
             <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" aria-hidden="true" />
             <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">Connection error</p>
             <h1 className="text-2xl font-bold mt-2">Couldn&apos;t reach Dash Platform</h1>
-            <p className="text-sm text-[#93a1bd] mt-2">The live read failed. The snapshot may still be stale — retry in a moment.</p>
+            <p className="text-sm text-[#93a1bd] mt-2">The live read failed and the snapshot had no forum to show.</p>
             <button onClick={() => window.location.reload()} className="mt-6 btn-primary px-4 py-2">Retry</button>
           </div>
         </main>
@@ -81,7 +92,7 @@ export default function ForumClient({ slug }: { slug: string }) {
     return (
       <>
         <Navbar />
-        <main className="flex-1 flex items-center justify-center px-6">
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Not found</p>
             <h1 className="text-2xl font-bold mt-2">Forum not found</h1>
@@ -96,7 +107,7 @@ export default function ForumClient({ slug }: { slug: string }) {
   return (
     <>
       <Navbar />
-      <main className="flex-1">
+      <main id="main" tabIndex={-1} className="flex-1">
         <section className="border-b border-[#22304e]">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 fade-up">
             <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -109,13 +120,9 @@ export default function ForumClient({ slug }: { slug: string }) {
             </div>
             <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">{forumTitle}</h1>
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
-            {showStaleNote && (
-              <div className="mt-4 rounded-lg border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-amber-400" role="status">
-                Live data unavailable — showing the snapshot from the last index refresh.
-              </div>
-            )}
+            {showStaleNote && <LiveUnavailable className="mt-4" />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
-              <span>{liveThreads.length} thread{liveThreads.length === 1 ? '' : 's'}</span>
+              <span>{listed.length} thread{listed.length === 1 ? '' : 's'}</span>
               <span>·</span>
               <span className={session ? 'text-emerald-400' : 'text-amber-400'}>
                 {session ? 'Open' : <Link href="/login" className="hover:underline">Login to post</Link>}
@@ -125,17 +132,20 @@ export default function ForumClient({ slug }: { slug: string }) {
         </section>
 
         <section className="max-w-6xl mx-auto px-4 sm:px-6 mt-6">
-          {live?.status === 'ok' && live.forum.threads.length >= 50 ? (
-            <p className="mb-3 text-xs text-[#93a1bd]">Showing the 50 most recent threads.</p>
-          ) : null}
-          {liveThreads.length === 0 && liveLoading ? (
-            <LoadingSkeleton />
-          ) : liveThreads.length === 0 ? (
+          {live?.status === 'ok' && live.forum.truncated && (
+            <p className="mb-3 text-xs text-[#93a1bd]">Showing the {MAX_LIST} most recent threads.</p>
+          )}
+          {listed.length === 0 && liveLoading ? (
+            <>
+              <span className="sr-only" role="status">Loading threads…</span>
+              <LoadingSkeleton />
+            </>
+          ) : listed.length === 0 ? (
             <EmptyForum forum={forum} slug={slug} session={session} />
           ) : (
             <div className="space-y-3">
-              {liveThreads.map((t) => (
-                <ThreadRow key={t.id} thread={{ ...t, forumSlug: forum?.slug ?? slug }} nameOf={(id) => profiles[id] ?? id.slice(0, 12)} />
+              {listed.map((t) => (
+                <ThreadRow key={t.id} thread={{ ...t, forumSlug: forum?.slug ?? slug }} nameOf={nameOf} />
               ))}
             </div>
           )}
@@ -146,7 +156,7 @@ export default function ForumClient({ slug }: { slug: string }) {
   )
 }
 
-function EmptyForum({ forum, slug, session }: { forum: { id: string } | undefined; slug: string; session: { identityId: string } | null }) {
+function EmptyForum({ forum, slug, session }: { forum: { id: string } | null; slug: string; session: { identityId: string } | null }) {
   return (
     <div className="rounded-xl border border-dashed border-[#22304e] bg-[#111a2e]/50 p-8 text-center fade-up">
       <Users className="w-8 h-8 text-[#93a1bd] mx-auto" aria-hidden="true" />
@@ -190,29 +200,63 @@ async function loadLiveForum(slug: string): Promise<LoadResult> {
     const forums = await query('forum', { where: [['slug', '==', slug]], limit: 1 })
     const fdoc = forums[0]
     if (!fdoc) return { status: 'missing' }
-    const threads = await query('thread', {
-      where: [['forumId', '==', fdoc.id]],
-      orderBy: [['$createdAt', 'desc']],
-      limit: 50,
-    })
+    // The pinned query only exists in moderated contracts — the `none`
+    // contract has no sticky property at all. If the roster cannot be read,
+    // fail safe: skip the pinned query (recent-first still renders).
+    let stickyQueryable = false
+    try {
+      const roster = await getRoster()
+      stickyQueryable = roster?.mode === 'team' || roster?.mode === 'network'
+    } catch {
+      stickyQueryable = false
+    }
+    const [recent, pinned] = await Promise.all([
+      query('thread', {
+        where: [['forumId', '==', fdoc.id]],
+        orderBy: [['$createdAt', 'desc']],
+        limit: 25,
+      }),
+      // byForumSticky serves forumId+sticky equality only — no $createdAt
+      // orderBy (it is not in the index; the chain rejects it). Sort
+      // client-side after merging.
+      stickyQueryable
+        ? query('thread', {
+            where: [['forumId', '==', fdoc.id], ['sticky', '==', true]],
+            limit: 10,
+          })
+        : Promise.resolve([]),
+    ])
+    const byId = new Map<string, LiveThread>()
+    for (const t of recent) byId.set(t.id, docToThread(t))
+    for (const t of pinned) byId.set(t.id, docToThread(t)) // pinned wins so a pinned thread can't silently drop off the page
+    // Orphan rule — drop threads with no visible opening post (bounded to
+    // the threads we'd list; one ascending query per thread).
+    const threads = await filterListable([...byId.values()], 4)
+    const truncated = recent.length === 25 || pinned.length === 10
     return {
       status: 'ok',
       forum: {
         title: (fdoc.properties.title as string) ?? undefined,
         description: (fdoc.properties.description as string) ?? undefined,
-        threads: threads.map((t) => ({
-          id: t.id,
-          title: (t.properties.title as string) ?? '',
-          tags: Array.isArray(t.properties.tags) ? (t.properties.tags as string[]) : [],
-          sticky: Boolean(t.properties.sticky),
-          lockedAt: (t.properties.lockedAt as number | null) ?? null,
-          modState: (t.properties.modState as number | null) ?? null,
-          ownerId: t.ownerId || null,
-          createdAt: t.createdAt,
-        })),
+        threads,
+        truncated,
       },
     }
   } catch {
     return { status: 'error' }
+  }
+}
+
+function docToThread(t: { id: string; title?: string; ownerId?: string | null; createdAt?: number; properties?: Record<string, unknown> }): LiveThread {
+  const p = t.properties ?? {}
+  return {
+    id: t.id,
+    title: (p.title as string) ?? '',
+    tags: Array.isArray(p.tags) ? (p.tags as string[]) : [],
+    sticky: Boolean(p.sticky),
+    lockedAt: (p.lockedAt as number | null) ?? null,
+    modState: (p.modState as number | null) ?? null,
+    ownerId: t.ownerId ?? null,
+    createdAt: t.createdAt ?? 0,
   }
 }

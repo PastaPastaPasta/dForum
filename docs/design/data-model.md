@@ -61,7 +61,7 @@ One contract per deployment (bans/suspensions apply to a single contract; one de
 | modState | integer 1..3 | changeFields, optional, moderator-only (1=hidden) |
 | modNote | string ≤200 | changeFields, optional |
 
-Every message is a `post` including the opening post. A thread is listed only when its opening post exists — the earliest visible post whose `$ownerId` equals the thread's `$ownerId`, ordered by (`$createdAt`, `$id`) (orphan rule). Posts by others created before it are dropped/hidden for listing.
+Every message is a `post` including the opening post. The opening post of a thread is the earliest post whose `$ownerId` equals the thread's `$ownerId`, ordered by (`$createdAt`, `$id`) — regardless of its moderation state. A thread is listed only when that opening post exists AND is itself visible (not moderated, and not past the lock). Posts by anyone created before the opening post are dropped for listing (they may exist as pre-opening noise).
 
 "Edited" is `$updatedAt > $createdAt` (not `$revision > 1`): moderator changeFields bumps `$revision` without moving `$updatedAt`.
 
@@ -131,9 +131,12 @@ documentsCountable: thread, post, reaction, profile.
 - `modState` non-null = hidden (console writes 1; every renderer — client, snapshot, sitemap — treats any non-null modState as hidden: body suppressed, listing suppressed, snapshot-excluded). `banned` never appears on profiles; bans live in the ban list.
 - Moderator changeFields on a thread/post bumps `$revision` but NOT `$updatedAt` — display edited badges from `$updatedAt > $createdAt`.
 - Locked threads: client ignores posts with `$createdAt > lockedAt`; the snapshot drops posts created after lockedAt (S3: never consensus-enforced).
-- Orphan rule: a thread is listed only when its opening post exists — the earliest visible post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`). Snapshot and client both apply it.
+- Orphan rule: the opening post is the earliest post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`) — regardless of that post's moderation state. A thread is listed only when that opening post exists AND is itself visible (not moderated, not past the lock). A hidden opening post means the thread is hidden — shown nowhere (snapshot, sitemap, llms.txt, live listings, thread page). Snapshot and client both apply it.
 
 ## Pending at next registration (indexes are frozen in this deployment)
+- `thread`/`post`: the `moderated` index (`$moderatedAt`) is registered and available for an audit view, but the moderation console currently scans `recent`/`byForum`/`byAuthor` and filters by `modState` client-side — a server-side moderated-audit listing is a next-registration improvement (query `moderated` only for types where `$moderatedAt` is set — only changeFields writes it). Do not query `moderated` for docs where the field is absent; an empty-set read is fine but an over-broad scan is not.
+- `thread`/`post`: `byUpdated` is registered but unused by the app — listing order uses `$createdAt` desc; the profile page reads `byAuthor`. No change this deployment.
+- `profile.canBeDeleted`: currently `true` — a moderator-hidden profile would be deletable/reappearable by its owner at the consensus layer. The app pairs profile hide with ban/suspend (soft-hide) today; at next registration set `profile.canBeDeleted: false` + `deleteKeepsFields` so a hidden profile cannot be erased and re-created into a fresh identity.
 - `reaction.byPostKind`: in a fresh registration, use `rangeCountable: true` so per-post counts can be served without `kind in [...]` group-by. The current contract uses `countable` — per-post totals need `postId == X, kind in [1..8]` with groupBy [kind] (one request per post); spike before building the reaction UI.
 - `profile`: no `moderated` index (`$moderatedAt`) — hidden profiles must be found by full scan; `profile.byOwner` is the only index.
 - `report`: no status index (`byStatus`) — the moderation queue scans `recent` and filters client-side; also add `where: { threadId: 'threadId' }` on `report.postId` so the cached threadId is validated.
@@ -151,6 +154,6 @@ documentsCountable: thread, post, reaction, profile.
 - Every post is a post; thread is title/meta only. No edit history (documentsKeepHistory incompatible with moderator delete) — "edited" when `$updatedAt > $createdAt`.
 - No thread moves in v1 (forumId immutable, verified against thread by reference).
 - No sequence numbers (moderator deletion breaks dense numbering); pagination is a client-side bounded window (threads/forums show the latest N with a truncation note), not server-side page routes yet.
-- Opening post = the earliest visible post whose owner equals the thread owner, ordered by (`$createdAt`, `$id`); the thread is listed iff such a post exists (orphan rule; see Moderation semantics).
+- Opening post = the earliest post whose owner equals the thread owner, ordered by (`$createdAt`, `$id`), regardless of moderation state; the thread is listed iff that opening post exists AND is visible (orphan rule; see Moderation semantics).
 - Reports are public on-chain, reporter included (UI says so). Only moderators set status/resolution.
 - Body limit: maxLength 4000, maxBytes 5120 (platform hard cap 5120/value).

@@ -387,11 +387,14 @@ function moderatorsFor(mode, deployer) {
       seatContestable: false,
       maxAddedModerators: 0,
       ownerProtected: true,
+      // Identity actions need the lists the contract keeps (banlist/
+      // suspensions/warnings are true above) — a charter claiming them on
+      // these types can ban, suspend and warn identities.
       moderatedDocumentTypes: {
-        thread: ['deleteDocuments', 'changeDocumentFields'],
-        post: ['deleteDocuments', 'changeDocumentFields'],
-        report: ['deleteDocuments', 'changeDocumentFields'],
-        profile: ['deleteDocuments', 'changeDocumentFields'],
+        thread: ['deleteDocuments', 'changeDocumentFields', 'ban', 'suspend', 'warn'],
+        post: ['deleteDocuments', 'changeDocumentFields', 'ban', 'suspend', 'warn'],
+        report: ['deleteDocuments', 'changeDocumentFields', 'ban', 'suspend', 'warn'],
+        profile: ['deleteDocuments', 'changeDocumentFields', 'ban', 'suspend', 'warn'],
       },
       interim: { $type: 'appointedModerators', identities: [deployer] },
     };

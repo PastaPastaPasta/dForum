@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { EvoSDK } from '@dashevo/evo-sdk';
+import { redactWif } from './lib/redact.mjs';
 
 async function main() {
   await EvoSDK.getLatestVersionNumber();
@@ -47,6 +48,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code', 'cause']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', parts.join(' | '));
+  console.error('ERROR:', redactWif(parts.join(' | ')));
   process.exit(1);
 });

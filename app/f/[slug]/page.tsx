@@ -1,16 +1,17 @@
 import type { Metadata } from 'next'
 import ForumClient from '@/components/ForumClient'
-import { loadSnapshot } from '@/lib/services/snapshot-service'
+import { loadSnapshot } from '@/lib/services/snapshot-server'
 
 export const dynamicParams = false
 
 export function generateStaticParams() {
   const snap = loadSnapshot()
-  const forumParams = snap.forums.map((f) => ({ slug: f.slug ?? '' })).filter((p) => p.slug)
-  if (forumParams.length === 0) {
-    throw new Error('[dForum] Snapshot has no forums — run `node scripts/snapshot.mjs` before building (the static index is generated from the platform).')
-  }
-  return forumParams
+  // Empty snapshot → one placeholder param, never zero: Next's export build
+  // throws on an empty param list. The placeholder renders the normal client
+  // component, which shows the live-fallback ("not found / loading") state —
+  // the SPA fallback covers the gap and the last good deploy keeps serving.
+  if (snap.forums.length === 0) return [{ slug: '__stub__' }]
+  return snap.forums.map((f) => ({ slug: f.slug ?? '' })).filter((p) => p.slug)
 }
 
 export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
@@ -23,5 +24,6 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
 }
 
 export default function ForumRoute({ params }: { params: { slug: string } }) {
-  return <ForumClient slug={params.slug} />
+  const snap = loadSnapshot()
+  return <ForumClient slug={params.slug} snapshot={snap} />
 }

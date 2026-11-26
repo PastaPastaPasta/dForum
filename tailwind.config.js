@@ -19,6 +19,14 @@ module.exports = {
           400: '#75d0ff',
           500: '#3aacff',
         },
+        // Design tokens — use these instead of raw hex utilities going forward.
+        base: '#0b1220',        // page background
+        surface: '#111a2e',     // cards / panels
+        surface2: '#18233c',    // subtle fills / chips
+        line: '#22304e',        // borders / dividers
+        text: '#e8edf7',        // primary text
+        muted: '#93a1bd',       // secondary text
+        input: 'var(--input-border)', // input borders (--input-border = #62749b)
       },
     },
   },

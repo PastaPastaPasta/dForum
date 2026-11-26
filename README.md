@@ -10,7 +10,7 @@ Baseline / parity target: dash.org/forum (XenForo-style: categories → forums �
 
 Next.js 14 static export (TypeScript + Tailwind, react 18) with the Dash Platform as the single source of truth.
 
-- `scripts/snapshot.mjs` — live platform reads: categories, forums, threads, posts and counts, with a completeness gate (the fetched counts must match the prove-context counts or the build fails loudly). Never a git branch — the workflow regenerates it hourly (and on push/dispatch) before the static build. Moderated content is dropped from the static index, and threads with no owner-owned visible post (orphan rule) are not listed.
+- `scripts/snapshot.mjs` — live platform reads: categories, forums, threads, posts and counts, with a completeness gate (any fetch or count failure throws — the build then fails and the last good deploy keeps serving). Never a git branch — the workflow regenerates it hourly (and on push/dispatch) before the static build. Moderated and ownerless threads are dropped from the static index (orphan rule), and any index-window overflow (forums/categories filled their 50-doc window) also fails the build loudly. An honest empty answer (zero listable threads) does NOT fail the build — the SPA fallback covers the gap.
 - `npm run build` — prerenders every route from the snapshot, never from the network. Routes are **path routes** (`/t/{id}/`, `/f/{slug}/`, `/u/{id}/`) with `dynamicParams = false`; new threads/forums made since the last snapshot render live through the `404.html` SPA fallback (`app/not-found.tsx`) which re-mounts the same client components for those paths.
 - The client re-queries the platform at runtime (`useLive`, `LiveFeed`) — posts newer than the snapshot fill in after hydration. The evo-sdk (~30 MB WASM) is loaded lazily on first live query, never at first paint (First Load JS ~125 kB).
 - `scripts/generate-static-seo.mjs` — writes `sitemap.xml`, `robots.txt`, `llms.txt`, `/data/v1/manifest.json` from the snapshot. Moderated content is excluded from all of them.
@@ -21,7 +21,7 @@ Next.js 14 static export (TypeScript + Tailwind, react 18) with the Dash Platfor
 
 - Every message is a `post`; a thread holds `title`, `tags`, `sticky`, `lockedAt`; flat reply chronology with `replyToId` for quotes. Forum id is immutable in v1 (no thread moves).
 - No edit history: show "edited" when `$updatedAt > $createdAt` (moderator `changeFields` bump `$revision` without moving `$updatedAt`). No counters — counts computed live. Pagination via indexed ranges.
-- `modState` non-null = hidden (console writes 1). Every render path — client, snapshot, sitemap — treats any non-null `modState` as hidden: body suppressed, listing suppressed, snapshot-excluded. Threads listed only when the earliest visible post's owner == thread owner (orphan rule).
+- `modState` non-null = hidden (console writes 1). Every render path — client, snapshot, sitemap — treats any non-null `modState` as hidden: body suppressed, listing suppressed, snapshot-excluded. Threads are listed only when the earliest owner-owned post (ordered by `$createdAt`, `$id`, regardless of moderation state) exists AND is itself visible — hidden, ownerless, or fully-locked threads are dropped everywhere (snapshot, live listings, sitemap, llms.txt).
 - Post/thread bodies: ≤4000 characters / ≤5120 bytes (platform hard cap 5120/value).
 
 ### Moderation (native platform moderation, protocol 14)
@@ -29,7 +29,7 @@ Next.js 14 static export (TypeScript + Tailwind, react 18) with the Dash Platfor
 - **Team mode** (default): `appointedModerators` in contract config — the owner + up to 16 named identities. Non-elected, owner-managed, enforced at consensus.
 - `none` mode: no moderation block at all (nothing bannable/removable/moderatable).
 - `network` mode: elected moderators (testnet-only; not recommended).
-- The moderation console (`/moderation`) signs with a CRITICAL auth key pasted by the operator — **dropped from app state for the tab** (never stored, never written outside the tab): the WASM signer is freed on wipe (`pagehide`, `visibilitychange` → hidden, in-app navigation, 10-minute idle, unmount) and the WIF is dropped from React state. Honest wording: “dropped from app state” — not a guarantee about memory. The owner identity always moderates and holds full contract authority (roster + moderation config); the console refuses the owner key off localhost — keep it offline for contract updates. The chain forbids moderating your own documents, so self-actions disable automatically with an explanatory note. The host gate warns on non-canonical hosts (localhost permitted for testing).
+- The moderation console (`/moderation`) signs with a CRITICAL auth key pasted by the operator — **dropped from app state for the tab** (never stored, never written outside the tab): the WASM signer is freed on wipe (`pagehide`, `visibilitychange` → hidden, in-app navigation, 10-minute idle, unmount) and the WIF is dropped from React state. Honest wording: “dropped from app state” — not a guarantee about memory. The owner identity always moderates and holds full contract authority (roster + moderation config); the console refuses the owner key off localhost — keep it offline for contract updates. The chain forbids moderating your own documents, so self-actions disable automatically with an explanatory note. The host gate hard-refuses the console on non-canonical hosts — there is no acknowledgement checkbox for a CRITICAL key (login keeps one, with the full warning).
 - Moderation actions (hide/unhide, pin, lock, ban, suspend, warn, clear warnings, delete) prompt a confirmation before anything destructive; deletion keeps the record and stores only `threadId`/`forumId`.
 
 ### Identity & login
@@ -62,8 +62,10 @@ Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + disp
 
 - Secrets are never in the repo. The deployer seed lives in the shared secret store (`~/.secrets/dforum/testnet-deployer`, linked into `.env.local`, gitignored). `.env.testing` and `.env*` are gitignored.
 - The moderation console's CRITICAL key never leaves the operator's browser — the WASM signer is freed and the WIF dropped from app state on wipe (pagehide, tab-hide, in-app navigation, 10-minute idle, unmount).
-- CSP is declared via `<meta http-equiv>` (static export is header-less): same-origin scripts/styles, WASM/blob workers, `connect-src 'self' https: wss:` (the Dash Platform is hosted on masternode IPs, so the connect-src cannot be narrowed without breaking the app).
+- CSP is declared via `<meta http-equiv>` (static export is header-less): same-origin scripts/styles, WASM/blob workers, `connect-src 'self' https: wss:` (the Dash Platform is hosted on masternode IPs, so the connect-src cannot be narrowed without breaking the app). Framework `frame-ancestors` is not expressible in a meta CSP — the moderation console and login page instead enforce a JavaScript frame-buster (`window.top !== window.self` → top navigates away).
 - Public files (sitemap, llms.txt, manifest) only carry public content, and moderated content is excluded.
+- **App Connect session-key bounds (design gap, documented).** The App Connect v2 flow registers an identity-level HIGH auth key. The protocol (and the vendored `platform-auth` client) does not support contract-bound keys — the key can sign documents on any contract the holder can read. Mitigations: the host gate on login/moderation (non-canonical origins require an explicit acknowledgement), sessionStorage scoped to the tab, never persisted cross-tab/cross-device, the HIGH key never leaves the browser beyond the platform request, and no storage of the login key. The owner keeps the full-contract CRITICAL key offline (full contract authority includes the roster and moderation config — the console refuses it off localhost).
+- **Host gate.** The key-signing surfaces are gated by the host: `localhost` and `forum.dashhq.org` are pre-approved. **Login** — on any other origin — requires an explicit acknowledgement before the key-signing flow is enabled (a shared github.io origin is an accepted risk, acknowledged by the user, not silent); the dedicated canonical host is the goal. **The moderation console** — on any other origin — refuses outright: no checkbox, no flow, only an open-on-the-canonical-host affordance.
 - Write fees: post 0.00134 DASH, thread 0.00164, reaction 0.00091, category 0.00038, forumSettings 0.00024 (credits ÷ 1e11) — all well under the 0.005 target (see `docs/design/spike-results.md`).
 
 ## Repository
@@ -71,8 +73,8 @@ Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + disp
 | Path | Role |
 | --- | --- |
 | `app/` | Next.js app router pages (path routes `/t/[id]`, `/f/[slug]`; shell pages only) |
-| `components/` | Navbar, Footer, Avatar, LiveFeed, KeyExchangeModal, ThreadRow, ThreadClient, ForumClient, ProfileClient |
-| `lib/` | Auth (App Connect), services (evo-sdk, snapshot, document, moderation), session, constants |
+| `components/` | Navbar, Footer, Avatar, LiveFeed, RelativeTime, KeyExchangeModal, ThreadRow, ThreadClient, ForumClient, ProfileClient, HomeClient, SearchClient, NewThreadClient |
+| `lib/` | Auth (App Connect: controller, adapters, decoder, key-registration-builder), services (evo-sdk, snapshot-server, document, moderation, orphan, moderator-fields), use-profiles, session, constants |
 | `contracts/` | build.mjs + generated contracts (none/team/network) + deployments record |
 | `scripts/` | snapshot.mjs, generate-static-seo.mjs, provision-identity.mjs, spikes/ |
 | `vendor/platform-auth/` | Vendored App Connect v2 client |

@@ -6,14 +6,16 @@ import { MessageSquare, Send, Lock, AlertTriangle, Loader2 } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
+import { RelativeTime } from '@/components/RelativeTime'
 import { get, query, createDocument } from '@/lib/services/document-service'
-import { loadSnapshot } from '@/lib/services/snapshot-service'
-import { formatRelativeTime, formatDate, shortId, isModerated } from '@/lib/utils'
+import { shortId, isModerated } from '@/lib/utils'
 import { useProfileNames } from '@/lib/use-profiles'
 import { useSession } from '@/lib/session'
 import { useLive } from '@/components/LiveFeed'
-import type { SnapshotThread } from '@/lib/services/snapshot-service'
+import type { SnapshotThread, StaticPost } from '@/lib/services/snapshot-server'
 import { LIMITS } from '@/lib/constants'
+import { beforePost, earliestOwnerPost, type OpeningPost } from '@/lib/services/orphan'
+import { LiveUnavailable } from '@/components/LiveUnavailable'
 
 interface LiveThread {
   id: string
@@ -38,62 +40,69 @@ interface LivePost {
 }
 
 type LoadResult =
-  | { status: 'ok'; thread: LiveThread; posts: LivePost[]; truncated: boolean }
+  | { status: 'ok'; thread: LiveThread; posts: LivePost[]; truncated: boolean; opening: OpeningPost | null }
   | { status: 'missing' }
   | { status: 'error' }
 
-/** Settled orphan rule (data-model.md): a post is the opening post of its
- * thread when it is the earliest visible post whose author equals the thread
- * owner, ordered by ($createdAt, $id). Posts of other authors created before
- * it are dropped from the listing. */
-function openingPost(posts: LivePost[], ownerId: string | null): LivePost | null {
-  const ownerPosts = posts.filter((p) => p.authorId === ownerId && !isModerated(p.modState))
-  if (ownerPosts.length === 0) return null
-  return ownerPosts.reduce((a, b) => (isBefore(b, a) ? b : a))
-}
+const POST_LIMIT = 99
 
-function isBefore(a: LivePost, b: LivePost): boolean {
-  return a.createdAt < b.createdAt || (a.createdAt === b.createdAt && a.id < b.id)
-}
-
-const POST_LIMIT = 100
-
-
-export default function ThreadClient({ threadId }: { threadId: string }) {
-  const snap = loadSnapshot()
+export default function ThreadClient({
+  threadId,
+  snapshotThread,
+  initialPosts,
+}: {
+  threadId: string
+  snapshotThread: SnapshotThread | null
+  initialPosts: StaticPost[]
+}) {
   const { session } = useSession()
   const [replyBody, setReplyBody] = useState('')
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [createdPosts, setCreatedPosts] = useState<LivePost[]>([])
 
-  const snapThread = snap.threads.find((t) => t.id === threadId)
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
   const isLiveOk = live?.status === 'ok'
   const thread: LiveThread | null = isLiveOk
-    ? { ...live!.thread, forumSlug: live!.thread.forumSlug ?? snapThread?.forumSlug ?? null }
-    : snapThread
-      ? snapshotThread(snapThread)
+    ? { ...live!.thread, forumSlug: live!.thread.forumSlug ?? snapshotThread?.forumSlug ?? null }
+    : snapshotThread
+      ? snapshotThreadToLive(snapshotThread)
       : null
 
-  const livePosts = isLiveOk ? live!.posts : []
-  const seen = new Set(livePosts.map((p) => p.id))
-  const created = createdPosts.filter((p) => !seen.has(p.id))
-  const posts: LivePost[] = [...livePosts, ...created]
+  // The opening post — resolved by the live read (or found async below).
+  // Undefined = unknown (fail open: the static index already filtered the
+  // static posts, so showing them is honest); null = no owner post at all.
+  const opening: OpeningPost | null | undefined = isLiveOk ? live!.opening : undefined
 
-  // Orphan rule applied to the live listing.
-  const opening = thread?.ownerId ? openingPost(posts, thread.ownerId) : null
-  const visible = opening ? posts.filter((p) => !isBefore(p, opening)) : posts
+  const livePosts = isLiveOk ? live!.posts : []
+  // Static posts ship in the HTML and stay visible while the live fill runs —
+  // the prerender and first view must show the thread.
+  const staticPosts: LivePost[] = !isLiveOk ? initialPosts.map(staticToLive) : []
+  const seen = new Set([...livePosts, ...staticPosts].map((p) => p.id))
+  const created = createdPosts.filter((p) => !seen.has(p.id))
+  const posts: LivePost[] = [...(isLiveOk ? livePosts : staticPosts), ...created]
+
+  // The orphan rule — the opening post is the earliest owner post, regardless
+  // of its moderation state. A hidden opening post means the thread is hidden;
+  // a missing opening post means the thread is not listed at all.
+  const openingKnown = opening !== undefined
+  const hiddenOpening = opening?.modState != null
+  const hidden = isModerated(thread?.modState) || hiddenOpening || (openingKnown && opening === null)
 
   const lockedAt = thread?.lockedAt ?? null
   const locked = lockedAt != null
-  const visiblePosts = lockedAt != null ? visible.filter((p) => p.createdAt <= lockedAt) : visible
+
+  // Only posts at/after the opening post are shown — posts before it are
+  // dropped regardless of who made them.
+  const atOrAfterOpening = opening ? posts.filter((p) => !beforePost(p, opening)) : posts
+  const visiblePosts = lockedAt != null
+    ? atOrAfterOpening.filter((p) => p.createdAt <= lockedAt)
+    : atOrAfterOpening
 
   // Resolve author display names for every visible post.
   const authorIds = visiblePosts.map((p) => p.authorId)
   const profiles = useProfileNames(authorIds)
-
   const profileName = (id: string): string => profiles[id] ?? shortId(id, 12)
 
   async function handlePost() {
@@ -137,20 +146,15 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
   }
 
   const status = live?.status ?? null
-  // Missing = the platform looked and found nothing → not found, even if
-  // the snapshot lists the thread (the delete path).
   const missing = status === 'missing' && !liveLoading
-  // Error with no snapshot fallback = error state. With a snapshot fallback,
-  // keep the static data and show a small note instead of a dead end.
-  const showHardError = status === 'error' && !snapThread && !liveLoading
-  const showStaleNote = status === 'error' && snapThread != null && !liveLoading
-  const hidden = isModerated(thread?.modState)
+  const showHardError = status === 'error' && !snapshotThread && !liveLoading
+  const showStaleNote = status === 'error' && snapshotThread != null && !liveLoading
 
   if (missing) {
     return (
       <>
         <Navbar />
-        <main className="flex-1 flex items-center justify-center px-6">
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Not found</p>
             <h1 className="text-2xl font-bold mt-2">Thread not found</h1>
@@ -166,7 +170,7 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
     return (
       <>
         <Navbar />
-        <main className="flex-1 flex items-center justify-center px-6">
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="text-center fade-up">
             <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" aria-hidden="true" />
             <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">Connection error</p>
@@ -184,7 +188,7 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
     return (
       <>
         <Navbar />
-        <main className="flex-1 flex items-center justify-center px-6">
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Not found</p>
             <h1 className="text-2xl font-bold mt-2">Thread not found</h1>
@@ -196,10 +200,12 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
     )
   }
 
+  const truncated = isLiveOk && live!.truncated
+
   return (
     <>
       <Navbar />
-      <main className="flex-1">
+      <main id="main" tabIndex={-1} className="flex-1">
         <article className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
           <Link href={thread?.forumSlug ? `/f/${encodeURIComponent(thread.forumSlug)}` : '/'} className="text-sm text-[#93a1bd] hover:text-white transition">
             ← {thread?.forumSlug ?? 'dForum'}
@@ -207,25 +213,24 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
           {hidden ? (
             <div className="mt-6 rounded-xl border border-amber-400/40 bg-amber-400/10 p-6 text-center">
               <p className="text-sm uppercase tracking-widest text-amber-400">Hidden by a moderator</p>
-              <h1 className="mt-2 text-2xl font-bold">{thread?.title ?? 'Thread'}</h1>
+              <h1 className="mt-2 text-2xl font-bold">This thread is hidden</h1>
               <p className="mt-2 text-sm text-amber-400/80">This thread was hidden by a moderator. Its contents are not rendered.</p>
             </div>
           ) : (
             <>
               <h1 className="mt-3 text-2xl sm:text-3xl font-bold tracking-tight">{thread?.title ?? '…'}</h1>
               <div className="mt-3 flex items-center gap-3 text-sm text-[#93a1bd] flex-wrap">
-                <span className="inline-flex items-center gap-1.5"><MessageSquare className="w-4 h-4" aria-hidden="true" />{visiblePosts.length} post{visiblePosts.length === 1 ? '' : 's'}</span>
+                {(isLiveOk || staticPosts.length > 0) && (
+                  <span className="inline-flex items-center gap-1.5"><MessageSquare className="w-4 h-4" aria-hidden="true" />{visiblePosts.length} post{visiblePosts.length === 1 ? '' : 's'}</span>
+                )}
+                {liveLoading && staticPosts.length === 0 && <span className="inline-flex items-center gap-1.5"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Loading posts…</span>}
                 {locked && <span className="inline-flex items-center gap-1 text-amber-400"><Lock className="w-3.5 h-3.5" aria-hidden="true" /> locked</span>}
                 {thread?.tags.map((tag) => (
                   <span key={tag} className="rounded bg-[#18233c] px-2 py-0.5">#{tag}</span>
                 ))}
               </div>
 
-              {showStaleNote && (
-                <div className="mt-4 rounded-lg border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-amber-400" role="status">
-                  Live data unavailable — showing the snapshot from the last index refresh.
-                </div>
-              )}
+              {showStaleNote && <LiveUnavailable className="mt-4" />}
 
               <div className="mt-6 space-y-4">
                 {visiblePosts.map((p) => (
@@ -238,7 +243,12 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
                     ))}
                   </div>
                 )}
-                {live?.status === 'ok' && live.truncated && (
+                {visiblePosts.length === 0 && !liveLoading && (
+                  <p className="text-sm text-[#93a1bd] rounded-xl border border-dashed border-[#22304e] p-6 text-center">
+                    {isLiveOk ? 'No visible posts in this thread.' : 'Posts unavailable — the live read failed and the snapshot had none.'}
+                  </p>
+                )}
+                {truncated && (
                   <p className="text-xs text-[#93a1bd]">Showing the first {POST_LIMIT} posts of this thread.</p>
                 )}
               </div>
@@ -247,38 +257,40 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
                 <div className="mt-8 rounded-xl border border-amber-400/40 bg-amber-400/5 p-4 text-center text-sm text-amber-400">
                   This thread is locked by moderators. No new replies.
                 </div>
-              ) : session ? (
-                <div className="mt-8 rounded-xl border border-[#22304e] bg-[#111a2e] p-4">
-                  <label htmlFor="reply" className="text-sm font-medium text-[#93a1bd]">Reply</label>
-                  <textarea
-                    id="reply"
-                    value={replyBody}
-                    onChange={(e) => setReplyBody(e.target.value)}
-                    rows={4}
-                    maxLength={LIMITS.body}
-                    placeholder="Write your reply…"
-                    className="mt-2 w-full rounded-lg border border-[#22304e] bg-[#0b1220] p-3 text-sm placeholder:text-[#93a1bd] resize-y"
-                  />
-                  <div className="mt-1 flex items-center justify-between text-xs text-[#93a1bd]">
-                    <span aria-live="polite" role="status">{postError ? <span className="text-red-400">{postError}</span> : ''}</span>
-                    <span>{replyBody.length}/4000</span>
+              ) : thread && thread.forumId ? (
+                session ? (
+                  <div className="mt-8 rounded-xl border border-[#22304e] bg-[#111a2e] p-4">
+                    <label htmlFor="reply" className="text-sm font-medium text-[#93a1bd]">Reply</label>
+                    <textarea
+                      id="reply"
+                      value={replyBody}
+                      onChange={(e) => setReplyBody(e.target.value)}
+                      rows={4}
+                      maxLength={LIMITS.body}
+                      placeholder="Write your reply…"
+                      className="mt-2 w-full rounded-lg border border-input bg-[#0b1220] p-3 text-sm placeholder:text-[#93a1bd] resize-y"
+                    />
+                    <div className="mt-1 flex items-center justify-between text-xs text-[#93a1bd]">
+                      <span aria-live="polite">{postError ? <span className="text-red-400">{postError}</span> : ''}</span>
+                      <span>{new TextEncoder().encode(replyBody).length}/{LIMITS.bodyMaxBytes} bytes</span>
+                    </div>
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        onClick={handlePost}
+                        disabled={posting || !replyBody.trim()}
+                        className="btn-primary inline-flex items-center gap-2 px-4 py-2 font-medium"
+                      >
+                        {posting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
+                        {posting ? 'Posting…' : 'Post reply'}
+                      </button>
+                    </div>
                   </div>
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      onClick={handlePost}
-                      disabled={posting || !replyBody.trim()}
-                      className="btn-primary inline-flex items-center gap-2 px-4 py-2 font-medium"
-                    >
-                      {posting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
-                      {posting ? 'Posting…' : 'Post reply'}
-                    </button>
+                ) : (
+                  <div className="mt-8 rounded-xl border border-dashed border-[#22304e] p-6 text-center text-sm text-[#93a1bd]">
+                    <Link href={`/login?next=${encodeURIComponent(`/t/${thread.id}`)}`} className="text-[#4db3ff] hover:underline">Login with Dash</Link> to join the conversation.
                   </div>
-                </div>
-              ) : (
-                <div className="mt-8 rounded-xl border border-dashed border-[#22304e] p-6 text-center text-sm text-[#93a1bd]">
-                  <Link href="/login" className="text-[#4db3ff] hover:underline">Login with Dash</Link> to join the conversation.
-                </div>
-              )}
+                )
+              ) : null}
             </>
           )}
         </article>
@@ -286,19 +298,31 @@ export default function ThreadClient({ threadId }: { threadId: string }) {
       <Footer />
     </>
   )
-}
 
-function snapshotThread(t: SnapshotThread): LiveThread {
-  return {
-    id: t.id,
-    title: t.title,
-    forumId: t.forumId ?? '',
-    forumSlug: t.forumSlug,
-    tags: t.tags,
-    sticky: t.sticky,
-    lockedAt: t.lockedAt,
-    modState: t.modState ?? null,
-    ownerId: t.ownerId ?? null,
+  function snapshotThreadToLive(t: SnapshotThread): LiveThread {
+    return {
+      id: t.id,
+      title: t.title,
+      forumId: t.forumId ?? '',
+      forumSlug: t.forumSlug,
+      tags: t.tags,
+      sticky: t.sticky,
+      lockedAt: t.lockedAt,
+      modState: t.modState ?? null,
+      ownerId: t.ownerId ?? null,
+    }
+  }
+
+  function staticToLive(p: StaticPost): LivePost {
+    return {
+      id: p.id,
+      body: p.body,
+      authorId: p.authorId ?? '',
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      modState: p.modState ?? null,
+      replyToId: p.replyToId,
+    }
   }
 }
 
@@ -310,7 +334,7 @@ function PostCard({ post, mine, nameOf }: { post: LivePost; mine?: string | null
   return (
     <div className="rounded-xl border border-[#22304e] bg-[#111a2e] p-4 fade-up">
       <div className="flex items-center gap-3">
-        <Link href={`/u/${encodeURIComponent(post.authorId)}`} className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-[#4db3ff]/60 transition" title={`Open ${authorName}'s profile`}>
+        <Link href={`/u/${encodeURIComponent(post.authorId)}`} tabIndex={-1} aria-hidden="true" className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-[#4db3ff]/60 transition">
           <Avatar name={authorName} id={post.authorId || null} />
         </Link>
         <div className="flex-1 min-w-0">
@@ -318,7 +342,7 @@ function PostCard({ post, mine, nameOf }: { post: LivePost; mine?: string | null
             <Link href={`/u/${encodeURIComponent(post.authorId)}`} className="hover:text-[#4db3ff] hover:underline transition">{authorName}</Link>
           </p>
           <p className="text-xs text-[#93a1bd]">
-            {formatRelativeTime(post.createdAt)} · {formatDate(post.createdAt)}
+            <RelativeTime time={post.createdAt} />
             {edited && ' · edited'}
           </p>
         </div>
@@ -339,7 +363,11 @@ async function loadThread(id: string): Promise<LoadResult> {
   try {
     const thread = await get('thread', id)
     if (!thread) return { status: 'missing' }
-    const posts = await query('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: POST_LIMIT + 1 })
+    const ownerId = thread.ownerId ?? null
+    const [posts, opening] = await Promise.all([
+      query('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: POST_LIMIT + 1 }),
+      ownerId ? earliestOwnerPost(thread.id, ownerId, thread.createdAt) : Promise.resolve(null),
+    ])
     const truncated = posts.length > POST_LIMIT
     const visiblePosts = posts.slice(0, POST_LIMIT)
     return {
@@ -364,6 +392,7 @@ async function loadThread(id: string): Promise<LoadResult> {
         modState: (p.properties.modState as number | null) ?? null,
         replyToId: (p.properties.replyToId as string | null) ?? null,
       })),
+      opening,
       truncated,
     }
   } catch {

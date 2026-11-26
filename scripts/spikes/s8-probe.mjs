@@ -11,6 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { Document, EvoSDK, IdentitySigner } from '@dashevo/evo-sdk';
 import { criticalAuthKey, deriveIdentityKeys } from '../derive-identities.mjs';
+import { redactWif } from '../lib/redact.mjs';
 
 const record = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'));
 const CONTRACT_ID = record.contracts.team.contractId;
@@ -82,6 +83,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', parts.join(' | ').replace(/\b[c9][1-9A-HJ-NP-Za-km-z]{50,51}\b/g, '<redacted-wif>'));
+  console.error('ERROR:', redactWif(parts.join(' | ')));
   process.exit(1);
 });

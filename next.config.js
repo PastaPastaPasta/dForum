@@ -12,6 +12,16 @@ const getGitInfo = () => {
 }
 
 const gitInfo = getGitInfo()
+// The snapshot is bundled into build chunks — its content changes hourly,
+// so the build id must change with it (or a stale build could serve stale
+// snapshot data as if it were fresh).
+const snapshotStamp = (() => {
+  try {
+    return require('fs').statSync('data/snapshot.json').mtimeMs.toString(36)
+  } catch {
+    return 'nosnapshot'
+  }
+})()
 
 const basePath = process.env.BASE_PATH || ''
 
@@ -20,7 +30,7 @@ const nextConfig = {
   basePath,
   assetPrefix: basePath,
   trailingSlash: true,
-  generateBuildId: async () => gitInfo.commitHash,
+  generateBuildId: async () => `${gitInfo.commitHash}-${snapshotStamp}`,
   env: {
     NEXT_PUBLIC_GIT_COMMIT_HASH: gitInfo.commitHash,
     NEXT_PUBLIC_GIT_COMMIT_DATE: gitInfo.commitDate,

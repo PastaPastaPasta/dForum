@@ -3,14 +3,14 @@
 import Link from 'next/link'
 import { useEffect } from 'react'
 
-export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     // Client-side error boundary — the error is expected for platform-side
     // failures; we keep the same shape as the rest of the app.
     console.error(error)
   }, [error])
   return (
-    <main className="flex-1 flex items-center justify-center px-6">
+    <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
       <div className="text-center fade-up">
         <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Something went wrong</p>
         <h1 className="text-2xl font-bold mt-2">This page hit an error</h1>

@@ -2,7 +2,7 @@
   "name": "dforum",
   "version": "0.1.0",
   "private": true,
-  "description": "A decentralized forum on Dash Platform — centralized ownership, team moderation, all data on-chain, login with Dash",
+  "description": "A decentralized forum on Dash Platform \u2014 centralized ownership, team moderation, all data on-chain, login with Dash",
   "license": "MIT",
   "scripts": {
     "dev": "next dev",
@@ -23,7 +23,8 @@
     "platform-auth": "file:vendor/platform-auth",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "@noble/hashes": "^1.7.0"
   },
   "devDependencies": {
     "@noble/curves": "^2.4.0",

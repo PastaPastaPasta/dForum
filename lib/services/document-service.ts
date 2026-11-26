@@ -13,6 +13,7 @@ import bs58check from 'bs58check'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { hash160 } from '@/lib/auth/protocol'
+import { stripModeratorFields, buildAuthorUpdate } from '@/lib/services/moderator-fields'
 
 export interface DocRef {
   id: string
@@ -198,7 +199,7 @@ export async function buildSigning(
 
   // Match the WIF against the identity's public keys, exactly as yappr does.
   const wifBytes = wifToPrivateKey(authKeyWif)
-  if (!wifBytes) return null
+  if (!wifBytes) { try { signer.free() } catch { /* already freed */ } return null }
   const { privateKey, compressed } = wifBytes
   const { getPublicKey } = await import('@noble/secp256k1')
   const publicKey = getPublicKey(privateKey, compressed)
@@ -213,6 +214,7 @@ export async function buildSigning(
   }>
 
   const hash160Pub = hash160(publicKey)
+  try {
   for (const key of identityKeys) {
     // skipped below — purpose/level are checked before any match is trusted.
     const disabledAt = key.disabledAt === undefined || key.disabledAt === null ? null : Number(key.disabledAt)
@@ -236,7 +238,12 @@ export async function buildSigning(
     const wasmKey = identity.getPublicKeyById(key.keyId)
     if (wasmKey) return { identityId, identityKey: wasmKey, signer }
   }
+  try { signer.free() } catch { /* already freed */ }
   return null
+  } catch (e) {
+    try { signer.free() } catch { /* already freed */ }
+    throw e
+  }
 }
 
 function wifToPrivateKey(wif: string): { privateKey: Uint8Array; compressed: boolean } | null {
@@ -309,21 +316,25 @@ export async function createDocument(
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
-  const entropy = crypto.getRandomValues(new Uint8Array(32))
-  const nonce = await freshNonce(identityId)
-  const document = new Document({
-    properties: properties as Record<string, unknown>,
-    documentTypeName: type,
-    dataContractId: CONTRACT_ID,
-    ownerId: identityId,
-    revision: 1n,
-    entropy,
-    identityContractNonce: nonce,
-  })
-  const created = await sdk.documents.create({ document, identityKey: sign.identityKey as never, signer: sign.signer })
-  const normalized = normalizeDoc(created)
-  if (!normalized) throw new Error('Document create returned an unreadable document')
-  return normalized
+  try {
+    const entropy = crypto.getRandomValues(new Uint8Array(32))
+    const nonce = await freshNonce(identityId)
+    const document = new Document({
+      properties: stripModeratorFields(type, properties),
+      documentTypeName: type,
+      dataContractId: CONTRACT_ID,
+      ownerId: identityId,
+      revision: 1n,
+      entropy,
+      identityContractNonce: nonce,
+    })
+    const created = await sdk.documents.create({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+    const normalized = normalizeDoc(created)
+    if (!normalized) throw new Error('Document create returned an unreadable document')
+    return normalized
+  } finally {
+    try { sign.signer?.free?.() } catch { /* already freed */ }
+  }
 }
 
 export async function replaceDocument(
@@ -337,20 +348,27 @@ export async function replaceDocument(
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
-  const updatedProps = { ...existing.properties, ...properties }
-  const nonce = await freshNonce(identityId)
-  const document = new Document({
-    properties: updatedProps,
-    documentTypeName: existing.documentTypeName,
-    dataContractId: CONTRACT_ID,
-    ownerId: identityId,
-    revision: existing.revision + 1n,
-    id: existing.id,
-    identityContractNonce: nonce,
-  })
-  await sdk.documents.replace({ document, identityKey: sign.identityKey as never, signer: sign.signer })
-  const after = await get(existing.documentTypeName, existing.id)
-  if (!after) throw new Error('Replace returned but the document could not be re-read')
-  return after
+  try {
+    // Author-side write: stored moderator-owned values pass through unchanged
+    // (a moderator-set field must not be dropped or reset); the author may
+    // never set them.
+    const updatedProps = buildAuthorUpdate(existing.documentTypeName, existing.properties, properties)
+    const nonce = await freshNonce(identityId)
+    const document = new Document({
+      properties: updatedProps,
+      documentTypeName: existing.documentTypeName,
+      dataContractId: CONTRACT_ID,
+      ownerId: identityId,
+      revision: existing.revision + 1n,
+      id: existing.id,
+      identityContractNonce: nonce,
+    })
+    await sdk.documents.replace({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+    const after = await get(existing.documentTypeName, existing.id)
+    if (!after) throw new Error('Replace returned but the document could not be re-read')
+    return after
+  } finally {
+    try { sign.signer?.free?.() } catch { /* already freed */ }
+  }
 }
 

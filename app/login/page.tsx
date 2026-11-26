@@ -1,26 +1,75 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { MessageSquare, KeyRound, ShieldCheck, Sparkles } from 'lucide-react'
+import { MessageSquare, KeyRound, ShieldCheck, Sparkles, Loader2, ShieldAlert, ExternalLink } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { KeyExchangeModal } from '@/components/KeyExchangeModal'
 import { useSession } from '@/lib/session'
-import { Loader2 } from 'lucide-react'
+import { hostIsCanonical, canonicalHost } from '@/lib/host'
+import { useFrameBuster } from '@/lib/use-frame-buster'
 
 export default function LoginPage() {
   const { session, ready, authError } = useSession()
   const [showModal, setShowModal] = useState(false)
+  const [host, setHost] = useState('')
+  const [hostAcknowledged, setHostAcknowledged] = useState(false)
+  const [nextPath, setNextPath] = useState<string | null>(null)
+  const signedInRef = useRef<HTMLDivElement>(null)
+  const frameState = useFrameBuster()
 
-  const closeModal = useCallback(() => setShowModal(false), [])
+  // Read the host after hydration — during prerender there is no window.
+  useEffect(() => {
+    setHost(typeof window !== 'undefined' ? window.location.hostname : '')
+    const params = new URLSearchParams(window.location.search)
+    const next = params.get('next')
+    if (next && /^\/(?!\/)[^\s]*$/.test(next)) setNextPath(next)
+  }, [])
+
+  const canonical = hostIsCanonical(host)
+  const hostGateOpen = canonical || hostAcknowledged
+
+  const openModal = useCallback(() => setShowModal(true), [])
+  const closeModal = useCallback(() => {
+    setShowModal(false)
+    // Signed-in users land wherever they came from (e.g. a thread reply).
+    if (session && nextPath) window.location.assign(nextPath)
+  }, [session, nextPath])
+
+  // Announce the signed-in panel once the login modal closes.
+  useEffect(() => {
+    if (session) signedInRef.current?.focus?.()
+  }, [session])
 
   const alreadySignedIn = Boolean(session)
+
+  if (frameState === 'framed') {
+    return (
+      <>
+        <Navbar />
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
+          <div className="text-center fade-up max-w-md">
+            <ExternalLink className="w-8 h-8 text-[#4db3ff] mx-auto" aria-hidden="true" />
+            <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">In a frame</p>
+            <h1 className="text-2xl font-bold mt-2">Open dForum in its own tab</h1>
+            <p className="text-sm text-[#93a1bd] mt-2">
+              The login flow holds key material — it only runs on its own top-level page.
+            </p>
+            <a href={`https://${canonicalHost()}/login`} className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
+              Open in a new tab <ExternalLink className="w-4 h-4" />
+            </a>
+          </div>
+        </main>
+        <Footer />
+      </>
+    )
+  }
 
   return (
     <>
       <Navbar />
-      <main className="flex-1">
+      <main id="main" tabIndex={-1} className="flex-1">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
           <div className="grid md:grid-cols-2 gap-8 items-center">
             <div className="fade-up">
@@ -38,23 +87,44 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — no central server" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum keeps a HIGH-level auth key for this tab only" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum keeps a limited posting key for this tab only; your wallet key never leaves your wallet" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="All posts, profiles and reactions live on-chain" />
               </div>
 
               {alreadySignedIn ? (
-                <div className="mt-8 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+                <div ref={signedInRef} tabIndex={-1} className="mt-8 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4">
                   <p className="text-sm font-medium text-emerald-400">You are signed in</p>
                   <p className="text-xs text-[#93a1bd] mt-1 font-mono truncate">{session?.identityId}</p>
-                  <Link href="/" className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30 transition">
-                    Go to dForum
+                  <Link href={nextPath ?? '/'} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30 transition">
+                    {nextPath ? 'Continue to your page' : 'Go to dForum'}
                   </Link>
                 </div>
               ) : (
                 <>
+                  {!canonical && host && (
+                    <div className="mt-6 flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-xs text-amber-200">
+                      <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" aria-hidden="true" />
+                      <div>
+                        <p className="font-medium text-amber-300">Untrusted host — login</p>
+                        <p className="mt-1 text-amber-200/80">
+                          This page is served from <code>{host}</code>. The login flow and its keys are designed for{' '}
+                          <code>{canonicalHost()}</code>. Continue on hosts you control only.
+                        </p>
+                        <label className="mt-2 flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={hostAcknowledged}
+                            onChange={(e) => setHostAcknowledged(e.target.checked)}
+                            className="accent-[#008CE7]"
+                          />
+                          I understand the risk and want to log in on this host
+                        </label>
+                      </div>
+                    </div>
+                  )}
                   <button
-                    onClick={() => setShowModal(true)}
-                    disabled={!ready}
+                    onClick={openModal}
+                    disabled={!ready || !hostGateOpen}
                     className="mt-8 btn-primary px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20 disabled:opacity-60"
                   >
                     {!ready ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
@@ -74,7 +144,7 @@ export default function LoginPage() {
                 <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dash-key: code shown in the login modal." />
                 <Step number={2} title="Approve the request" body="Confirm the key-exchange request in your wallet." />
                 <Step number={3} title="Keys registered (first login)" body="On first login you'll register auth keys with dForum — scan a second code." />
-                <Step number={4} title="You're in" body="Your session lives in this tab only — the app never holds your wallet key." />
+                <Step number={4} title="You're in" body="Your session lives in this tab only — your wallet key never leaves your wallet." />
               </ol>
             </div>
           </div>

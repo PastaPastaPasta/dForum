@@ -26,6 +26,7 @@ const stub = {
   categories: [],
   forums: [],
   threads: [],
+  profiles: {},
 };
 mkdirSync('data', { recursive: true });
 writeFileSync('data/snapshot.json', JSON.stringify(stub, null, 2) + '\n');

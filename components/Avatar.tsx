@@ -16,8 +16,9 @@ export function Avatar({ name, id, size = 'md' }: { name: string; id?: string | 
   return (
     <span
       className={`inline-flex items-center justify-center rounded-full font-semibold text-white shrink-0 ${cls}`}
-      style={{ background: `linear-gradient(135deg, hsl(${hue} 70% 48%), hsl(${(hue + 40) % 360} 70% 38%))` }}
+      style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 32%), hsl(${(hue + 40) % 360} 55% 28%))` }}
       title={name}
+      aria-hidden="true"
     >
       {initials(name)}
     </span>

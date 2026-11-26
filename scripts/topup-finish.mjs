@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { getPublicKey } from '@noble/secp256k1';
 import { AssetLockProof, EvoSDK, Identity, OutPoint, PrivateKey } from '@dashevo/evo-sdk';
+import { redactWif } from './lib/redact.mjs';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -40,6 +41,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code', 'cause']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', parts.join(' | ').replace(/\b[c9][1-9A-HJ-NP-Za-km-z]{50,51}\b/g, '<redacted-wif>'));
+  console.error('ERROR:', redactWif(parts.join(' | ')));
   process.exit(1);
 });

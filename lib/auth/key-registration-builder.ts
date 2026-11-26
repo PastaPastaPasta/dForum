@@ -13,6 +13,7 @@ import * as secp256k1 from '@noble/secp256k1'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { hash160 } from '@/lib/auth/protocol'
 import { getSdk } from '@/lib/services/evo-sdk-service'
+import { decodeKeyDataBytes } from '@/lib/auth/decoder'
 
 const COMPACT_SIG_BASE = 27
 const COMPACT_SIG_COMPRESSED_FLAG = 4
@@ -190,14 +191,11 @@ export async function checkKeysRegistered(
   const keyData = (key: unknown): Uint8Array | null => {
     const raw = (key as { data?: unknown }).data as string | Uint8Array | undefined
     if (!raw) return null
-    if (raw instanceof Uint8Array) return raw
-    const hex = typeof raw === 'string' ? (raw.startsWith('0x') ? raw.slice(2) : raw) : null
-    if (hex && /^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0) {
-      const bytes = new Uint8Array(hex.length / 2)
-      for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-      return bytes
+    try {
+      return decodeKeyDataBytes(raw)
+    } catch {
+      return null
     }
-    return null
   }
 
   const publicKeys = identity.publicKeys as Array<{
@@ -205,16 +203,28 @@ export async function checkKeysRegistered(
     purpose: string
     securityLevel: string
     keyType: string
+    disabledAt?: bigint | number | null
   }>
+
+  // A key is only proof of registration when it is enabled (disabledAt unset)
+  // and at the security level the App Connect flow relies on — the HIGH
+  // auth key (document writes) and the MEDIUM encryption key (signed by it).
+  const enabled = (key: { disabledAt?: bigint | number | null }): boolean => {
+    const disabledAt = key.disabledAt === undefined || key.disabledAt === null ? null : Number(key.disabledAt)
+    return disabledAt === null
+  }
 
   const authKeyExists = publicKeys.some((key) => {
     const data = keyData(key)
     if (!data) return false
-    const purpose = key.purpose
-    const keyType = key.keyType
-    const isAuth = purpose === 'authentication' || purpose === 'AUTHENTICATION'
-    const isHash160 = keyType === 'ecdsa_hash160' || keyType === 'ECDSA_HASH160'
+    const purpose = String(key.purpose).toUpperCase()
+    const keyType = String(key.keyType).toUpperCase()
+    const level = String(key.securityLevel).toUpperCase()
+    const isAuth = purpose === 'AUTHENTICATION'
+    const isHash160 = keyType === 'ECDSA_HASH160'
     if (!isAuth || !isHash160) return false
+    if (level !== 'HIGH') return false
+    if (!enabled(key)) return false
     if (data.length !== authHash.length) return false
     return data.every((b, i) => b === authHash[i])
   })
@@ -222,11 +232,14 @@ export async function checkKeysRegistered(
   const encKeyExists = publicKeys.some((key) => {
     const data = keyData(key)
     if (!data) return false
-    const purpose = key.purpose
-    const keyType = key.keyType
-    const isEnc = purpose === 'encryption' || purpose === 'ENCRYPTION'
-    const isFull = keyType === 'ecdsa_secp256k1' || keyType === 'ECDSA_SECP256K1'
+    const purpose = String(key.purpose).toUpperCase()
+    const keyType = String(key.keyType).toUpperCase()
+    const level = String(key.securityLevel).toUpperCase()
+    const isEnc = purpose === 'ENCRYPTION'
+    const isFull = keyType === 'ECDSA_SECP256K1'
     if (!isEnc || !isFull) return false
+    if (level !== 'MEDIUM') return false
+    if (!enabled(key)) return false
     if (data.length !== encryptionPublicKey.length) return false
     return data.every((b, i) => b === encryptionPublicKey[i])
   })

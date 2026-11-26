@@ -3,7 +3,9 @@
 /**
  * Batch-resolve profile display names for a set of identity ids.
  * Results are cached module-wide (names rarely change) and fall back to the
- * truncated id until loaded.
+ * truncated id until loaded. Profiles hidden by a moderator resolve to
+ * "Hidden profile" — never their name. A failed read is not cached: the next
+ * render retries it.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { query } from '@/lib/services/document-service'
@@ -26,14 +28,18 @@ export function useProfileNames(ids: (string | null | undefined)[]): Record<stri
     Promise.all(missing.map(async (id) => {
       try {
         const d = await query('profile', { where: [['$ownerId', '==', id]], limit: 1 })
-        const name = d[0]?.properties?.displayName
+        const doc = d[0]
+        if (doc?.properties?.modState != null) {
+          cache.set(id, 'Hidden profile')
+          return [id, 'Hidden profile'] as const
+        }
+        const name = doc?.properties?.displayName
         const resolved = typeof name === 'string' && name.trim() ? name.trim() : shortId(id, 12)
         cache.set(id, resolved)
         return [id, resolved] as const
       } catch {
-        const resolved = shortId(id, 12)
-        cache.set(id, resolved)
-        return [id, resolved] as const
+        // Not cached — a transient failure must not freeze the fallback forever.
+        return [id, shortId(id, 12)] as const
       }
     })).then((entries) => {
       if (cancelled) return

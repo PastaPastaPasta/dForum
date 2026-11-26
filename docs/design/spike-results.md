@@ -37,7 +37,7 @@ Recorded 2026-11-26. Contract `ozZNp21WNWLx79aJXFo2ScEaMtBc9vvfUonqmzADM16` (tea
 
 All five document types land well under the 0.005 DASH aspiration (post 0.00134, thread 0.00164). A post create writes five index entries (byThread, byForum, byAuthor, recent, byUpdated) — `moderated` is skipped because $moderatedAt is absent at create. A thread create writes four plus one byTag entry per tag (byForum, byAuthor, recent, byUpdated). Fee follows the platform's per-index write model. No re-registration needed. Fee target (< 0.005 DASH) verified across the board.
 
-**S8 probe — DONE (2026-11-26).** One live ~2 KB body post (1,898 bytes, 1,896 chars) on the seeded contract: 151,910,540 credits = **0.00152 DASH** (7229 ms). Body length does not materially move the fee — the per-index write model (5 entries at create) dominates as expected. Fee target (< 0.005 DASH per write) is met across the board.
+**S8 probe — DONE (2026-11-26).** One live ~2 KB body post (1,898 bytes, 1,896 chars) on the seeded contract: 151,910,540 credits = **0.00152 DASH** (7229 ms). Body length does not materially move the fee — the per-index write model (5 entries at create) dominates as expected. Fee target (< 0.005 DASH per write) is met across the board. The probe post exists on the testnet seed thread (id `DeiHv4nj1cui6NTGbuumcWN7AWUWMzP6cLFRm5GLRy6r`, body starts "S8 body probe — "). **It must not be deleted** — it is the fee evidence for posting; leave it live. Documented here so a later cleanup pass does not remove it.
 
 ## Seed documents (real test data on the testnet contract)
 | type | id |
@@ -47,4 +47,5 @@ All five document types land well under the 0.005 DASH aspiration (post 0.00134,
 | forum | `B3F2hJCE6N8ZgDZpbBwKm3JWXYQYmekJed54JaRvENDh` |
 | thread | `2cZ7p1ZzYuziaDSiGSpmwu7aK7R8SMoDD7Z6bLsGYVap` |
 | post | `FGejahwvKYGx4wywcnFtHP3vvrm6nmnvTT56YdRjdtor` |
+| post (S8 probe) | `DeiHv4nj1cui6NTGbuumcWN7AWUWMzP6cLFRm5GLRy6r` — keep; fee-probe evidence, do not delete |
 | reaction | `Gunb9VtVvavzdjmVUabR3TpU7f1a2MeRGwwP1gUJRbq1` |

@@ -14,32 +14,47 @@ export function Navbar() {
   const [isModerator, setIsModerator] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+
+  const sessionIdentityId = session?.identityId ?? null
 
   useEffect(() => {
-    if (!session) {
+    if (!sessionIdentityId) {
       setIsModerator(false)
       return
     }
     let cancelled = false
-    getRoster()
-      .then((roster) => {
-        if (cancelled) return
-        setIsModerator(Boolean(roster && (roster.ownerId === session.identityId || roster.appointed.includes(session.identityId))))
-      })
-      .catch(() => setIsModerator(false))
-    return () => { cancelled = true }
-  }, [session])
+    // Defer the roster fetch to idle time — the navbar renders instantly from
+    // the session; the moderator affordance appears when the roster resolves.
+    const timer = setTimeout(() => {
+      getRoster()
+        .then((roster) => {
+          if (cancelled) return
+          setIsModerator(Boolean(roster && (roster.ownerId === sessionIdentityId || roster.appointed.includes(sessionIdentityId))))
+        })
+        .catch(() => setIsModerator(false))
+    }, 0)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [sessionIdentityId])
 
   // Close the account menu on navigation / outside click / Escape.
+  // Escape returns focus to the trigger button — the dropdown is a menu-like
+  // disclosure (no arrow-key nav exists), so no menu/menuitem roles.
   useEffect(() => {
     setMenuOpen(false)
   }, [pathname])
   useEffect(() => {
     if (!menuOpen) return
+    const trigger = menuTriggerRef.current
     const onDocClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false)
+        trigger?.focus()
+      }
+    }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
@@ -66,7 +81,7 @@ export function Navbar() {
           </Link>
         </div>
 
-        <nav className="flex items-center gap-1 text-sm">
+        <nav aria-label="Account" className="flex items-center gap-1 text-sm">
           {!ready ? (
             <span className="inline-block w-24 h-9 rounded-lg bg-[#18233c] animate-pulse" aria-hidden="true" />
           ) : session ? (
@@ -79,12 +94,19 @@ export function Navbar() {
                 <Pencil className="w-4 h-4" aria-hidden="true" />
                 <span className="hidden sm:inline">New thread</span>
               </Link>
-              <div className="relative" ref={menuRef}>
+              <div
+                className="relative"
+                ref={menuRef}
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setMenuOpen(false)
+                }}
+              >
                 <button
+                  ref={menuTriggerRef}
                   type="button"
                   onClick={() => setMenuOpen((o) => !o)}
                   aria-expanded={menuOpen}
-                  aria-haspopup="menu"
+                  {...(menuOpen ? { 'aria-controls': 'account-menu' } : {})}
                   aria-label="Account menu"
                   className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg border border-[#22304e] hover:border-[#008CE7] transition shrink-0"
                 >
@@ -94,20 +116,19 @@ export function Navbar() {
                   </span>
                 </button>
                 {menuOpen && (
-                  <div role="menu" aria-label="Account" className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-[#22304e] bg-[#111a2e] shadow-xl overflow-hidden z-50">
-                    <Link role="menuitem" href={`/u/${encodeURIComponent(session.identityId)}`} className="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-[#18233c] transition">
+                  <div id="account-menu" aria-label="Account" className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-[#22304e] bg-[#111a2e] shadow-xl overflow-hidden z-50">
+                    <Link href={`/u/${encodeURIComponent(session.identityId)}`} className="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-[#18233c] transition">
                       <User className="w-4 h-4 text-[#93a1bd]" aria-hidden="true" /> Profile
                     </Link>
-                    <Link role="menuitem" href="/settings" className="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-[#18233c] transition">
+                    <Link href="/settings" className="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-[#18233c] transition">
                       <Settings className="w-4 h-4 text-[#93a1bd]" aria-hidden="true" /> Settings
                     </Link>
                     {isModerator && (
-                      <Link role="menuitem" href="/moderation" aria-current={pathname.startsWith('/moderation') ? 'page' : undefined} className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#4db3ff] hover:bg-[#18233c] transition">
+                      <Link href="/moderation" aria-current={pathname.startsWith('/moderation') ? 'page' : undefined} className="flex items-center gap-2 px-4 py-2.5 text-sm text-[#4db3ff] hover:bg-[#18233c] transition">
                         <Shield className="w-4 h-4" aria-hidden="true" /> Moderate
                       </Link>
                     )}
                     <button
-                      role="menuitem"
                       type="button"
                       onClick={async () => { setMenuOpen(false); await signOut() }}
                       className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition border-t border-[#22304e]"

@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { Lock } from 'lucide-react'
 import { Avatar } from '@/components/Avatar'
-import { formatRelativeTime, isModerated } from '@/lib/utils'
+import { RelativeTime } from '@/components/RelativeTime'
+import { isModerated } from '@/lib/utils'
 
 export interface ThreadRowData {
   id: string
@@ -35,7 +36,7 @@ export function ThreadRow({ thread, nameOf }: { thread: ThreadRowData; nameOf?: 
           <p className="font-medium truncate group-hover:text-[#4db3ff] transition">{thread.title}</p>
         </div>
         <p className="text-xs text-[#93a1bd] mt-0.5 truncate">
-          {authorName ?? 'dForum'} · {thread.forumSlug ?? 'dForum'} · {formatRelativeTime(thread.createdAt)}
+          {authorName ?? 'dForum'} · {thread.forumSlug ?? 'dForum'} · <RelativeTime time={thread.createdAt} />
           {thread.tags.slice(0, 3).map((tag) => ` · #${tag}`).join('')}
         </p>
       </div>

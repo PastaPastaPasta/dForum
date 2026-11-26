@@ -25,6 +25,7 @@ import {
 } from '@dashevo/evo-sdk';
 import { buildAssetLock } from './lib/asset-lock.mjs';
 import { broadcastRaw, waitForMined, fetchTestnetNodes, getBlockchainStatus } from './lib/dapi.mjs';
+import { redactWif } from './lib/redact.mjs';
 
 const TESTNET_P2PKH_VERSION = 0x8c;
 
@@ -32,7 +33,7 @@ function describeErr(e) {
   const parts = [];
   for (const k of ['message', 'name', 'code', 'cause']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  return parts.join(' | ').replace(/\b[c9][1-9A-HJ-NP-Za-km-z]{50,51}\b/g, '<redacted-wif>');
+  return redactWif(parts.join(' | '));
 }
 
 async function main() {

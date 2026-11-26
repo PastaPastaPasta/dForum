@@ -27,13 +27,10 @@ export const viewport: Viewport = {
   themeColor: '#0b1220',
 }
 
-const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ''
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
       <head>
-        <link rel="icon" href={`${BASE_PATH}/icon.svg`} type="image/svg+xml" />
         <meta
           httpEquiv="Content-Security-Policy"
           content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; base-uri 'self'; form-action 'self'"
@@ -41,6 +38,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="bg-[#0b1220] text-[#e8edf7] antialiased">
         <SessionProvider>
+          <a
+            href="#main"
+            className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-[#0070c0] focus:px-4 focus:py-2 focus:text-white"
+          >
+            Skip to content
+          </a>
           <div className="min-h-screen flex flex-col">{children}</div>
         </SessionProvider>
       </body>

@@ -24,9 +24,9 @@ Native Dash Platform contract moderation (protocol 14), per contract. Deployer p
 - change fields (changeFields): `sticky`, `lockedAt`, `modState`, `modNote` (thread); `modState`, `modNote` (post); `status`, `resolution` (report); `customTitle`, `modState` (profile).
 - Moderator-only fields are never set by the author (create refuses: 41124) and never listed in a unique index, nor referenced by another property.
 
-## Signing (spike S1 — do not skip)
+## Signing (S1 — decided)
 
-Moderation transitions need a CRITICAL authentication key WITHOUT contract bounds ("not there yet" for contract-bound moderation keys). The App Connect session key probably cannot sign them, so moderators sign through their wallet (dash-st:/dsa pattern) or a moderator console. Until S1 proves what works, the moderation UI must offer "sign with your wallet" as the primary path and show the CRITICAL-key requirement.
+Moderation transitions need a CRITICAL authentication key. The App Connect session key is HIGH-level and cannot sign moderation — the moderator console (`/moderation`) pastes the operator's CRITICAL WIF and signs in-tab (freed on wipe: pagehide, tab-hide, in-app navigation, 10-minute idle, unmount). The owner keeps the owner CRITICAL key offline for contract updates; the console refuses the owner key off localhost (the roster is fetched fresh and fail-closed). Design note: contract-bound moderation keys do not exist yet — the CRITICAL key is identity-level, same as App Connect.
 
 ## Behavior rules
 
@@ -36,4 +36,4 @@ Moderation transitions need a CRITICAL authentication key WITHOUT contract bound
 - Locked threads (lockedAt set): clients ignore posts with $createdAt > lockedAt; the snapshot drops those posts from the static index and the thread is listed too (URL still renders live). The network never enforces the lock (S3).
 - Reports are public on-chain, reporter included (UI says so).
 - Moderation semantics (settled 2026-11-26): every render path (client, snapshot, sitemap) treats a non-null modState as hidden. Snapshot exclusion happens at both thread and post level; orphan-filtered threads are also excluded from the static index.
-- Orphan rule (settled 2026-11-26): a thread is listed only when its opening post exists — the earliest visible post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`). Posts by others created before it are dropped for listing. The snapshot and the client both apply it.
+- Orphan rule (settled 2026-11-26, amended 2026-11-26): the opening post is the earliest post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`) — regardless of its moderation state. A thread is listed only when that opening post exists AND is itself visible (not hidden, not past the lock). A hidden opening post means the thread is hidden — shown nowhere. Posts (by anyone) created before the opening post are dropped for listing. The snapshot and the client both apply the rule.

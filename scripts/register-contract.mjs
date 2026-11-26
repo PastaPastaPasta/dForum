@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DataContract, DataContractCreateTransition, EvoSDK, IdentityPublicKey, PrivateKey } from '@dashevo/evo-sdk';
 import { criticalAuthKey, deriveIdentityKeys, loadMnemonic } from './derive-identities.mjs';
+import { redactWif } from './lib/redact.mjs';
 
 const PROTOCOL_VERSION = 14;
 const MAX_STATE_TRANSITION_SIZE = 20480;
@@ -143,7 +144,7 @@ try {
   const parts2 = [];
   let c = e;
   while (c && parts2.length < 6) { if (c.cause) { parts2.push(`cause.${c.cause?.name ?? 'x'}: ${c.cause?.message ?? c.cause}`); c = c.cause; } else break; }
-  console.error(`broadcast failed: ${parts.join(' | ')}${parts2.length ? ' | ' + parts2.join(' | ') : ''}`);
+  console.error(`broadcast failed: ${redactWif(parts.join(' | '))}${parts2.length ? ' | ' + redactWif(parts2.join(' | ')) : ''}`);
   process.exit(1);
 }
 
@@ -183,6 +184,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code', 'cause']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', parts.join(' | '));
+  console.error('ERROR:', redactWif(parts.join(' | ')));
   process.exit(1);
 });

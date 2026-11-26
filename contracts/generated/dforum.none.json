@@ -3,7 +3,7 @@
   "id": "PV5ERAp8YpWhfpG2K8kEYoCEshKM2VgkY4UQyUQCUMCc",
   "ownerId": "PV5ERAp8YpWhfpG2K8kEYoCEshKM2VgkY4UQyUQCUMCc",
   "version": 1,
-  "description": "dForum: a forum on Dash Platform, owned and moderated by the deployer team.",
+  "description": "dForum: a forum on Dash Platform, unmoderated (nothing removable at consensus).",
   "config": {
     "$formatVersion": "2",
     "canBeDeleted": false,

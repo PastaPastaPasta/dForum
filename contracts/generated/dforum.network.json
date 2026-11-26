@@ -3,7 +3,7 @@
   "id": "PV5ERAp8YpWhfpG2K8kEYoCEshKM2VgkY4UQyUQCUMCc",
   "ownerId": "PV5ERAp8YpWhfpG2K8kEYoCEshKM2VgkY4UQyUQCUMCc",
   "version": 1,
-  "description": "dForum: a forum on Dash Platform, owned and moderated by the deployer team.",
+  "description": "dForum: a forum on Dash Platform, elected moderation (testnet only, not for production).",
   "config": {
     "$formatVersion": "2",
     "canBeDeleted": false,
@@ -25,19 +25,31 @@
         "moderatedDocumentTypes": {
           "thread": [
             "deleteDocuments",
-            "changeDocumentFields"
+            "changeDocumentFields",
+            "ban",
+            "suspend",
+            "warn"
           ],
           "post": [
             "deleteDocuments",
-            "changeDocumentFields"
+            "changeDocumentFields",
+            "ban",
+            "suspend",
+            "warn"
           ],
           "report": [
             "deleteDocuments",
-            "changeDocumentFields"
+            "changeDocumentFields",
+            "ban",
+            "suspend",
+            "warn"
           ],
           "profile": [
             "deleteDocuments",
-            "changeDocumentFields"
+            "changeDocumentFields",
+            "ban",
+            "suspend",
+            "warn"
           ]
         },
         "interim": {

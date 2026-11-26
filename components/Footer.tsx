@@ -1,3 +1,5 @@
+import { NETWORK } from '@/lib/constants'
+
 export function Footer() {
   return (
     <footer className="border-t border-[#22304e] mt-12">
@@ -7,7 +9,7 @@ export function Footer() {
           <p className="mt-1">A decentralized forum on Dash Platform</p>
         </div>
         <div className="text-xs leading-relaxed">
-          All data on-chain · Login with Dash · Testnet build
+          All data on-chain · Login with Dash · {NETWORK === 'mainnet' ? 'Mainnet' : `${NETWORK.charAt(0).toUpperCase() + NETWORK.slice(1)} build`}
         </div>
       </div>
     </footer>

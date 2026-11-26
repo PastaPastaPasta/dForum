@@ -1,14 +1,17 @@
 import type { Metadata } from 'next'
 import ThreadClient from '@/components/ThreadClient'
-import { loadSnapshot } from '@/lib/services/snapshot-service'
+import { loadSnapshot, getStaticPosts } from '@/lib/services/snapshot-server'
 
 export const dynamicParams = false
 
 export function generateStaticParams() {
   const snap = loadSnapshot()
-  if (snap.threads.length === 0) {
-    throw new Error('[dForum] Snapshot has no threads — run `node scripts/snapshot.mjs` before building (the static index is generated from the platform).')
-  }
+  // Empty snapshot → one placeholder param, never zero: Next's export build
+  // throws on an empty param list. The placeholder renders the normal client
+  // component, which shows the live-fallback ("not found / loading") state —
+  // the SPA fallback covers the gap and the last good deploy keeps serving.
+  if (snap.threads.length === 0) return [{ id: '__stub__' }]
+  // A hidden/orphan thread is deliberately never prerendered.
   return snap.threads.map((t) => ({ id: t.id }))
 }
 
@@ -22,5 +25,8 @@ export function generateMetadata({ params }: { params: { id: string } }): Metada
 }
 
 export default function ThreadRoute({ params }: { params: { id: string } }) {
-  return <ThreadClient threadId={params.id} />
+  const snap = loadSnapshot()
+  const thread = snap.threads.find((t) => t.id === params.id) ?? null
+  const initialPosts = getStaticPosts(params.id)
+  return <ThreadClient threadId={params.id} snapshotThread={thread} initialPosts={initialPosts} />
 }

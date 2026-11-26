@@ -67,11 +67,11 @@ export default function NotFound() {
     return (
       <>
         <Navbar />
-        <main className="flex-1 flex items-center justify-center px-6">
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="w-full max-w-3xl space-y-3">
-            <div className="h-4 w-24 rounded bg-[#18233c] animate-pulse" />
-            <div className="h-8 w-3/4 rounded bg-[#18233c] animate-pulse" />
-            <div className="h-4 w-1/2 rounded bg-[#18233c] animate-pulse" />
+            <div aria-hidden="true" className="h-4 w-24 rounded bg-[#18233c] animate-pulse" />
+            <div aria-hidden="true" className="h-8 w-3/4 rounded bg-[#18233c] animate-pulse" />
+            <div aria-hidden="true" className="h-4 w-1/2 rounded bg-[#18233c] animate-pulse" />
           </div>
         </main>
         <Footer />
@@ -80,15 +80,17 @@ export default function NotFound() {
   }
 
   if (mode) {
-    if (mode.kind === 'thread') return <ThreadClient threadId={mode.value} />
-    if (mode.kind === 'forum') return <ForumClient slug={mode.value} />
-    return <ProfileClient identityId={mode.value} />
+    // The SPA fallback renders the same client components with no prerendered
+    // data — they fall back to live queries (and their not-found states).
+    if (mode.kind === 'thread') return <ThreadClient threadId={mode.value} snapshotThread={null} initialPosts={[]} />
+    if (mode.kind === 'forum') return <ForumClient slug={mode.value} snapshot={null} />
+    return <ProfileClient identityId={mode.value} snapshot={null} />
   }
 
   return (
     <>
       <Navbar />
-      <main className="flex-1 flex items-center justify-center px-6">
+      <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
         <div className="text-center fade-up">
           <p className="text-sm uppercase tracking-widest text-[#93a1bd]">404</p>
           <h1 className="text-3xl font-bold mt-2">Page not found</h1>

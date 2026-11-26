@@ -56,19 +56,9 @@ function write(key: string, value: string | null): void {
   }
 }
 
-/** Decode a key-data field the same way document-service does: hex if it
- * decodes as hex, else base64. */
-function decodeKeyDataBytes(data: Uint8Array | string): Uint8Array {
-  if (data instanceof Uint8Array) return data
-  const str = String(data)
-  if (/^(?:[0-9a-fA-F]{2})+$/.test(str) && str.length % 2 === 0) {
-    const bytes = new Uint8Array(str.length / 2)
-    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16)
-    return bytes
-  }
-  return fromBase64(str)
-}
+import { decodeKeyDataBytes as decodeKeyDataBytesShared, decodeWif as decodeWifShared } from '@/lib/auth/decoder'
 
+/** Mirror document-service's encode side: hex if it decodes as hex, else assume base64 already. */
 function toBase64FromString(str: string): string {
   // Mirror document-service: hex if it decodes as hex, else assume base64 already.
   if (/^(?:[0-9a-fA-F]{2})+$/.test(str) && str.length % 2 === 0) {
@@ -261,15 +251,9 @@ function securityLevelToNumber(level: string): number {
 // ---- crypto port ------------------------------------------------------------
 
 function decodeWif(wif: string): { privateKey: Uint8Array; compressed: boolean } {
-  const decoded = bs58check.decode(wif)
-  // decoded[0] = prefix (0xef testnet / 0xcc mainnet)
-  if (decoded.length === 34 && decoded[33] === 0x01) {
-    return { privateKey: decoded.slice(1, 33), compressed: true }
-  }
-  if (decoded.length === 33) {
-    return { privateKey: decoded.slice(1, 33), compressed: false }
-  }
-  throw new Error('Invalid WIF format')
+  const decoded = decodeWifShared(wif, NETWORK)
+  if (!decoded) throw new Error(`Invalid ${NETWORK} WIF`)
+  return decoded
 }
 
 function encodeWif(privateKey: Uint8Array, network: NetworkName, compressed: boolean): string {
@@ -296,8 +280,15 @@ export const cryptoPort = {
       const sdk = await getSdk()
       const identity = await sdk.identities.fetch(identityId)
       if (!identity) return false
-      return (identity.publicKeys as Array<{ data: Uint8Array | string; keyType: string }>).some((key) => {
-        const data = decodeKeyDataBytes(key.data)
+      return (identity.publicKeys as Array<{ data: Uint8Array | string; keyType: string; purpose?: string; securityLevel?: string; disabledAt?: bigint | number | null }>).some((key) => {
+        // Only an enabled AUTHENTICATION key whose level is HIGH or CRITICAL
+        // may be trusted — a MEDIUM/low or disabled key must never pass.
+        if (String(key.purpose ?? '').toUpperCase() !== 'AUTHENTICATION') return false
+        const level = String(key.securityLevel ?? '').toUpperCase()
+        if (level !== 'HIGH' && level !== 'CRITICAL') return false
+        const disabledAt = key.disabledAt === undefined || key.disabledAt === null ? null : Number(key.disabledAt)
+        if (disabledAt !== null && disabledAt > 0) return false
+        const data = decodeKeyDataBytesShared(key.data)
         if (data.length === hash.length) return data.every((b, i) => b === hash[i])
         if (data.length === publicKey.length) return data.every((b, i) => b === publicKey[i])
         return false
@@ -317,6 +308,9 @@ export const cryptoPort = {
 }
 
 // ---- key-exchange port ------------------------------------------------------
+
+/** Response doc ids already handed out — a poll must never replay the same one. */
+const seenResponseIds = new Set<string>()
 
 function toBase64OfBytes(data: unknown): Uint8Array | null {
   if (data instanceof Uint8Array) return data
@@ -358,6 +352,11 @@ export const keyExchangePort: YapprKeyExchangePort = {
     const contractIdBase58 = bs58.encode(contractIdBytes)
     const hashBase64 = toBase64(appEphemeralPubKeyHash)
 
+    // Oldest-first and several candidates, not one: a malformed or
+    // attacker-posted document must never wedge the poll — skip
+    // structurally invalid docs and only return ones that can decrypt.
+    // Docs already returned are remembered and skipped so the poll cannot
+    // hand the same response back twice.
     const page = await sdk.documents.query({
       dataContractId: KEY_EXCHANGE_CONTRACT_ID,
       documentTypeName: 'loginKeyResponse',
@@ -365,31 +364,37 @@ export const keyExchangePort: YapprKeyExchangePort = {
         ['contractId', '==', contractIdBase58],
         ['appEphemeralPubKeyHash', '==', hashBase64],
       ],
-      limit: 1,
+      orderBy: [['$createdAt', 'asc']],
+      limit: 10,
     })
 
-    const doc = page.values().next().value
-    if (!doc) return null
-    const obj = (doc.toObject?.() ?? doc) as Record<string, unknown>
-    const walletEphemeralPubKey = toBase64OfBytes(obj.walletEphemeralPubKey)
-    const encryptedPayload = toBase64OfBytes(obj.encryptedPayload)
-    const keyIndex = Number(obj.keyIndex ?? 0)
-    if (!walletEphemeralPubKey || !encryptedPayload) {
-      throw new Error('Malformed key exchange response document')
+    for (const doc of page.values()) {
+      if (!doc) continue
+      const obj = (doc.toObject?.() ?? doc) as Record<string, unknown>
+      const idRaw = obj.$id ?? obj.id
+      const idString = typeof idRaw === 'string' ? idRaw : String(idRaw ?? '')
+      if (!idString || seenResponseIds.has(idString)) continue
+      const walletEphemeralPubKey = toBase64OfBytes(obj.walletEphemeralPubKey)
+      const encryptedPayload = toBase64OfBytes(obj.encryptedPayload)
+      const keyIndex = Number(obj.keyIndex ?? 0)
+      if (!walletEphemeralPubKey || walletEphemeralPubKey.length !== 33) continue
+      if (!encryptedPayload || encryptedPayload.length < 60) continue
+      const ownerRaw = obj.$ownerId ?? obj.ownerId
+      const ownerId = typeof ownerRaw === 'string' ? ownerRaw : String(ownerRaw ?? '')
+      if (!ownerId) continue
+      seenResponseIds.add(idString)
+      return {
+        $id: idString,
+        $ownerId: ownerId,
+        $revision: Number(obj.$revision ?? obj.revision ?? 1),
+        contractId: contractIdBytes,
+        appEphemeralPubKeyHash,
+        walletEphemeralPubKey,
+        encryptedPayload,
+        keyIndex,
+      }
     }
-    const ownerRaw = obj.$ownerId ?? obj.ownerId
-    const ownerId = typeof ownerRaw === 'string' ? ownerRaw : String(ownerRaw ?? '')
-    const idRaw = obj.$id ?? obj.id
-    return {
-      $id: typeof idRaw === 'string' ? idRaw : String(idRaw ?? ''),
-      $ownerId: ownerId,
-      $revision: Number(obj.$revision ?? obj.revision ?? 1),
-      contractId: contractIdBytes,
-      appEphemeralPubKeyHash,
-      walletEphemeralPubKey,
-      encryptedPayload,
-      keyIndex,
-    }
+    return null
   },
 
   async buildUnsignedKeyRegistrationTransition(request) {

@@ -11,6 +11,7 @@
  */
 import { ContractUserModeration, IdentitySigner, PrivateKey, IdentityPublicKey } from '@dashevo/evo-sdk';
 import { criticalAuthKey, deriveIdentityKeys } from '../derive-identities.mjs';
+import { redactWif } from '../lib/redact.mjs';
 
 async function main() {
   const ownerArg = process.argv[2] ?? '6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM';
@@ -52,6 +53,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('S1 FAIL:', parts.join(' | '));
+  console.error('S1 FAIL:', redactWif(parts.join(' | ')));
   process.exit(1);
 });
