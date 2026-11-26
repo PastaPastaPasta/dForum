@@ -234,6 +234,10 @@ export default function ModerationPage() {
   }
 
   const canOperate = Boolean(admin)
+  const adminIdentityId = identityId.trim()
+  // Consensus forbids moderating documents (or identities) the moderator owns.
+  const ownsDoc = (doc: ModeratableDoc) => Boolean(admin && adminIdentityId && doc.ownerId === adminIdentityId)
+  const isSelfTarget = Boolean(admin && adminIdentityId && targetId.trim() === adminIdentityId)
 
   return (
     <>
@@ -384,7 +388,7 @@ export default function ModerationPage() {
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <ActionButton
-                      disabled={!canOperate || actionBusy != null || !banReason.trim()}
+                      disabled={!canOperate || actionBusy != null || !banReason.trim() || isSelfTarget}
                       busy={actionBusy === 'ban'}
                       icon={<Ban className="w-3.5 h-3.5" />}
                       label="Ban"
@@ -392,7 +396,7 @@ export default function ModerationPage() {
                       onClick={() => act('ban', () => banUser(admin!, targetId.trim(), banReason.trim()))}
                     />
                     <ActionButton
-                      disabled={!canOperate || actionBusy != null}
+                      disabled={!canOperate || actionBusy != null || isSelfTarget}
                       busy={actionBusy === 'unban'}
                       icon={<Undo2 className="w-3.5 h-3.5" />}
                       label="Unban"
@@ -400,7 +404,7 @@ export default function ModerationPage() {
                       onClick={() => act('unban', () => unbanUser(admin!, targetId.trim()))}
                     />
                     <ActionButton
-                      disabled={!canOperate || actionBusy != null || !suspendReason.trim() || !Number(suspendHours)}
+                      disabled={!canOperate || actionBusy != null || !suspendReason.trim() || !Number(suspendHours) || isSelfTarget}
                       busy={actionBusy === 'suspend'}
                       icon={<Clock className="w-3.5 h-3.5" />}
                       label="Suspend"
@@ -408,7 +412,7 @@ export default function ModerationPage() {
                       onClick={() => act('suspend', () => suspendUser(admin!, targetId.trim(), BigInt(Date.now() + Number(suspendHours) * 3600 * 1000), suspendReason.trim()))}
                     />
                     <ActionButton
-                      disabled={!canOperate || actionBusy != null}
+                      disabled={!canOperate || actionBusy != null || isSelfTarget}
                       busy={actionBusy === 'unsuspend'}
                       icon={<Unlock className="w-3.5 h-3.5" />}
                       label="Unsuspend"
@@ -416,7 +420,7 @@ export default function ModerationPage() {
                       onClick={() => act('unsuspend', () => unsuspendUser(admin!, targetId.trim()))}
                     />
                     <ActionButton
-                      disabled={!canOperate || actionBusy != null || !warnReason.trim()}
+                      disabled={!canOperate || actionBusy != null || !warnReason.trim() || isSelfTarget}
                       busy={actionBusy === 'warn'}
                       icon={<Bell className="w-3.5 h-3.5" />}
                       label="Warn"
@@ -424,7 +428,7 @@ export default function ModerationPage() {
                       onClick={() => act('warn', () => warnUser(admin!, targetId.trim(), warnReason.trim()))}
                     />
                     <ActionButton
-                      disabled={!canOperate || actionBusy != null}
+                      disabled={!canOperate || actionBusy != null || isSelfTarget}
                       busy={actionBusy === 'clearWarnings'}
                       icon={<BellOff className="w-3.5 h-3.5" />}
                       label="Clear warnings"
@@ -434,7 +438,10 @@ export default function ModerationPage() {
                   </div>
                 </>
               )}
-              {!status && !statusLoading && (
+              {isSelfTarget && (
+                <p className="mt-4 text-xs text-amber-400">The chain refuses to moderate your own identity — pick another identity to moderate.</p>
+              )}
+              {!status && !statusLoading && !isSelfTarget && (
                 <p className="mt-4 text-sm text-[#93a1bd]">Enter an identity ID and press the refresh button to read its status.</p>
               )}
             </section>
@@ -458,17 +465,20 @@ export default function ModerationPage() {
                   <span className={`text-[10px] uppercase tracking-wider rounded px-1.5 py-0.5 border shrink-0 ${doc.type === 'thread' ? 'text-[#4db3ff] border-[#4db3ff]/40' : 'text-emerald-400 border-emerald-400/30'}`}>{doc.type}</span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm truncate">{doc.title}</p>
-                    <p className="text-xs text-[#93a1bd]">{shortId(doc.ownerId, 12)} · {formatRelativeTime(doc.createdAt)}</p>
+                    <p className="text-xs text-[#93a1bd]">
+                      {shortId(doc.ownerId, 12)} · {formatRelativeTime(doc.createdAt)}
+                      {ownsDoc(doc) && <span className="block text-[10px] text-amber-400">own document — the chain refuses self-moderation; these actions are disabled</span>}
+                    </p>
                   </div>
                   {doc.type === 'thread' ? (
                     <>
-                      <SmallButton icon={<Pin className="w-3.5 h-3.5" />} label={doc.sticky ? 'Unpin' : 'Pin'} active={doc.sticky} disabled={!canOperate || docActionBusy != null} busy={docActionBusy === `${doc.id}:sticky`} onClick={() => toggleSticky(doc)} />
-                      <SmallButton icon={doc.lockedAt != null ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} label={doc.lockedAt != null ? 'Unlock' : 'Lock'} disabled={!canOperate || docActionBusy != null} busy={docActionBusy === `${doc.id}:lock`} onClick={() => toggleLock(doc)} />
+                      <SmallButton icon={<Pin className="w-3.5 h-3.5" />} label={doc.sticky ? 'Unpin' : 'Pin'} active={doc.sticky} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:sticky`} onClick={() => toggleSticky(doc)} />
+                      <SmallButton icon={doc.lockedAt != null ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} label={doc.lockedAt != null ? 'Unlock' : 'Lock'} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:lock`} onClick={() => toggleLock(doc)} />
                     </>
                   ) : (
-                    <SmallButton icon={doc.modState === 2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState === 2 ? 'Unhide' : 'Hide'} active={doc.modState === 2} disabled={!canOperate || docActionBusy != null} busy={docActionBusy === `${doc.id}:hide`} onClick={() => toggleHide(doc)} />
+                    <SmallButton icon={doc.modState === 2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState === 2 ? 'Unhide' : 'Hide'} active={doc.modState === 2} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:hide`} onClick={() => toggleHide(doc)} />
                   )}
-                  <SmallButton icon={<Trash2 className="w-3.5 h-3.5" />} label="Delete" danger disabled={!canOperate || docActionBusy != null} busy={docActionBusy === `${doc.id}:delete`} onClick={() => deleteDoc(doc)} />
+                  <SmallButton icon={<Trash2 className="w-3.5 h-3.5" />} label="Delete" danger disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:delete`} onClick={() => deleteDoc(doc)} />
                 </div>
               ))}
             </div>

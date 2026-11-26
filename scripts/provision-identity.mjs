@@ -86,7 +86,10 @@ async function main() {
     const txid = args[2];
     const creditIndex = Number(args[3]);
     const keyFile = args[4];
+    const indexIdx = args.indexOf('--index');
+    const identityIndex = indexIdx >= 0 ? Number(args[indexIdx + 1]) : 0;
     if (!Number.isInteger(height) || !Number.isInteger(creditIndex)) throw new Error('--create <height> <txid> <creditIndex> <keyfile>');
+    if (!Number.isInteger(identityIndex) || identityIndex < 0) throw new Error('--index must be a non-negative integer');
 
     // Wait until a synced node reports a consensus height >= the mined height.
     const nodes = await fetchTestnetNodes();
@@ -112,7 +115,7 @@ async function main() {
     const identityId = assetLockProof.createIdentityId();
     console.log(`identity id from proof: ${identityId.toBase58()}`);
 
-    const keys = deriveIdentityKeys(0);
+    const keys = deriveIdentityKeys(identityIndex);
     const identity = new Identity(identityId);
     const signer = new IdentitySigner();
     for (const key of keys) {
@@ -129,7 +132,7 @@ async function main() {
 
     const sdk = EvoSDK.testnetTrusted({ settings: { timeoutMs: SDK_TIMEOUT_MS } });
     await sdk.connect();
-    console.log(`registering identity ${identityId.toBase58()} …`);
+    console.log(`registering identity ${identityId.toBase58()} (index ${identityIndex}) …`);
     await sdk.identities.create({
       identity,
       assetLockProof,
@@ -139,7 +142,7 @@ async function main() {
     const id = identityId.toBase58();
     const balance = await sdk.identities.balance(id);
     console.log(`identity registered: ${id}  balance=${balance} credits`);
-    console.log('Append the identity id to E2E_IDENTITY_IDS in .env.testing (index 0, comma-separated).');
+    console.log('Append the identity id to E2E_IDENTITY_IDS in .env.testing (comma-separated).');
     process.exit(0);
   }
 
@@ -147,7 +150,10 @@ async function main() {
     const faucetTxid = args[1];
     const vout = Number(args[2]);
     const keyFile = args[3];
+    const indexIdx = args.indexOf('--index');
+    const identityIndex = indexIdx >= 0 ? Number(args[indexIdx + 1]) : 0;
     if (!Number.isInteger(vout) || vout < 0) throw new Error('--provision <faucetTxid> <vout> <keyfile>');
+    if (!Number.isInteger(identityIndex) || identityIndex < 0) throw new Error('--index must be a non-negative integer');
     await EvoSDK.getLatestVersionNumber();
 
     // The faucet tx output value is read from Insight (PeP: the funding output we already confirmed).
@@ -206,7 +212,7 @@ async function main() {
     const identityId = assetLockProof.createIdentityId();
     console.log(`identity id from proof: ${identityId.toBase58()}`);
 
-    const keys = deriveIdentityKeys(0);
+    const keys = deriveIdentityKeys(identityIndex);
     const identity = new Identity(identityId);
     const signer = new IdentitySigner();
     for (const key of keys) {
@@ -223,7 +229,7 @@ async function main() {
 
     const sdk = EvoSDK.testnetTrusted({ settings: { timeoutMs: SDK_TIMEOUT_MS } });
     await sdk.connect();
-    console.log(`registering identity ${identityId.toBase58()} …`);
+    console.log(`registering identity ${identityId.toBase58()} (index ${identityIndex}) …`);
     await sdk.identities.create({
       identity,
       assetLockProof,
@@ -233,14 +239,14 @@ async function main() {
     const id = identityId.toBase58();
     const balance = await sdk.identities.balance(id);
     console.log(`identity registered: ${id}  balance=${balance} credits`);
-    console.log('Append the identity id to E2E_IDENTITY_IDS in .env.testing (index 0, comma-separated).');
+    console.log('Append the identity id to E2E_IDENTITY_IDS in .env.testing (comma-separated).');
     process.exit(0);
   }
 
   console.error('Usage:');
   console.error('  node scripts/provision-identity.mjs --gen-asset-lock-key <keyfile>');
-  console.error('  node scripts/provision-identity.mjs --provision <faucetTxid> <vout> <keyfile>');
-  console.error('  node scripts/provision-identity.mjs --create <height> <txid> <creditIndex> <keyfile>');
+  console.error('  node scripts/provision-identity.mjs --provision <faucetTxid> <vout> <keyfile> [--index <n>]');
+  console.error('  node scripts/provision-identity.mjs --create <height> <txid> <creditIndex> <keyfile> [--index <n>]');
   process.exit(1);
 }
 
