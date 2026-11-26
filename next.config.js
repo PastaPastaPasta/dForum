@@ -1,0 +1,72 @@
+const { execSync } = require('child_process')
+
+const getGitInfo = () => {
+  try {
+    const commitHash = execSync('git rev-parse --short HEAD').toString().trim()
+    const commitDate = execSync('git log -1 --format=%ci').toString().trim()
+    const branch = execSync('git rev-parse --abbrev-ref HEAD').toString().trim()
+    return { commitHash, commitDate, branch }
+  } catch {
+    return { commitHash: 'unknown', commitDate: '', branch: 'unknown' }
+  }
+}
+
+const gitInfo = getGitInfo()
+
+const basePath = process.env.BASE_PATH || ''
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  basePath,
+  assetPrefix: basePath,
+  trailingSlash: true,
+  generateBuildId: async () => gitInfo.commitHash,
+  env: {
+    NEXT_PUBLIC_GIT_COMMIT_HASH: gitInfo.commitHash,
+    NEXT_PUBLIC_GIT_COMMIT_DATE: gitInfo.commitDate,
+    NEXT_PUBLIC_GIT_BRANCH: gitInfo.branch,
+    NEXT_PUBLIC_STORAGE_SCOPE: basePath ? basePath.replace(/^\//, '') : '',
+  },
+  reactStrictMode: true,
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.optimization = {
+        ...config.optimization,
+        splitChunks: {
+          chunks: 'all',
+          cacheGroups: {
+            dashevo: {
+              test: /[\\/]node_modules[\\/]@dashevo[\\/]/,
+              name: 'evo-sdk',
+              priority: 10,
+              reuseExistingChunk: true,
+            },
+          },
+        },
+      }
+    }
+    config.experiments = {
+      ...config.experiments,
+      asyncWebAssembly: true,
+    }
+    return config
+  },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          // CSP is set via <meta> tag in app/layout.tsx so it works in static exports.
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+        ],
+      },
+    ]
+  },
+}
+
+module.exports = nextConfig
