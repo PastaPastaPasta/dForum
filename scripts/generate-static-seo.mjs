@@ -29,10 +29,10 @@ function sitemap() {
   const snap = readSnapshot();
   const urls = [`${SITE}/`, `${SITE}/login`, `${SITE}/search`];
   for (const f of snap.forums || []) {
-    if (f.slug) urls.push(`${SITE}/f?slug=${encodeURIComponent(f.slug)}`);
+    if (f.slug && !f.archived) urls.push(`${SITE}/f/${encodeURIComponent(f.slug)}/`);
   }
   for (const t of snap.threads || []) {
-    urls.push(`${SITE}/t?id=${encodeURIComponent(t.id)}`);
+    if (t.id && !t.modState && !t.archived) urls.push(`${SITE}/t/${encodeURIComponent(t.id)}/`);
   }
   const body = urls
     .map((loc) => `  <url><loc>${loc}</loc><lastmod>${snap.generatedAt ? snap.generatedAt.slice(0, 10) : new Date().toISOString().slice(0, 10)}</lastmod></url>`)
@@ -52,8 +52,8 @@ function robots() {
 function llms() {
   const snap = readSnapshot();
   const forums = (snap.forums || [])
-    .filter((f) => f.slug)
-    .map((f) => `- [${f.title}](${SITE}/f?slug=${encodeURIComponent(f.slug)})`)
+    .filter((f) => f.slug && !f.archived)
+    .map((f) => `- [${escapeMd(f.title)}](${SITE}/f/${encodeURIComponent(f.slug)}/)`)
     .join('\n');
   const body = `# dForum — a decentralized forum on Dash Platform
 
@@ -62,11 +62,22 @@ Centralized ownership, team-based (non-elected) moderation, every message stored
 ## Forums
 ${forums || '- (none yet)'}
 
+## Threads
+${(snap.threads || [])
+  .slice(0, 20)
+  .map((t) => `- [${escapeMd(t.title)}](${SITE}/t/${encodeURIComponent(t.id)}/)`)
+  .join('\n') || '- (none yet)'}
+
 ## Live
 - [/](${SITE}/) — latest threads, forums, real-time data on the platform
-- [/search](${SITE}/search) — search threads
+- [/search](${SITE}/search/) — search threads
+- [/login](${SITE}/login/) — login with Dash
 `;
   writeFileSync(join(OUT, 'llms.txt'), body);
+}
+
+function escapeMd(s) {
+  return String(s ?? '').replace(/[[\]()#*_~`<>]/g, (c) => `\\${c}`);
 }
 
 function manifest() {

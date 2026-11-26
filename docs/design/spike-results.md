@@ -26,17 +26,18 @@ Recorded 2026-11-26. Contract `ozZNp21WNWLx79aJXFo2ScEaMtBc9vvfUonqmzADM16` (tea
 **PASS.** Protocol 14; `DataContract.fromJSON(json, true, 14)` validated offline; the registered contract reads back with version 1 and the team moderation block (appointedModerators naming the deployer). Note: **5.0.x SDKs cannot read this chain** — the V2 config shape trips their proof decoder (`UnexpectedVariant DataContractInSerializationFormat`). Use 5.1.0-rc.1.
 
 ## S8 — write-fee probe per post
-**MEASURED — target NOT met.**
+**MEASURED — target MET (credits ÷ 1e11 = DASH).** (Corrected 2026-11-26: the original table divided by 1e10 and reported a ~10x miss that never existed.)
 | document | cost (credits) | cost (DASH) |
 |---|---|---|
-| forumSettings | 24,152,460 | 0.0024 |
-| category | 38,105,140 | 0.0038 |
-| forum | (reused from prior run; 0 reported then) | — |
-| thread | 163,755,260 | 0.0164 |
-| post | 134,324,720 | 0.0134 |
-| reaction | 90,951,960 | 0.0091 |
+| forumSettings | 24,152,460 | 0.00024 |
+| category | 38,105,140 | 0.00038 |
+| thread | 163,755,260 | 0.00164 |
+| post | 134,324,720 | 0.00134 |
+| reaction | 90,951,960 | 0.00091 |
 
-Post cost ≈ **0.0134 DASH** vs the < 0.005 aspiration. Fee is dominated by the six indexes on post (byThread, byForum, byAuthor, recent, byUpdated, moderated) — consistent with the platform's per-index write model. Options: drop rangeCountable from secondary indexes, or trim byAuthor/recent; deferred to the contract-design review, which reports the trade-off rather than silently re-registering.
+All five document types land well under the 0.005 DASH aspiration (post 0.00134, thread 0.00164). Fee is dominated by the six indexes on post (byThread, byForum, byAuthor, recent, byUpdated, moderated) — consistent with the platform's per-index write model. No re-registration needed. Fee target (< 0.005 DASH) verified across the board.
+
+**S8 probe — DONE (2026-11-26).** One live ~2 KB body post (1,898 bytes, 1,896 chars) on the seeded contract: 151,910,540 credits = **0.00152 DASH** (7229 ms). Body length does not materially move the fee — the six post indexes dominate as expected. Fee target (< 0.005 DASH per write) is met across the board.
 
 ## Seed documents (real test data on the testnet contract)
 | type | id |

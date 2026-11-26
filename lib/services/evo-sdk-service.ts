@@ -3,17 +3,21 @@
 /**
  * Client-side EvoSDK singleton. Imported by client components only.
  *
- * The SDK runs WASM in the browser; connect() resolves the current trusted
- * testnet nodes. The first call connects, later calls reuse the instance.
+ * The SDK is loaded lazily (dynamic import) so the ~15 MB WASM chunk never
+ * blocks the initial page load — it is only fetched when a page actually
+ * needs the platform. connect() resolves the current trusted nodes.
  */
-import { EvoSDK } from '@dashevo/evo-sdk'
 import { NETWORK } from '@/lib/constants'
+
+type EvoSDK = import('@dashevo/evo-sdk').EvoSDK
+type DocumentModule = typeof import('@dashevo/evo-sdk')
 
 let sdk: EvoSDK | null = null
 let initPromise: Promise<EvoSDK> | null = null
 
 async function init(): Promise<EvoSDK> {
   if (sdk) return sdk
+  const { EvoSDK } = await import('@dashevo/evo-sdk')
   const candidate = NETWORK === 'mainnet'
     ? EvoSDK.mainnetTrusted({ settings: { timeoutMs: 60000 } })
     : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } })
@@ -35,8 +39,30 @@ export async function getSdk(): Promise<EvoSDK> {
   }
 }
 
+type DocumentCls = DocumentModule['Document']
+type IdentitySignerCls = DocumentModule['IdentitySigner']
+
+type SdkClasses = {
+  Document: DocumentCls
+  IdentitySigner: IdentitySignerCls
+}
+
+let sdkClassesPromise: Promise<SdkClasses> | null = null
+
+/** Lazily load the SDK's classes — the ~15 MB chunk stays off the first paint. */
+export function getSdkClasses(): Promise<SdkClasses> {
+  if (!sdkClassesPromise) {
+    sdkClassesPromise = import('@dashevo/evo-sdk').then((mod) => ({
+      Document: mod.Document,
+      IdentitySigner: mod.IdentitySigner,
+    }))
+  }
+  return sdkClassesPromise
+}
+
 /** Reset the singleton (e.g. on logout). The next getSdk() reconnects. */
 export function resetSdk(): void {
   sdk = null
   initPromise = null
+  sdkClassesPromise = null
 }

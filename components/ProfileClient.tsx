@@ -1,8 +1,7 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
 import { MessageSquare, Pencil, UserPlus } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
@@ -10,7 +9,7 @@ import { Avatar } from '@/components/Avatar'
 import { useSession } from '@/lib/session'
 import { query, count } from '@/lib/services/document-service'
 import { loadSnapshot } from '@/lib/services/snapshot-service'
-import { formatRelativeTime, formatDate, shortId } from '@/lib/utils'
+import { formatRelativeTime, formatDate, shortId, isModerated, safeHttpUrl } from '@/lib/utils'
 
 interface ProfileData {
   displayName: string
@@ -27,20 +26,15 @@ interface OwnedThread {
   tags: string[]
   forumSlug: string | null
   sticky: boolean
+  modState: number | null
   createdAt: number
 }
 
-export default function ProfilePage() {
-  return (
-    <Suspense fallback={<main className="flex-1" />}>
-      <ProfileInner />
-    </Suspense>
-  )
+export default function ProfileClient({ identityId }: { identityId: string }) {
+  return <ProfileInner identityId={identityId} />
 }
 
-function ProfileInner() {
-  const params = useSearchParams()
-  const identityId = params.get('id') ?? ''
+function ProfileInner({ identityId }: { identityId: string }) {
   const { session, ready } = useSession()
   const snap = loadSnapshot()
   const isSelf = session?.identityId === identityId
@@ -52,7 +46,10 @@ function ProfileInner() {
   const [modState, setModState] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!identityId) return
+    if (!identityId) {
+      setLoading(false)
+      return
+    }
     let cancelled = false
     const forumById = new Map(snap.forums.map((f) => [f.id, f.slug ?? null]))
 
@@ -84,6 +81,7 @@ function ProfileInner() {
             tags: Array.isArray(t.properties.tags) ? (t.properties.tags as string[]) : [],
             forumSlug: forumById.get((t.properties.forumId as string) ?? '') ?? null,
             sticky: Boolean(t.properties.sticky),
+            modState: (t.properties.modState as number | null) ?? null,
             createdAt: t.createdAt,
           })),
         )
@@ -112,11 +110,11 @@ function ProfileInner() {
         <section className="border-b border-[#22304e]">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 fade-up">
             <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-              <Avatar name={displayName} size="lg" />
+              <Avatar name={displayName} id={identityId || null} size="lg" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{displayName}</h1>
-                  {modState === 1 && <span className="text-[10px] uppercase tracking-wider text-red-400 border border-red-400/40 rounded px-2 py-0.5">banned</span>}
+                  {isModerated(modState) && <span className="text-[10px] uppercase tracking-wider text-amber-400 border border-amber-400/40 rounded px-2 py-0.5">hidden</span>}
                   {isSelf && (
                     <Link href="/settings" className="ml-1 inline-flex items-center gap-1.5 rounded-lg border border-[#22304e] px-3 py-1.5 text-xs text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition">
                       <Pencil className="w-3.5 h-3.5" /> Edit profile
@@ -125,13 +123,13 @@ function ProfileInner() {
                 </div>
                 <p className="mt-1 text-xs font-mono text-[#93a1bd] break-all">{identityId}</p>
                 {profile?.bio && <p className="mt-3 text-[#93a1bd] max-w-xl whitespace-pre-wrap">{profile.bio}</p>}
-                {profile?.website && (
-                  <a href={profile.website} target="_blank" rel="noreferrer noopener" className="mt-2 inline-block text-sm text-[#4db3ff] hover:underline">
-                    {profile.website}
+                {safeHttpUrl(profile?.website) && (
+                  <a href={safeHttpUrl(profile?.website)!} target="_blank" rel="noreferrer noopener" className="mt-2 inline-block text-sm text-[#4db3ff] hover:underline break-all">
+                    {profile?.website}
                   </a>
                 )}
                 <div className="mt-4 flex gap-4 text-sm text-[#93a1bd]">
-                  <span>{threads.length} threads</span>
+                  <span>{threads.filter((t) => !isModerated(t.modState)).length} threads</span>
                   <span>{postCount} posts</span>
                 </div>
               </div>
@@ -142,16 +140,16 @@ function ProfileInner() {
         <section className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
           <h2 className="text-lg font-bold tracking-tight">Threads by this user</h2>
           <div className="mt-3 space-y-3">
-            {threads.length === 0 ? (
+            {threads.filter((t) => !isModerated(t.modState)).length === 0 ? (
               <div className="rounded-xl border border-dashed border-[#22304e] p-8 text-center">
                 <UserPlus className="w-6 h-6 text-[#93a1bd] mx-auto" />
                 <p className="mt-2 text-[#93a1bd]">{loading ? 'Loading…' : 'No threads yet.'}</p>
               </div>
             ) : (
-              threads.map((t) => (
+              threads.filter((t) => !isModerated(t.modState)).map((t) => (
                 <Link
                   key={t.id}
-                  href={`/t?id=${t.id}`}
+                  href={`/t/${encodeURIComponent(t.id)}`}
                   className="flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#111a2e] px-4 py-3 hover:border-[#008CE7] transition fade-up"
                 >
                   <MessageSquare className="w-4 h-4 text-[#4db3ff] shrink-0" />

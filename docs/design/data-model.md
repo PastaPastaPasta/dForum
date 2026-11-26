@@ -48,7 +48,7 @@ One contract per deployment (bans/suspensions apply to a single contract; one de
 | tags | typed array, ≤5, ^[a-z0-9-]{1,32}$ | uniqueItems |
 | sticky | boolean | changeFields, optional, moderator-only |
 | lockedAt | integer (ms) | changeFields, optional, moderator-only |
-| modState | integer 1..3 | changeFields, optional, moderator-only (1=hidden,2=locked?,3=flagged? — final: 1=hidden) |
+| modState | integer 1..3 | changeFields, optional, moderator-only (1=hidden) |
 | modNote | string ≤200 | changeFields, optional |
 
 ### post — public, documentsMutable true, canBeDeleted true, moderator delete (keeps record, keeps threadId+forumId) + changeFields
@@ -62,6 +62,8 @@ One contract per deployment (bans/suspensions apply to a single contract; one de
 | modNote | string ≤200 | changeFields, optional |
 
 Every message is a `post` including the opening post. Thread listed only when earliest post belongs to thread owner (orphan check).
+
+"Edited" is `$updatedAt > $createdAt` (not `$revision > 1`): moderator changeFields bumps `$revision` without moving `$updatedAt`.
 
 ### reaction — public, documentsMutable false, canBeDeleted true
 | field | type | notes |
@@ -88,7 +90,7 @@ Every message is a `post` including the opening post. Thread listed only when ea
 | bio | string ≤1000 | optional |
 | signature | string ≤300 | optional |
 | avatarUrl | string ≤300, https pattern | optional |
-| website | string ≤200 | optional |
+| website | string ≤200 | optional — no pattern in the registered contract (`string(0,200)`); app-side http(s) check on write/display; `^(https?://\S+)?$` pattern to add at next registration only (indexes are frozen) |
 | customTitle | string ≤40 | changeFields, optional |
 | modState | integer 1..3 | changeFields, optional (1=hidden) |
 
@@ -125,11 +127,17 @@ Every message is a `post` including the opening post. Thread listed only when ea
 
 documentsCountable: thread, post, reaction, profile.
 
+## Moderation semantics (settled 2026-11-26)
+- `modState` non-null = hidden (console writes 1; every renderer — client, snapshot, sitemap — treats any non-null modState as hidden: body suppressed, listing suppressed, snapshot-excluded). `banned` never appears on profiles; bans live in the ban list.
+- Moderator changeFields on a thread/post bumps `$revision` but NOT `$updatedAt` — display edited badges from `$updatedAt > $createdAt`.
+- Locked threads: client ignores posts with `$createdAt > lockedAt`; the snapshot drops posts created after lockedAt (S3: never consensus-enforced).
+- Snapshot orphan rule: a thread is listed only when the earliest visible post's owner == thread owner.
+
 ## Invariants
 
 - No running counters on threads (nobody can edit another's document) — count indexes instead.
 - No global uniqueness on usernames — DPNS identity; display name is not unique.
-- Every post is a post; thread is title/meta only. No edit history (documentsKeepHistory incompatible with moderator delete) — "edited" when $revision > 1.
+- Every post is a post; thread is title/meta only. No edit history (documentsKeepHistory incompatible with moderator delete) — "edited" when `$updatedAt > $createdAt`.
 - No thread moves in v1 (forumId immutable, verified against thread by reference).
 - No sequence numbers (moderator deletion breaks dense numbering) — cursor pagination with counts for pages.
 - Opening post = earliest post in thread; thread listed only if that post's owner == thread owner (orphan check).

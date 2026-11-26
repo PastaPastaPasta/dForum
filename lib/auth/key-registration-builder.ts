@@ -9,8 +9,6 @@
  * - encryption key: ecdsa_secp256k1, purpose encryption, medium security,
  *   full public key (signed with the encryption key)
  */
-import { EvoSDK } from '@dashevo/evo-sdk'
-import * as wasm from '@dashevo/wasm-sdk/compressed'
 import * as secp256k1 from '@noble/secp256k1'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { hash160 } from '@/lib/auth/protocol'
@@ -61,6 +59,7 @@ export async function buildUnsignedKeyRegistrationTransition(
   if (encryptionPrivateKey.length !== 32) throw new Error(`Invalid encryption private key length: ${encryptionPrivateKey.length}`)
   if (encryptionPublicKey.length !== 33) throw new Error(`Invalid encryption public key length: ${encryptionPublicKey.length}`)
 
+  const wasm = await import('@dashevo/wasm-sdk/compressed')
   const sdk = await getSdk()
   const identity = await sdk.identities.fetch(identityId)
   if (!identity) throw new Error(`Identity not found: ${identityId}`)

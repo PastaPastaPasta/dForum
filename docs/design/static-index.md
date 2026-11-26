@@ -6,24 +6,21 @@ Two stages, never a separate `/index/` tree:
 2. `next build` — reads only the snapshot (never the network). Outputs static pages for the canonical routes.
 
 ## Routes (canonical, self-static HTML)
-- `/` — home (latest forums/threads)
-- `/f/{categorySlug}/{forumSlug}/[page/N/]` — forum listing (also `/f/{forumSlug}/` if forum under root)
-- `/t/{threadId}/[page/N/]` — thread (opening post + replies)
-- `/m/{identityId}/[page/N/]` — member profile listing (threads/posts by identity)
-- `/data/v1/manifest.json` — build manifest (contract id+version, snapshot time, counts)
-- `/data/v1/forums.json` — all forums
-- `/data/v1/f/{forumId}/p{n}.json` — per-forum thread pages (cursor boundaries)
-- `/data/v1/t/{threadId}/p{n}.json` — per-thread post pages (cursor boundaries)
-- `/sitemap.xml` index → `/sitemaps/{forums-N,threads-N,members-N}.xml` (≤50k URLs each, lastmod)
-- `/feed.xml` + `/f/{forumSlug}/feed.xml` — RSS 2.0 (50 items)
+- `/` — home (latest forums/threads, live-fills from the platform after hydration)
+- `/f/{slug}/` — forum listing (path route; prerendered from the snapshot)
+- `/t/{threadId}/` — thread (opening post + replies; path route, prerendered from the snapshot)
+- `/u/{identityId}/` — member profile (NOT prerendered — every profile renders live; the URL hits the 404 SPA fallback)
+- `/login`, `/search`, `/new`, `/settings`, `/moderation` — static shell routes
+- `/sitemap.xml` — threads + forums (path routes, trailing slash, moderated content excluded)
 - `/robots.txt`, `/llms.txt` — AI crawlers allowed; content-policy notes
-- JSON-LD `DiscussionForumPosting` on thread pages
-- Footer "snapshot as of {time}" on every static page
+- Footer "snapshot as of {time}" on every static page (rendered via the static shell)
+
+The build reads only the snapshot — never the network. `generateStaticParams` throws a clear error if the snapshot is empty (run `node scripts/snapshot.mjs` first); a broken snapshot fails the build and the last good deploy keeps serving.
 
 ## Gates
 - Completeness: fetched doc counts must equal proved counts (documentsCountable, per-forum/thread groupBy counts) or the deploy is skipped (last good site keeps serving).
 - Sanity: contract id + version from build config matches the snapshot; total posts must not drop >2% vs last good unless removals explain it.
-- New threads not yet in the snapshot: SPA fallback via GH Pages `404.html` (404 status, noindex) until the next build runs.
+- New threads/forums not yet in the snapshot: SPA fallback via GH Pages `404.html` (404 status; `/t/`, `/f/`, `/u/` URLs render the live client components for that path; anything else shows the plain 404) until the next build runs.
 
 ## Incremental
 - Hourly: new/edited via `byUpdated`/`recent` (cursor startAfter), moderator changes via `moderated`, moderator deletions via `documentRemovals`.

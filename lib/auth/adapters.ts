@@ -136,20 +136,21 @@ export const secretStore: SecretStore = {
   async clearTransferKey(identityId: string): Promise<void> {
     write(`${NS}transfer:${identityId}`, null)
   },
+  // The login key is never written to storage. The App Connect session
+  // only needs the derived HIGH auth key (kept as `sk:`) and the
+  // encryption key (`enc:`); `authVault` is disabled, so nothing reads the
+  // login key back. Keeping it out of sessionStorage removes a second
+  // sensitive value from the origin's storage space.
   async storeLoginKey(identityId: string, loginKey: Uint8Array): Promise<void> {
-    write(`${LK_PREFIX}${identityId}`, toBase64(loginKey))
+    void identityId
+    void loginKey
   },
   async getLoginKey(identityId: string): Promise<Uint8Array | null> {
-    const raw = read(`${LK_PREFIX}${identityId}`)
-    if (!raw) return null
-    try {
-      return fromBase64(raw)
-    } catch {
-      return null
-    }
+    void identityId
+    return null
   },
   async clearLoginKey(identityId: string): Promise<void> {
-    write(`${LK_PREFIX}${identityId}`, null)
+    void identityId
   },
   async storeAuthVaultDek(identityId: string, dek: Uint8Array): Promise<void> {
     write(`${DEK_PREFIX}${identityId}`, toBase64(dek))

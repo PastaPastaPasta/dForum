@@ -7,11 +7,12 @@
  * Writes go through an IdentitySigner built from the session's auth key
  * (or a moderator CRITICAL key for moderation transitions).
  */
-import { Document, IdentitySigner } from '@dashevo/evo-sdk'
+import type { Document as DocumentCtor, IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import bs58 from 'bs58'
 import bs58check from 'bs58check'
-import { getSdk } from '@/lib/services/evo-sdk-service'
+import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
+import { hash160 } from '@/lib/auth/protocol'
 
 export interface DocRef {
   id: string
@@ -189,7 +190,7 @@ export async function countPostsPerThread(threadIds: string[]): Promise<Map<stri
 export interface SigningContext {
   identityId: string
   identityKey: unknown
-  signer: InstanceType<typeof IdentitySigner>
+  signer: InstanceType<typeof IdentitySignerCtor>
 }
 
 /**
@@ -202,6 +203,7 @@ export async function buildSigning(
   requiredAtLeast: 'high' | 'critical' = 'high',
 ): Promise<SigningContext | null> {
   const sdk = await getSdk()
+  const { IdentitySigner } = await getSdkClasses()
   const identity = await sdk.identities.fetch(identityId)
   if (!identity) return null
 
@@ -223,21 +225,25 @@ export async function buildSigning(
     isReadOnly: boolean
   }>
 
+  const hash160Pub = hash160(publicKey)
   for (const key of identityKeys) {
     const data = key.data instanceof Uint8Array ? key.data : hexToBytes(String(key.data))
     const keyType = key.keyType.toUpperCase()
-    if (data.length === publicKey.length && keyType === 'ECDSA_SECP256K1') {
-      if (bytesEqual(data, publicKey)) {
-        const levelNum = securityLevelNumber(key.securityLevel)
-        // document writes allow CRITICAL or HIGH (1 or 2); moderation needs CRITICAL (1)
-        if (levelNum === 0) continue
-        if (requiredAtLeast === 'critical' && levelNum > 1) continue
-        if (requiredAtLeast === 'high' && levelNum > 2) continue
-        // find the wasm key object by id
-        const wasmKey = identity.getPublicKeyById(key.keyId)
-        if (wasmKey) return { identityId, identityKey: wasmKey, signer }
-      }
+    let match = false
+    if (keyType === 'ECDSA_SECP256K1' && data.length === publicKey.length && bytesEqual(data, publicKey)) {
+      match = true
+    } else if (keyType === 'ECDSA_HASH160' && data.length === hash160Pub.length && bytesEqual(data, hash160Pub)) {
+      match = true
     }
+    if (!match) continue
+    const levelNum = securityLevelNumber(key.securityLevel)
+    // document writes allow CRITICAL or HIGH (1 or 2); moderation needs CRITICAL (1)
+    if (levelNum === 0) continue
+    if (requiredAtLeast === 'critical' && levelNum > 1) continue
+    if (requiredAtLeast === 'high' && levelNum > 2) continue
+    // find the wasm key object by id
+    const wasmKey = identity.getPublicKeyById(key.keyId)
+    if (wasmKey) return { identityId, identityKey: wasmKey, signer }
   }
   return null
 }
@@ -293,13 +299,14 @@ export async function createDocument(
   properties: Record<string, unknown>,
 ): Promise<DocRef> {
   const sdk = await getSdk()
+  const { Document } = await getSdkClasses()
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
   const entropy = crypto.getRandomValues(new Uint8Array(32))
   const nonce = await freshNonce(identityId)
   const document = new Document({
-    properties: properties as Document['properties'],
+    properties: properties as Record<string, unknown>,
     documentTypeName: type,
     dataContractId: CONTRACT_ID,
     ownerId: identityId,
@@ -320,6 +327,7 @@ export async function replaceDocument(
   properties: Record<string, unknown>,
 ): Promise<DocRef> {
   const sdk = await getSdk()
+  const { Document } = await getSdkClasses()
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
@@ -342,9 +350,11 @@ export async function replaceDocument(
 
 export async function deleteDocument(existing: DocRef, identityId: string, authKeyWif: string): Promise<void> {
   const sdk = await getSdk()
+  const { Document } = await getSdkClasses()
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
+  const nonce = await freshNonce(identityId)
   const document = new Document({
     properties: existing.properties,
     documentTypeName: existing.documentTypeName,
@@ -352,6 +362,7 @@ export async function deleteDocument(existing: DocRef, identityId: string, authK
     ownerId: identityId,
     revision: existing.revision,
     id: existing.id,
+    identityContractNonce: nonce,
   })
   await sdk.documents.delete({ document, identityKey: sign.identityKey as never, signer: sign.signer })
 }

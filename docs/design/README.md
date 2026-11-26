@@ -18,7 +18,7 @@ A greenfield forum on Dash Platform (Dash Evolution). All content, moderation an
 - **Every message is a `post`** — the opening post of a thread is just a post. The thread holds title/forum/tags/editable-meta; threads are listed only when the thread's earliest post belongs to the thread's author (orphan check, free from page-1 fetch). No atomic multi-document write, so create = 2 writes; no stored counters (nobody can edit another's document) — use count indexes.
 - **Flat reply chronology** (XenForo-style). Quotes via optional `replyToId` stored as a plain id (no enforced reference).
 - **Body limit**: maxLength 4000 / maxBytes 5000 (platform caps a string at 5120 bytes — do not exceed).
-- **No edit history** (documentsKeepHistory is incompatible with moderator delete); show "edited" when `$revision` > 1.
+- **No edit history** (documentsKeepHistory is incompatible with moderator delete); show "edited" when `$updatedAt > $createdAt` (moderator changeFields bump `$revision` without moving `$updatedAt`).
 - **Deletes**: authors hard-delete their own posts (post hard-delete). Threads can't be deleted; the author can blank the opening post. Moderators delete documents (removal record; keeping just threadId/forumId) or hide (changeFields modState, reversible).
 - **Pins/locks are moderator-only fields** (`sticky`, `lockedAt`), set via the moderation transition. Clients ignore posts after `lockedAt`.
 - **Reports are public on-chain**, reporter included (say so in UI). Only moderators set status/resolution.

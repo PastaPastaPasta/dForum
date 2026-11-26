@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Send, Loader2, AlertCircle } from 'lucide-react'
@@ -34,6 +34,7 @@ export default function NewThreadPage() {
   const [body, setBody] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const createdThreadId = useRef('')
 
   // Live forum list
   useEffect(() => {
@@ -68,7 +69,7 @@ export default function NewThreadPage() {
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Login required</p>
             <h1 className="text-2xl font-bold mt-2">Sign in to start a thread</h1>
-            <Link href="/login" className="mt-6 inline-block rounded-lg bg-[#008CE7] px-4 py-2 font-medium text-white hover:bg-[#006bb3] transition">Login with Dash</Link>
+            <Link href="/login" className="mt-6 inline-block rounded-lg bg-[#0070c0] px-4 py-2 font-medium text-white hover:bg-[#005fa0] transition">Login with Dash</Link>
           </div>
         </main>
         <Footer />
@@ -97,18 +98,56 @@ export default function NewThreadPage() {
         title: title.trim().slice(0, LIMITS.title),
         tags: tagList,
       })
+      createdThreadId.current = thread.id
 
       if (body.trim()) {
-        await createDocument('post', session.identityId, session.authKeyWif, {
-          threadId: thread.id,
-          forumId: selected.id,
-          body: body.trim().slice(0, LIMITS.body),
-        })
+        try {
+          await createDocument('post', session.identityId, session.authKeyWif, {
+            threadId: thread.id,
+            forumId: selected.id,
+            body: body.trim().slice(0, LIMITS.body),
+          })
+          createdThreadId.current = ''
+          router.push(`/t/${encodeURIComponent(thread.id)}`)
+          return
+        } catch (postError) {
+          // The thread exists. Do not create a second one — let the author
+          // retry just the opening post (or leave the thread empty and finish it later).
+          setError(
+            `Thread created, but the opening post failed: ${postError instanceof Error ? postError.message : 'error'}. Click "Finish opening post" to retry — your thread is already saved.`,
+          )
+          setSubmitting(false)
+          return
+        }
       }
 
-      router.push(`/t?id=${thread.id}`)
+      router.push(`/t/${encodeURIComponent(thread.id)}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create thread — try again in a moment')
+      setSubmitting(false)
+    }
+  }
+
+  async function handleFinishOpeningPost() {
+    if (!session || !session.authKeyWif || !createdThreadId.current || !selected) return
+    if (!body.trim()) {
+      setError('Write the opening post first, then tap "Finish opening post".')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await createDocument('post', session.identityId, session.authKeyWif, {
+        threadId: createdThreadId.current,
+        forumId: selected.id,
+        body: body.trim().slice(0, LIMITS.body),
+      })
+      const threadId = createdThreadId.current
+      createdThreadId.current = ''
+      setBody('')
+      router.push(`/t/${encodeURIComponent(threadId)}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Opening post failed — try again in a moment')
       setSubmitting(false)
     }
   }
@@ -185,14 +224,24 @@ export default function NewThreadPage() {
             {error && (
               <div className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                <span>{error}</span>
+                <span className="flex-1">{error}</span>
+                {createdThreadId.current && (
+                  <button
+                    type="button"
+                    onClick={handleFinishOpeningPost}
+                    disabled={submitting}
+                    className="ml-2 shrink-0 rounded-lg border border-red-500/40 px-2 py-1 text-xs hover:bg-red-500/10 transition"
+                  >
+                    Finish opening post
+                  </button>
+                )}
               </div>
             )}
 
             <button
               type="submit"
               disabled={submitting || !forumId || !title.trim()}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#008CE7] hover:bg-[#006bb3] transition px-5 py-3 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#0070c0] hover:bg-[#005fa0] transition px-5 py-3 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
               {submitting ? 'Creating…' : 'Start thread'}

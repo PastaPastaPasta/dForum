@@ -31,7 +31,9 @@ function readContractId() {
 
 function shortStr(s, max = 400) {
   if (s == null) return '';
-  return String(s);
+  const str = String(s);
+  if (str.length <= max) return str;
+  return str.slice(0, max - 1) + '…';
 }
 
 async function main() {
@@ -58,7 +60,44 @@ async function main() {
   const forumMap = new Map(forums.map((f) => [f.id, f]));
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
 
-  const snapshotThreads = threads.map((t) => ({
+  // Moderated content is never published on the static index — it stays
+  // on-chain (the records remain public) but neither the sitemap nor any
+  // prerendered page shows it.
+  const visibleThreads = threads.filter((t) => t.properties?.modState == null);
+  // Lock enforcement: a post created after its thread was locked is not
+  // shown in the static index (the lock is moderator-set by hand; the
+  // network never enforces it).
+  const lockedAtById = new Map(visibleThreads.map((t) => [t.id, t.properties?.lockedAt ?? null]));
+  const visiblePosts = posts.filter((p) => {
+    if (p.properties?.modState != null) return false;
+    const lockedAt = lockedAtById.get(p.properties?.threadId);
+    if (lockedAt != null && (p.$createdAt ?? 0) > lockedAt) return false;
+    return true;
+  });
+
+  // Orphan rule: a thread is listed only when its earliest visible post
+  // belongs to the thread owner (data-model.md). Without an owner-owned
+  // post the thread is hidden from listings — the URL still renders live.
+  const postsByThread = new Map();
+  for (const p of visiblePosts) {
+    const threadId = p.properties?.threadId;
+    if (!threadId) continue;
+    if (!postsByThread.has(threadId)) postsByThread.set(threadId, []);
+    postsByThread.get(threadId).push(p);
+  }
+  const hiddenByOrphan = new Set(
+    visibleThreads
+      .filter((t) => {
+        const ps = postsByThread.get(t.id) ?? [];
+        if (ps.length === 0) return true;
+        const earliest = ps.reduce((a, b) => (a.$createdAt < b.$createdAt ? a : b));
+        return earliest.$ownerId !== t.$ownerId;
+      })
+      .map((t) => t.id),
+  );
+  const listedThreads = visibleThreads.filter((t) => !hiddenByOrphan.has(t.id));
+
+  const snapshotThreads = listedThreads.map((t) => ({
     id: t.id,
     forumId: t.properties?.forumId ?? null,
     forumSlug: forumMap.get(t.properties?.forumId)?.properties?.slug ?? null,
@@ -66,39 +105,46 @@ async function main() {
     tags: Array.isArray(t.properties?.tags) ? t.properties.tags : [],
     sticky: Boolean(t.properties?.sticky),
     lockedAt: t.properties?.lockedAt ?? null,
-    modState: t.properties?.modState ?? null,
+    modState: null,
     ownerId: t.$ownerId ?? null,
     createdAt: t.$createdAt ?? 0,
     updatedAt: t.$updatedAt ?? 0,
   }));
 
-  const snapshotPosts = posts.map((p) => ({
+  const snapshotPosts = visiblePosts.map((p) => ({
     id: p.id,
     threadId: p.properties?.threadId ?? null,
     forumId: p.properties?.forumId ?? null,
     forumSlug: forumMap.get(p.properties?.forumId)?.properties?.slug ?? null,
     body: shortStr(p.properties?.body, 2000),
-    modState: p.properties?.modState ?? null,
+    modState: null,
     ownerId: p.$ownerId ?? null,
     createdAt: p.$createdAt ?? 0,
   }));
 
+  // Completeness gate: if the proved count says there is content the raw
+  // queries did not return, fail loudly — the deploy keeps the last good
+  // snapshot. (Moderated content is counted separately and excluded.)
+  const provedThreads = await countDocuments(sdk, 'thread');
+  const provedPosts = await countDocuments(sdk, 'post');
+  if (threads.length === 0 && provedThreads > 0) {
+    throw new Error(`completeness gate: proved ${provedThreads} threads but listed 0`);
+  }
+  if (posts.length === 0 && provedPosts > 0) {
+    throw new Error(`completeness gate: proved ${provedPosts} posts but listed 0`);
+  }
+
   const counts = {
-    // categories/forums carry no countable index — report the listed page.
     categories: categories.length,
     forums: forums.length,
-    threads: await countDocuments(sdk, 'thread'),
-    posts: await countDocuments(sdk, 'post'),
+    threads: provedThreads,
+    posts: provedPosts,
     reactions: reactionCounts,
   };
 
-  // Completeness gate: if the proved count says there is content the queries
-  // did not return, fail loudly — the deploy keeps the last good snapshot.
-  if (counts.threads > threads.length && threads.length === 0) {
-    throw new Error(`completeness gate: proved ${counts.threads} threads but listed 0`);
-  }
-  if (counts.posts > posts.length && posts.length === 0) {
-    throw new Error(`completeness gate: proved ${counts.posts} posts but listed 0`);
+  const hiddenTotal = (threads.length - visibleThreads.length) + (posts.length - visiblePosts.length);
+  if (hiddenTotal > 0) {
+    console.log(`snapshot: excluded ${hiddenTotal} moderated document(s) from the static index`);
   }
 
   const snapshot = {

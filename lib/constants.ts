@@ -44,10 +44,15 @@ export const SESSION_AU_KEY = `${STORAGE_KEY_PREFIX}:session:auth`
 export const LIMITS = {
   title: 150,
   body: 4000,
+  bodyMaxBytes: 5120,
   bio: 1000,
   tagline: 160,
   description: 500,
   announcement: 500,
+  displayName: 40,
+  signature: 300,
+  website: 200,
+  avatarUrl: 300,
   maxTags: 5,
   maxReplies: 5,
 } as const

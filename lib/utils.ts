@@ -57,3 +57,22 @@ export function formatTime(seconds: number): string {
 export function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ')
 }
+
+/** Returns the URL unchanged when it is a safe http(s) link, otherwise null. */
+export function safeHttpUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return trimmed
+  } catch {
+    return null
+  }
+  return null
+}
+
+/** A moderated (hidden) document — body and listings must suppress it. */
+export function isModerated(modState: number | null | undefined): boolean {
+  return modState !== null && modState !== undefined
+}

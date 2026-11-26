@@ -26,6 +26,7 @@ const nextConfig = {
     NEXT_PUBLIC_GIT_COMMIT_DATE: gitInfo.commitDate,
     NEXT_PUBLIC_GIT_BRANCH: gitInfo.branch,
     NEXT_PUBLIC_STORAGE_SCOPE: basePath ? basePath.replace(/^\//, '') : '',
+    NEXT_PUBLIC_BASE_PATH: basePath,
   },
   reactStrictMode: true,
   output: 'export',

@@ -1,14 +1,60 @@
+'use client'
+
+/**
+ * 404 + live SPA fallback.
+ *
+ * Static export builds only the routes the snapshot knows about; threads,
+ * forums and profiles created after the hourly snapshot have no
+ * pre-built HTML. For those paths this page renders the same client
+ * components live, so shared links to new content still work. Any other
+ * URL gets the plain not-found page.
+ */
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { Navbar } from '@/components/Navbar'
+import { Footer } from '@/components/Footer'
+import ThreadClient from '@/components/ThreadClient'
+import ForumClient from '@/components/ForumClient'
+import ProfileClient from '@/components/ProfileClient'
+
 export default function NotFound() {
+  const [mode, setMode] = useState<{ kind: 'thread' | 'forum' | 'profile'; value: string } | null>(null)
+  const [ready, setReady] = useState(false)
+  const pathname = usePathname()
+
+  useEffect(() => {
+    setReady(true)
+    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ''
+    const fullPath = typeof window !== 'undefined' ? window.location.pathname : pathname
+    const stripped = basePath && fullPath.startsWith(basePath) ? fullPath.slice(basePath.length) : fullPath
+    const parts = stripped.split('/').filter(Boolean)
+    if (parts.length === 2 && parts[0] === 't') setMode({ kind: 'thread', value: decodeURIComponent(parts[1]) })
+    else if (parts.length === 2 && parts[0] === 'f') setMode({ kind: 'forum', value: decodeURIComponent(parts[1]) })
+    else if (parts.length === 2 && parts[0] === 'u') setMode({ kind: 'profile', value: decodeURIComponent(parts[1]) })
+    else setMode(null)
+  }, [pathname])
+
+  if (ready && mode) {
+    if (mode.kind === 'thread') return <ThreadClient threadId={mode.value} />
+    if (mode.kind === 'forum') return <ForumClient slug={mode.value} />
+    return <ProfileClient identityId={mode.value} />
+  }
+
   return (
-    <main className="flex-1 flex items-center justify-center px-6">
-      <div className="text-center fade-up">
-        <p className="text-sm uppercase tracking-widest text-[#93a1bd]">404</p>
-        <h1 className="text-3xl font-bold mt-2">Page not found</h1>
-        <p className="text-[#93a1bd] mt-2">That page is gone — or never was.</p>
-        <a href="/" className="mt-6 inline-block rounded-lg bg-[#008CE7] px-4 py-2 font-medium text-white hover:bg-[#006bb3] transition">
-          Back to home
-        </a>
-      </div>
-    </main>
+    <>
+      <Navbar />
+      <main className="flex-1 flex items-center justify-center px-6">
+        <div className="text-center fade-up">
+          <p className="text-sm uppercase tracking-widest text-[#93a1bd]">404</p>
+          <h1 className="text-3xl font-bold mt-2">Page not found</h1>
+          <p className="text-[#93a1bd] mt-2">That page is gone — or never was.</p>
+          <Link href="/" className="mt-6 inline-block rounded-lg bg-[#0070c0] px-4 py-2 font-medium text-white hover:bg-[#005fa0] transition">
+            Back to home
+          </Link>
+        </div>
+      </main>
+      <Footer />
+    </>
   )
 }

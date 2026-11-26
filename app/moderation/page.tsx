@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
   Shield, Ban, Undo2, Clock, AlertTriangle, Trash2, Bell, BellOff, Loader2, ShieldCheck,
-  Eye, EyeOff, Pin, Lock, Unlock, KeyRound, Search, RefreshCw,
+  Eye, EyeOff, Pin, Lock, Unlock, KeyRound, Search, RefreshCw, ShieldAlert,
 } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
@@ -17,7 +17,8 @@ import {
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { shortId, formatDate, formatRelativeTime } from '@/lib/utils'
 
-const CRITICAL_KEY_STORAGE = 'dforum:moderator:wif'
+// The CRITICAL key lives only in component state — never in storage, so it
+// can't outlive the tab and can't be read by later same-origin pages.
 const CRITICAL_ID_STORAGE = 'dforum:moderator:identityId'
 
 interface Roster {
@@ -52,6 +53,7 @@ export default function ModerationPage() {
   const [validation, setValidation] = useState<{ ok: boolean; reason?: string } | null>(null)
 
   const [roster, setRoster] = useState<Roster | null>(null)
+  const [rosterError, setRosterError] = useState(false)
   const [targetId, setTargetId] = useState('')
   const [status, setStatus] = useState<StatusData | null>(null)
   const [statusLoading, setStatusLoading] = useState(false)
@@ -63,20 +65,33 @@ export default function ModerationPage() {
   const [actionError, setActionError] = useState<string | null>(null)
 
   const [docs, setDocs] = useState<ModeratableDoc[]>([])
+  const [hostAcknowledged, setHostAcknowledged] = useState(false)
   const [docsLoading, setDocsLoading] = useState(true)
   const [docActionBusy, setDocActionBusy] = useState<string | null>(null)
 
   useEffect(() => {
     try {
       const storedId = sessionStorage.getItem(CRITICAL_ID_STORAGE)
-      const storedWif = sessionStorage.getItem(CRITICAL_KEY_STORAGE)
       if (storedId) setIdentityId(storedId)
-      if (storedWif) setWif(storedWif)
     } catch { /* ignore */ }
+    // Wipe the key from the UI when the tab hides/closes.
+    const wipe = () => {
+      setWif('')
+      setAdmin(null)
+      setValidation(null)
+    }
+    window.addEventListener('pagehide', wipe)
+    window.addEventListener('beforeunload', wipe)
+    return () => {
+      window.removeEventListener('pagehide', wipe)
+      window.removeEventListener('beforeunload', wipe)
+    }
   }, [])
 
   useEffect(() => {
-    getRoster().then(setRoster).catch(() => setRoster(null))
+    getRoster()
+      .then((r) => { setRoster(r); setRosterError(false) })
+      .catch(() => { setRoster(null); setRosterError(true) })
     Promise.all([
       query('thread', { orderBy: [['$createdAt', 'desc']], limit: 12 }).catch(() => []),
       query('post', { orderBy: [['$createdAt', 'desc']], limit: 12 }).catch(() => []),
@@ -108,17 +123,32 @@ export default function ModerationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  async function retryRoster() {
+    setRosterError(false)
+    try {
+      const r = await getRoster()
+      setRoster(r)
+      setRosterError(false)
+    } catch {
+      setRoster(null)
+      setRosterError(true)
+    }
+  }
+
   const isOwner = Boolean(roster?.ownerId && identityId && roster.ownerId === identityId)
   const isAppointed = Boolean(roster?.appointed.includes(identityId))
   const isModerator = isOwner || isAppointed
 
+  const host = typeof window !== 'undefined' ? window.location.hostname : ''
+  const canonicalHost = host === 'forum.dashhq.org' || host === 'localhost' || host === '127.0.0.1' || /^127\.0\.0\./.test(host)
+  const hostGateOpen = canonicalHost || hostAcknowledged
+
   async function handleValidate() {
-    if (!identityId.trim() || !wif.trim()) return
+    if (!identityId.trim() || !wif.trim() || !hostGateOpen) return
     setValidating(true)
     setValidation(null)
     try {
       sessionStorage.setItem(CRITICAL_ID_STORAGE, identityId.trim())
-      sessionStorage.setItem(CRITICAL_KEY_STORAGE, wif.trim())
       const result = await validateCriticalKey(identityId.trim(), wif.trim())
       setValidation(result)
       if (result.ok) {
@@ -137,7 +167,6 @@ export default function ModerationPage() {
 
   async function handleClearAdmin() {
     sessionStorage.removeItem(CRITICAL_ID_STORAGE)
-    sessionStorage.removeItem(CRITICAL_KEY_STORAGE)
     setIdentityId('')
     setWif('')
     setAdmin(null)
@@ -161,7 +190,8 @@ export default function ModerationPage() {
     }
   }
 
-  async function act(busyKey: string, fn: () => Promise<void>) {
+  async function act(busyKey: string, fn: () => Promise<void>, confirm?: string) {
+    if (confirm && !window.confirm(confirm)) return
     setActionBusy(busyKey)
     setActionError(null)
     try {
@@ -176,6 +206,7 @@ export default function ModerationPage() {
 
   async function toggleSticky(doc: ModeratableDoc) {
     if (!admin) return
+    if (!window.confirm(`${doc.sticky ? 'Unpin' : 'Pin'} this thread?`)) return
     setDocActionBusy(`${doc.id}:sticky`)
     setActionError(null)
     try {
@@ -190,10 +221,11 @@ export default function ModerationPage() {
 
   async function toggleLock(doc: ModeratableDoc) {
     if (!admin) return
+    const locked = doc.lockedAt != null
+    if (!window.confirm(locked ? 'Unlock this thread? Replies can be posted again.' : 'Lock this thread? No new posts will be shown from now on.')) return
     setDocActionBusy(`${doc.id}:lock`)
     setActionError(null)
     try {
-      const locked = doc.lockedAt != null
       await changeDocumentFields(admin, 'thread', doc.id, { lockedAt: locked ? null : Date.now() }, locked ? 'thread unlock' : 'thread lock')
       setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, lockedAt: locked ? null : Date.now() } : d)))
     } catch (e) {
@@ -205,12 +237,14 @@ export default function ModerationPage() {
 
   async function toggleHide(doc: ModeratableDoc) {
     if (!admin) return
+    const hiding = doc.modState == null
+    if (!window.confirm(hiding ? 'Hide this post? The body will be hidden from everyone.' : 'Unhide this post? It will be shown again.')) return
     setDocActionBusy(`${doc.id}:hide`)
     setActionError(null)
     try {
-      const hidden = doc.modState === 2
-      await changeDocumentFields(admin, 'post', doc.id, { modState: hidden ? null : 2 }, hidden ? 'post unhide' : 'post hide')
-      setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, modState: hidden ? null : 2 } : d)))
+      const hidden = doc.modState != null
+      await changeDocumentFields(admin, 'post', doc.id, { modState: hidden ? null : 1 }, hidden ? 'post unhide' : 'post hide')
+      setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, modState: hidden ? null : 1 } : d)))
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Hide toggle failed')
     } finally {
@@ -220,7 +254,7 @@ export default function ModerationPage() {
 
   async function deleteDoc(doc: ModeratableDoc) {
     if (!admin) return
-    if (!window.confirm(`Delete this ${doc.type}? This cannot be undone in the UI.`)) return
+    if (!window.confirm(`Delete this ${doc.type}? This removes it from view — the record is kept on-chain. This cannot be undone in the UI.`)) return
     setDocActionBusy(`${doc.id}:delete`)
     setActionError(null)
     try {
@@ -246,7 +280,7 @@ export default function ModerationPage() {
         <section className="border-b border-[#22304e]">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
             <div className="flex items-center gap-3">
-              <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#008CE7]/15 text-[#4db3ff]"><Shield className="w-5 h-5" /></span>
+              <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#0070c0]/15 text-[#4db3ff]"><Shield className="w-5 h-5" /></span>
               <div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Moderator console</h1>
                 <p className="text-sm text-[#93a1bd]">
@@ -271,7 +305,7 @@ export default function ModerationPage() {
             <p className="mt-2 text-sm text-[#93a1bd]">
               Moderation is signed with a <strong>CRITICAL</strong> authentication key — the session key you log in with is HIGH and
               cannot moderate. Paste your own CRITICAL key WIF (from your admin identity). It is kept in
-              this tab&apos;s sessionStorage only and never sent anywhere.
+              memory for this tab only — never stored, never written to any other origin.
             </p>
             <div className="mt-4 grid sm:grid-cols-2 gap-3">
               <label className="block">
@@ -295,11 +329,33 @@ export default function ModerationPage() {
                 />
               </label>
             </div>
+            {!canonicalHost && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300">
+                <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium">Untrusted host — moderation console</p>
+                  <p className="mt-1 text-amber-200/80 text-xs">
+                    This console is designed for <code>forum.dashhq.org</code>. The deploy below is a testnet
+                    preview; pasting a CRITICAL key here exposes it to anything served from this origin. Only
+                    continue on hosts you control.
+                  </p>
+                  <label className="mt-2 flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={hostAcknowledged}
+                      onChange={(e) => setHostAcknowledged(e.target.checked)}
+                      className="accent-[#008CE7]"
+                    />
+                    I understand the risk and want to use this console on this host
+                  </label>
+                </div>
+              </div>
+            )}
             <div className="mt-3 flex items-center gap-3 flex-wrap">
               <button
                 onClick={handleValidate}
-                disabled={validating || !identityId.trim() || !wif.trim()}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#008CE7] hover:bg-[#006bb3] transition px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={validating || !identityId.trim() || !wif.trim() || !hostGateOpen}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#0070c0] hover:bg-[#005fa0] transition px-4 py-2 text-sm font-semibold disabled:opacity-50"
               >
                 {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                 Validate &amp; sign in as admin
@@ -341,6 +397,11 @@ export default function ModerationPage() {
                   {roster.appointed.length === 0 && <p className="text-xs text-[#93a1bd]">No appointed moderators — owner only.</p>}
                   <p className="text-[11px] text-[#93a1bd] pt-1">Appointed moderators are set by the owner in the contract&apos;s moderation config (owner-managed; the change applies to new moderation actions).</p>
                 </div>
+              ) : rosterError ? (
+                <div className="mt-3">
+                  <p className="text-sm text-red-400">Couldn&apos;t load the roster. Check your connection and retry.</p>
+                  <button onClick={retryRoster} className="mt-2 text-xs text-[#4db3ff] hover:underline">Retry</button>
+                </div>
               ) : (
                 <p className="mt-3 text-sm text-[#93a1bd] flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading roster…</p>
               )}
@@ -378,7 +439,7 @@ export default function ModerationPage() {
                   <div className="mt-4 grid sm:grid-cols-2 gap-2">
                     <TextInput label="Ban reason" value={banReason} onChange={setBanReason} />
                     <TextInput label="Warning reason" value={warnReason} onChange={setWarnReason} />
-                    <TextInput label="Suspend hours" value={suspendHours} onChange={setSuspendHours} />
+                    <TextInput label="Suspend hours" value={suspendHours} onChange={setSuspendHours} type="number" />
                     <TextInput label="Suspend reason" value={suspendReason} onChange={setSuspendReason} />
                   </div>
 
@@ -393,7 +454,7 @@ export default function ModerationPage() {
                       icon={<Ban className="w-3.5 h-3.5" />}
                       label="Ban"
                       tone="red"
-                      onClick={() => act('ban', () => banUser(admin!, targetId.trim(), banReason.trim()))}
+                      onClick={() => act('ban', () => banUser(admin!, targetId.trim(), banReason.trim()), `Ban ${shortId(targetId.trim(), 12)}? They cannot create content until unbanned.`)}
                     />
                     <ActionButton
                       disabled={!canOperate || actionBusy != null || isSelfTarget}
@@ -409,7 +470,7 @@ export default function ModerationPage() {
                       icon={<Clock className="w-3.5 h-3.5" />}
                       label="Suspend"
                       tone="amber"
-                      onClick={() => act('suspend', () => suspendUser(admin!, targetId.trim(), BigInt(Date.now() + Number(suspendHours) * 3600 * 1000), suspendReason.trim()))}
+                      onClick={() => act('suspend', () => suspendUser(admin!, targetId.trim(), BigInt(Date.now() + Number(suspendHours) * 3600 * 1000), suspendReason.trim()), `Suspend ${shortId(targetId.trim(), 12)} for ${suspendHours}h?`)}
                     />
                     <ActionButton
                       disabled={!canOperate || actionBusy != null || isSelfTarget}
@@ -425,7 +486,7 @@ export default function ModerationPage() {
                       icon={<Bell className="w-3.5 h-3.5" />}
                       label="Warn"
                       tone="amber"
-                      onClick={() => act('warn', () => warnUser(admin!, targetId.trim(), warnReason.trim()))}
+                      onClick={() => act('warn', () => warnUser(admin!, targetId.trim(), warnReason.trim()), `Warn ${shortId(targetId.trim(), 12)}?`)}
                     />
                     <ActionButton
                       disabled={!canOperate || actionBusy != null || isSelfTarget}
@@ -433,7 +494,7 @@ export default function ModerationPage() {
                       icon={<BellOff className="w-3.5 h-3.5" />}
                       label="Clear warnings"
                       tone="neutral"
-                      onClick={() => act('clearWarnings', () => clearWarnings(admin!, targetId.trim()))}
+                      onClick={() => act('clearWarnings', () => clearWarnings(admin!, targetId.trim()), `Clear all warnings for ${shortId(targetId.trim(), 12)}?`)}
                     />
                   </div>
                 </>
@@ -461,10 +522,17 @@ export default function ModerationPage() {
                 <p className="text-sm text-[#93a1bd]">No documents yet.</p>
               )}
               {docs.map((doc) => (
-                <div key={doc.id} className="flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#0b1220] px-4 py-3">
+                <div key={doc.id} className="flex items-center gap-2 sm:gap-3 rounded-xl border border-[#22304e] bg-[#0b1220] px-3 sm:px-4 py-3 flex-wrap">
                   <span className={`text-[10px] uppercase tracking-wider rounded px-1.5 py-0.5 border shrink-0 ${doc.type === 'thread' ? 'text-[#4db3ff] border-[#4db3ff]/40' : 'text-emerald-400 border-emerald-400/30'}`}>{doc.type}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm truncate">{doc.title}</p>
+                  <div className="min-w-0 flex-1 basis-40">
+                    <p className="text-sm truncate">
+                      {doc.type === 'thread' ? (
+                        <Link href={`/t/${encodeURIComponent(doc.id)}`} className="text-white hover:underline">{doc.title}</Link>
+                      ) : (
+                        doc.title
+                      )}
+                      {doc.modState != null && <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-400">hidden</span>}
+                    </p>
                     <p className="text-xs text-[#93a1bd]">
                       {shortId(doc.ownerId, 12)} · {formatRelativeTime(doc.createdAt)}
                       {ownsDoc(doc) && <span className="block text-[10px] text-amber-400">own document — the chain refuses self-moderation; these actions are disabled</span>}
@@ -476,7 +544,7 @@ export default function ModerationPage() {
                       <SmallButton icon={doc.lockedAt != null ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} label={doc.lockedAt != null ? 'Unlock' : 'Lock'} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:lock`} onClick={() => toggleLock(doc)} />
                     </>
                   ) : (
-                    <SmallButton icon={doc.modState === 2 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState === 2 ? 'Unhide' : 'Hide'} active={doc.modState === 2} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:hide`} onClick={() => toggleHide(doc)} />
+                    <SmallButton icon={doc.modState != null ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState != null ? 'Unhide' : 'Hide'} active={doc.modState != null} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:hide`} onClick={() => toggleHide(doc)} />
                   )}
                   <SmallButton icon={<Trash2 className="w-3.5 h-3.5" />} label="Delete" danger disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:delete`} onClick={() => deleteDoc(doc)} />
                 </div>
@@ -551,7 +619,7 @@ function SmallButton({ icon, label, active, danger, disabled, busy, onClick }: {
   )
 }
 
-function TextInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function TextInput({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
   return (
     <label className="block">
       <span className="text-xs text-[#93a1bd]">{label}</span>

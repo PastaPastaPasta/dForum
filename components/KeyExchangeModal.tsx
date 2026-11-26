@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { Check, Copy, Loader2, KeyRound, ShieldCheck, X } from 'lucide-react'
+import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle, ArrowRight } from 'lucide-react'
 import { useYapprKeyExchangeLogin, useYapprKeyRegistration } from 'platform-auth'
 import { useSession } from '@/lib/session'
 import { formatTime } from '@/lib/utils'
@@ -90,19 +90,45 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   }
 
   const closing = login.state === 'complete' || registration.state === 'complete'
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  // Escape closes; focus moves into the dialog on open.
+  useEffect(() => {
+    if (!onClose) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    const focusable = dialogRef.current
+    focusable?.focus()
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  // Trap scroll behind the modal
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="relative w-full max-w-sm rounded-2xl border border-[#22304e] bg-[#111a2e] shadow-2xl p-6">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="login-modal-title"
+        tabIndex={-1}
+        className="relative w-full max-w-sm rounded-2xl border border-[#22304e] bg-[#111a2e] shadow-2xl p-6 outline-none"
+      >
         <button
           onClick={onClose}
           className="absolute right-3 top-3 rounded-lg p-2 text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
-          aria-label="Close"
+          aria-label="Close login dialog"
         >
           <X className="w-4 h-4" />
         </button>
 
-        <h2 className="text-lg font-bold tracking-tight">Login with Dash</h2>
+        <h2 id="login-modal-title" className="text-lg font-bold tracking-tight">Login with Dash</h2>
         <p className="text-sm text-[#93a1bd] mt-1">Sign in to dForum with your Dash identity</p>
 
         <div className="mt-6 flex flex-col items-center gap-4">
@@ -127,13 +153,19 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                 </p>
               </div>
               {displayUri && (
-                <button
-                  onClick={copy}
-                  className="inline-flex items-center gap-2 text-xs text-[#93a1bd] hover:text-white transition"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copied ? 'URI copied' : 'Copy URI'}
-                </button>
+                <>
+                  <button
+                    onClick={copy}
+                    className="inline-flex items-center gap-2 text-xs text-[#93a1bd] hover:text-white transition"
+                    aria-label="Copy login URI"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? 'URI copied' : 'Copy URI'}
+                  </button>
+                  <p className="text-[11px] text-[#93a1bd] text-center">
+                    Scan the QR with your wallet, or paste the URI into it.
+                  </p>
+                </>
               )}
             </>
           )}
@@ -179,22 +211,39 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
           {(login.state === 'error' || login.state === 'timeout') && (
             <>
               <div className="text-center">
-                <p className="text-sm font-medium text-red-400">{login.error ?? 'Login failed'}</p>
-                <p className="text-xs text-[#93a1bd] mt-2">The wallet did not respond in time. Try again.</p>
+                <p className="text-sm font-medium text-red-400 inline-flex items-center gap-2 justify-center">
+                  <AlertTriangle className="w-4 h-4" /> {login.state === 'timeout' ? 'Timed out' : 'Login failed'}
+                </p>
+                <p className="text-xs text-[#93a1bd] mt-2">
+                  {login.state === 'timeout'
+                    ? 'Your wallet did not respond in time. Scan the QR again — or open dForum in a browser on the same device your wallet is installed on.'
+                    : (login.error ?? 'Something went wrong. Try again.')}
+                </p>
+                {registration.state === 'error' && (
+                  <p className="text-xs text-red-400 mt-2">Key registration failed{registration.error ? `: ${registration.error}` : '.'}</p>
+                )}
               </div>
-              <button
-                onClick={() => login.retry()}
-                className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm hover:bg-[#18233c] transition"
-              >
-                Try again
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => login.retry()}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#0070c0] hover:bg-[#005fa0] transition px-4 py-2 text-sm font-medium"
+                >
+                  Try again
+                </button>
+                <button
+                  onClick={() => onClose?.()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm hover:bg-[#18233c] transition"
+                >
+                  Close
+                </button>
+              </div>
             </>
           )}
         </div>
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5" />
-          Your wallet signs everything — nothing is sent to us.
+          Your wallet signs — this app keeps a scoped, room-bound auth key in this tab only.
         </p>
       </div>
     </div>

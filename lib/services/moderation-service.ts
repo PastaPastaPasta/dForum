@@ -8,18 +8,19 @@
  * pastes their key in the moderation console; it lives in sessionStorage
  * only and is never sent anywhere except the platform.
  */
-import { IdentitySigner } from '@dashevo/evo-sdk'
-import { getSdk } from '@/lib/services/evo-sdk-service'
+import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
+import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID } from '@/lib/constants'
 
 export interface ModerationIdentity {
   identityId: string
-  signer: InstanceType<typeof IdentitySigner>
+  signer: InstanceType<typeof IdentitySignerCtor>
   wasmIdentity: unknown
 }
 
 export async function prepareModerator(identityId: string, criticalWif: string): Promise<ModerationIdentity> {
   const sdk = await getSdk()
+  const { IdentitySigner } = await getSdkClasses()
   const identity = await sdk.identities.fetch(identityId)
   if (!identity) throw new Error('Moderator identity not found on the chain')
   const signer = new IdentitySigner()

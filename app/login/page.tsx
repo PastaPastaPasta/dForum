@@ -36,7 +36,7 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — no central server" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Only your wallet signs — the app never sees your keys" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum keeps a scoped auth key in this tab only" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="All posts, profiles and reactions live on-chain" />
               </div>
 
@@ -53,7 +53,7 @@ export default function LoginPage() {
                   <button
                     onClick={() => setShowModal(true)}
                     disabled={!ready}
-                    className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#008CE7] hover:bg-[#006bb3] transition px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#0070c0] hover:bg-[#005fa0] transition px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {!ready ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
                     Login with Dash
@@ -70,7 +70,7 @@ export default function LoginPage() {
                 <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dash-key: code shown in the login modal." />
                 <Step number={2} title="Approve the request" body="Confirm the key-exchange request in your wallet." />
                 <Step number={3} title="Keys registered (first login)" body="On first login you'll register auth keys with dForum — scan a second code." />
-                <Step number={4} title="You're in" body="Your session lives in this tab only. Nothing is stored server-side." />
+                <Step number={4} title="You're in" body="Your session lives in this tab only. The app never holds your wallet key." />
               </ol>
             </div>
           </div>
@@ -95,7 +95,7 @@ function Benefit({ icon, text }: { icon: React.ReactNode; text: string }) {
 function Step({ number, title, body }: { number: number; title: string; body: string }) {
   return (
     <li className="flex gap-4">
-      <span className="flex items-center justify-center w-8 h-8 rounded-full bg-[#008CE7]/15 text-[#4db3ff] text-sm font-bold shrink-0">{number}</span>
+      <span className="flex items-center justify-center w-8 h-8 rounded-full bg-[#0070c0]/15 text-[#4db3ff] text-sm font-bold shrink-0">{number}</span>
       <div>
         <p className="font-medium text-sm">{title}</p>
         <p className="text-xs text-[#93a1bd] mt-0.5">{body}</p>
