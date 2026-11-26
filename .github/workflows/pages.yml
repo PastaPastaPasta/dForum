@@ -1,0 +1,52 @@
+name: Pages
+
+# The static index is the SEO/AI-facing shell. It is rebuilt hourly from the
+# Dash Platform snapshot; live aspects fill in from the platform at runtime.
+# A failing snapshot/build step fails the workflow and the last good deploy keeps serving.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Snapshot (static index data)
+        run: node scripts/snapshot.mjs
+        env:
+          NEXT_PUBLIC_NETWORK: testnet
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_NETWORK: testnet
+      - name: SEO files
+        run: node scripts/generate-static-seo.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+      - id: deployment
+        uses: actions/deploy-pages@v4

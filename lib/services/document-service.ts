@@ -1,343 +1,357 @@
-import { logger } from '@/lib/logger';
-import { getEvoSdk } from './evo-sdk-service';
-import { stateTransitionService } from './state-transition-service';
-import { YAPPR_CONTRACT_ID } from '../constants';
-import { documentToPlainObject, queryDocuments, type QueryDocumentsOptions, type DocumentWhereClause, type DocumentOrderByClause } from './sdk-helpers';
+'use client'
 
-export interface QueryOptions {
-  where?: DocumentWhereClause[];
-  orderBy?: DocumentOrderByClause[];
-  limit?: number;
-  startAfter?: string;
-  startAt?: string;
+/**
+ * Forum data layer.
+ *
+ * Query + write calls against the dForum contract. Reads are public.
+ * Writes go through an IdentitySigner built from the session's auth key
+ * (or a moderator CRITICAL key for moderation transitions).
+ */
+import { Document, IdentitySigner } from '@dashevo/evo-sdk'
+import bs58 from 'bs58'
+import bs58check from 'bs58check'
+import { getSdk } from '@/lib/services/evo-sdk-service'
+import { CONTRACT_ID, NETWORK } from '@/lib/constants'
+
+export interface DocRef {
+  id: string
+  ownerId: string
+  dataContractId: string
+  documentTypeName: string
+  revision: bigint
+  createdAt: number
+  updatedAt: number
+  properties: Record<string, unknown>
 }
 
-export interface DocumentResult<T> {
-  documents: T[];
-  nextCursor?: string;
-  prevCursor?: string;
+const SEQUENCE_MASK = (1n << 40n) - 1n
+
+// ---- normalization helpers --------------------------------------------------
+
+/** Convert identifier-like values (Uint8Array, numeric-keyed objects, base58) to base58. */
+function identifierify(value: unknown): string | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    // already base58? try decode/re-encode to normalize; if it fails, leave it
+    try {
+      return bs58.encode(bs58.decode(value))
+    } catch {
+      return value
+    }
+  }
+  if (value instanceof Uint8Array) return bs58.encode(value)
+  if (Array.isArray(value) && value.length === 32) return bs58.encode(Uint8Array.from(value))
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>)
+    if (keys.length === 32 && keys.every((k) => /^\d+$/.test(k))) {
+      const bytes = new Uint8Array(32)
+      for (const k of keys) bytes[Number(k)] = Number((value as Record<string, unknown>)[k]) & 0xff
+      return bs58.encode(bytes)
+    }
+  }
+  return null
+}
+
+function normalizeValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return []
+    if (value.every((v) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+      return value.map((v) => normalizeValue(v))
+    }
+    const idents = value.map((v) => identifierify(v))
+    return idents.every(Boolean) ? idents : value.map((v) => normalizeValue(v))
+  }
+  if (value instanceof Uint8Array) {
+    // binary identifier-like; keep base58 for display/query
+    const ident = identifierify(value)
+    if (ident) return ident
+    return value
+  }
+  if (typeof value === 'object' && value !== null) {
+    const ident = identifierify(value)
+    if (ident) return ident
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = normalizeValue(v)
+    return out
+  }
+  return value
+}
+
+function normalizeDoc(raw: unknown): DocRef | null {
+  if (!raw) return null
+  try {
+    const obj = typeof (raw as { toObject?: () => unknown }).toObject === 'function'
+      ? (raw as { toObject: () => Record<string, unknown> }).toObject()
+      : (raw as Record<string, unknown>)
+    if (!obj || typeof obj !== 'object') return null
+
+    const id = identifierify(obj.$id ?? obj.id)
+    if (!id) return null
+
+    const ownerId = identifierify(obj.$ownerId ?? obj.ownerId) ?? ''
+    const dataContractId = identifierify(obj.$dataContractId ?? obj.dataContractId) ?? ''
+    const documentTypeName = (obj.$type ?? obj.documentTypeName ?? '') as string
+
+    const props: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith('$')) continue
+      if (key === 'dataContractId' || key === 'documentTypeName' || key === 'revision' || key === 'createdAt' || key === 'updatedAt' || key === 'id' || key === 'ownerId') continue
+      const normalized = normalizeValue(value)
+      if (normalized !== undefined) props[key] = normalized
+    }
+
+    const createdAtRaw = obj.$createdAt ?? obj.createdAt
+    const updatedAtRaw = obj.$updatedAt ?? obj.updatedAt
+    const revisionRaw = obj.$revision ?? obj.revision
+
+    return {
+      id,
+      ownerId,
+      dataContractId,
+      documentTypeName: String(documentTypeName),
+      revision: revisionRaw !== undefined ? BigInt(typeof revisionRaw === 'bigint' ? revisionRaw : Number(revisionRaw)) : 1n,
+      createdAt: createdAtRaw ? Number(createdAtRaw) : 0,
+      updatedAt: updatedAtRaw ? Number(updatedAtRaw) : 0,
+      properties: props,
+    }
+  } catch {
+    return null
+  }
+}
+
+// ---- reads ------------------------------------------------------------------
+
+export async function query(
+  type: string,
+  options: {
+    where?: [string, string, unknown][]
+    orderBy?: [string, 'asc' | 'desc'][]
+    limit?: number
+  } = {},
+): Promise<DocRef[]> {
+  const sdk = await getSdk()
+  const page = await sdk.documents.query({
+    dataContractId: CONTRACT_ID,
+    documentTypeName: type,
+    where: options.where as never,
+    orderBy: options.orderBy as never,
+    limit: options.limit ?? 100,
+  })
+  const out: DocRef[] = []
+  for (const doc of page.values()) {
+    const normalized = normalizeDoc(doc)
+    if (normalized) out.push(normalized)
+  }
+  return out
+}
+
+export async function count(
+  type: string,
+  options: {
+    where?: [string, string, unknown][]
+    groupBy?: string[]
+  } = {},
+): Promise<Map<string, bigint>> {
+  const sdk = await getSdk()
+  const map = await sdk.documents.count({
+    dataContractId: CONTRACT_ID,
+    documentTypeName: type,
+    where: options.where as never,
+    groupBy: options.groupBy ?? [],
+  })
+  const out = new Map<string, bigint>()
+  for (const [key, value] of map.entries()) out.set(String(key), value)
+  return out
+}
+
+export async function get(type: string, documentId: string): Promise<DocRef | null> {
+  const sdk = await getSdk()
+  const raw = await sdk.documents.get(CONTRACT_ID, type, documentId)
+  return normalizeDoc(raw)
+}
+
+export async function findOne(type: string, where: [string, string, unknown][]): Promise<DocRef | null> {
+  const docs = await query(type, { where, limit: 1 })
+  return docs[0] ?? null
+}
+
+/** Post count per thread via groupBy on an In-constrained index. */
+export async function countPostsPerThread(threadIds: string[]): Promise<Map<string, number>> {
+  if (threadIds.length === 0) return new Map()
+  const counts = await count('post', { where: [['threadId', 'in', threadIds]], groupBy: ['threadId'] })
+  const out = new Map<string, number>()
+  for (const [key, value] of counts.entries()) out.set(key, Number(value))
+  return out
+}
+
+// ---- writes ------------------------------------------------------------------
+
+export interface SigningContext {
+  identityId: string
+  identityKey: unknown
+  signer: InstanceType<typeof IdentitySigner>
 }
 
 /**
- * Query raw documents through the shared document-service path.
- * This keeps the raw `sdk.documents.query(...)` behavior centralized in one layer.
+ * Build the signer + matched identity key for a private key WIF.
+ * The matched key must be HIGH or CRITICAL (document writes).
  */
-export async function queryRawDocuments(options: QueryDocumentsOptions): Promise<Record<string, unknown>[]> {
-  const sdk = await getEvoSdk();
-  return queryDocuments(sdk, options);
+export async function buildSigning(
+  identityId: string,
+  authKeyWif: string,
+  requiredAtLeast: 'high' | 'critical' = 'high',
+): Promise<SigningContext | null> {
+  const sdk = await getSdk()
+  const identity = await sdk.identities.fetch(identityId)
+  if (!identity) return null
+
+  const signer = new IdentitySigner()
+  signer.addKeyFromWif(authKeyWif)
+
+  // Match the WIF against the identity's public keys, exactly as yappr does.
+  const wifBytes = wifToPrivateKey(authKeyWif)
+  if (!wifBytes) return null
+  const { privateKey, compressed } = wifBytes
+  const { getPublicKey } = await import('@noble/secp256k1')
+  const publicKey = getPublicKey(privateKey, compressed)
+  const identityKeys = identity.publicKeys as Array<{
+    keyId: number
+    purpose: string
+    keyType: string
+    securityLevel: string
+    data: Uint8Array | string
+    isReadOnly: boolean
+  }>
+
+  for (const key of identityKeys) {
+    const data = key.data instanceof Uint8Array ? key.data : hexToBytes(String(key.data))
+    const keyType = key.keyType.toUpperCase()
+    if (data.length === publicKey.length && keyType === 'ECDSA_SECP256K1') {
+      if (bytesEqual(data, publicKey)) {
+        const levelNum = securityLevelNumber(key.securityLevel)
+        // document writes allow CRITICAL or HIGH (1 or 2); moderation needs CRITICAL (1)
+        if (levelNum === 0) continue
+        if (requiredAtLeast === 'critical' && levelNum > 1) continue
+        if (requiredAtLeast === 'high' && levelNum > 2) continue
+        // find the wasm key object by id
+        const wasmKey = identity.getPublicKeyById(key.keyId)
+        if (wasmKey) return { identityId, identityKey: wasmKey, signer }
+      }
+    }
+  }
+  return null
 }
 
-/**
- * Query posts by owner IDs newer than a timestamp.
- */
-export async function queryPostsByOwnersSince(
-  ownerIds: string[],
-  sinceTimestamp: number,
-  limit = 50,
-  contractId = YAPPR_CONTRACT_ID
-): Promise<Record<string, unknown>[]> {
-  if (ownerIds.length === 0) return [];
-
-  return queryRawDocuments({
-    dataContractId: contractId,
-    documentTypeName: 'post',
-    where: [
-      ['$ownerId', 'in', ownerIds],
-      ['$createdAt', '>', sinceTimestamp],
-    ],
-    orderBy: [['$ownerId', 'asc'], ['$createdAt', 'asc']],
-    limit,
-  });
+function wifToPrivateKey(wif: string): { privateKey: Uint8Array; compressed: boolean } | null {
+  try {
+    const decoded = bs58check.decode(wif)
+    if (decoded.length === 34 && decoded[33] === 0x01) {
+      return { privateKey: decoded.slice(1, 33), compressed: true }
+    }
+    if (decoded.length === 33) {
+      return { privateKey: decoded.slice(1, 33), compressed: false }
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
-/**
- * Query all posts newer than a timestamp.
- */
-export async function queryPostsSince(
-  sinceTimestamp: number,
-  limit = 50,
-  language = 'en',
-  contractId = YAPPR_CONTRACT_ID
-): Promise<Record<string, unknown>[]> {
-  const where: DocumentWhereClause[] = [['$createdAt', '>', sinceTimestamp]];
-  const orderBy: DocumentOrderByClause[] = [['$createdAt', 'desc']];
-
-  if (language) {
-    where.unshift(['language', '==', language]);
-    orderBy.unshift(['language', 'asc']);
-  }
-
-  return queryRawDocuments({
-    dataContractId: contractId,
-    documentTypeName: 'post',
-    where,
-    orderBy,
-    limit,
-  });
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
 }
 
-export abstract class BaseDocumentService<T> {
-  protected readonly contractId: string;
-  protected readonly documentType: string;
-  protected cache: Map<string, { data: T; timestamp: number }> = new Map();
-  protected readonly CACHE_TTL = 120000; // 2 minutes cache (reduced query frequency)
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex
+  const bytes = new Uint8Array(clean.length / 2)
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16)
+  return bytes
+}
 
-  constructor(documentType: string, contractId?: string) {
-    this.contractId = contractId ?? YAPPR_CONTRACT_ID;
-    this.documentType = documentType;
+function securityLevelNumber(level: string): number {
+  switch (level.toUpperCase()) {
+    case 'MASTER': return 0
+    case 'CRITICAL': return 1
+    case 'HIGH': return 2
+    case 'MEDIUM': return 3
+    default: return 99
   }
+}
 
-  /**
-   * Query documents through the raw query path.
-   * `where` operands must already use the correct query encoding for each field.
-   */
-  async query(options: QueryOptions = {}): Promise<DocumentResult<T>> {
-    try {
-      const sdk = await getEvoSdk();
+async function freshNonce(identityId: string): Promise<bigint> {
+  const sdk = await getSdk()
+  const raw = (await sdk.wasm.getIdentityContractNonce(identityId, CONTRACT_ID)) ?? 0n
+  return (raw & SEQUENCE_MASK) + 1n
+}
 
-      logger.info(`Querying ${this.documentType} documents:`, {
-        dataContractId: this.contractId,
-        documentTypeName: this.documentType,
-        ...options
-      });
+export async function createDocument(
+  type: string,
+  identityId: string,
+  authKeyWif: string,
+  properties: Record<string, unknown>,
+): Promise<DocRef> {
+  const sdk = await getSdk()
+  const sign = await buildSigning(identityId, authKeyWif)
+  if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
-      const rawDocuments = await queryDocuments(sdk, {
-        dataContractId: this.contractId,
-        documentTypeName: this.documentType,
-        where: options.where,
-        orderBy: options.orderBy,
-        limit: options.limit,
-        startAfter: options.startAfter,
-        startAt: options.startAt,
-      });
+  const entropy = crypto.getRandomValues(new Uint8Array(32))
+  const nonce = await freshNonce(identityId)
+  const document = new Document({
+    properties: properties as Document['properties'],
+    documentTypeName: type,
+    dataContractId: CONTRACT_ID,
+    ownerId: identityId,
+    revision: 1n,
+    entropy,
+    identityContractNonce: nonce,
+  })
+  const created = await sdk.documents.create({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+  const normalized = normalizeDoc(created)
+  if (!normalized) throw new Error('Document create returned an unreadable document')
+  return normalized
+}
 
-      logger.info(`${this.documentType} query returned ${rawDocuments.length} documents`);
+export async function replaceDocument(
+  existing: DocRef,
+  identityId: string,
+  authKeyWif: string,
+  properties: Record<string, unknown>,
+): Promise<DocRef> {
+  const sdk = await getSdk()
+  const sign = await buildSigning(identityId, authKeyWif)
+  if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
-      const documents = rawDocuments.map(doc => this.transformDocument(doc));
+  const updatedProps = { ...existing.properties, ...properties }
+  const nonce = await freshNonce(identityId)
+  const document = new Document({
+    properties: updatedProps,
+    documentTypeName: existing.documentTypeName,
+    dataContractId: CONTRACT_ID,
+    ownerId: identityId,
+    revision: existing.revision + 1n,
+    id: existing.id,
+    identityContractNonce: nonce,
+  })
+  await sdk.documents.replace({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+  const after = await get(existing.documentTypeName, existing.id)
+  if (!after) throw new Error('Replace returned but the document could not be re-read')
+  return after
+}
 
-      return {
-        documents,
-        nextCursor: undefined,
-        prevCursor: undefined
-      };
-    } catch (error) {
-      logger.error(`Error querying ${this.documentType} documents:`, error);
-      throw error;
-    }
-  }
+export async function deleteDocument(existing: DocRef, identityId: string, authKeyWif: string): Promise<void> {
+  const sdk = await getSdk()
+  const sign = await buildSigning(identityId, authKeyWif)
+  if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
-  /**
-   * Get a single document by ID
-   */
-  async get(documentId: string): Promise<T | null> {
-    try {
-      // Check cache
-      const cached = this.cache.get(documentId);
-      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-        return cached.data;
-      }
-
-      const sdk = await getEvoSdk();
-
-      const response = await sdk.documents.get(
-        this.contractId,
-        this.documentType,
-        documentId
-      );
-
-      if (!response) {
-        return null;
-      }
-
-      // Normalize zero-arg toObject() output back to the JSON-like shape Yappr expects.
-      const docData = documentToPlainObject(response);
-      const transformed = this.transformDocument(docData);
-
-      // Cache the result
-      this.cache.set(documentId, {
-        data: transformed,
-        timestamp: Date.now()
-      });
-
-      return transformed;
-    } catch (error) {
-      logger.error(`Error getting ${this.documentType} document:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Create a new document through the typed `Document` path.
-   * Binary fields should already be `Uint8Array` when they reach this layer.
-   */
-  async create(ownerId: string, data: Record<string, unknown>): Promise<T> {
-    return this.createWithOptions(ownerId, data)
-  }
-
-  async createWithOptions(
-    ownerId: string,
-    data: Record<string, unknown>,
-    options?: {
-      documentId?: string;
-      entropy?: Uint8Array;
-    }
-  ): Promise<T> {
-    try {
-      logger.info(`Creating ${this.documentType} document:`, data);
-
-      const result = await stateTransitionService.createDocument(
-        this.contractId,
-        this.documentType,
-        ownerId,
-        data,
-        options
-      );
-
-      if (!result.success || !result.document) {
-        throw new Error(result.error || 'Failed to create document');
-      }
-
-      // Clear relevant caches
-      this.clearCache();
-
-      const transformed = this.transformDocument(result.document);
-
-      // Preserve creation confirmation status for callers that need UX handling.
-      if (typeof result.confirmed === 'boolean' && transformed && typeof transformed === 'object') {
-        (transformed as Record<string, unknown>).__createConfirmed = result.confirmed;
-      }
-
-      return transformed;
-    } catch (error) {
-      logger.error(`Error creating ${this.documentType} document:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Extract content fields from a transformed document, stripping system metadata.
-   * Used to build the full document data for replacements (updates).
-   * Subclasses can override for custom extraction logic.
-   */
-  protected extractContentFields(doc: T): Record<string, unknown> {
-    const systemFields = new Set([
-      'id', 'ownerId', 'createdAt', 'updatedAt',
-      '$id', '$ownerId', '$createdAt', '$updatedAt', '$revision', '$type', 'revision',
-    ]);
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(doc as Record<string, unknown>)) {
-      if (!systemFields.has(key) && value !== undefined) {
-        result[key] = value;
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Update a document through the typed `Document` replace path.
-   * Binary fields should already be `Uint8Array` when they reach this layer.
-   */
-  async update(documentId: string, ownerId: string, data: Record<string, unknown>): Promise<T> {
-    try {
-      logger.info(`Updating ${this.documentType} document ${documentId}:`, data);
-
-      // Clear cache to ensure we get fresh revision from network
-      this.cache.delete(documentId);
-
-      // Get current document to find revision and existing data
-      const currentDoc = await this.get(documentId);
-      if (!currentDoc) {
-        throw new Error('Document not found');
-      }
-      const revision = (currentDoc as Record<string, unknown>).$revision as number || 0;
-      logger.info(`Current revision for ${this.documentType} document ${documentId}: ${revision}`);
-
-      // Merge existing document data with partial update.
-      // Document replacement requires ALL fields, not just the changed ones.
-      const existingData = this.extractContentFields(currentDoc);
-      const mergedData = { ...existingData, ...data };
-      // Strip undefined values — they represent intentionally cleared optional fields
-      for (const key of Object.keys(mergedData)) {
-        if (mergedData[key] === undefined) delete mergedData[key];
-      }
-
-      const result = await stateTransitionService.updateDocument(
-        this.contractId,
-        this.documentType,
-        documentId,
-        ownerId,
-        mergedData,
-        revision
-      );
-
-      if (!result.success || !result.document) {
-        throw new Error(result.error || 'Failed to update document');
-      }
-
-      // Clear cache for this document
-      this.cache.delete(documentId);
-
-      return this.transformDocument(result.document);
-    } catch (error) {
-      logger.error(`Error updating ${this.documentType} document:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Delete a document
-   */
-  async delete(documentId: string, ownerId: string): Promise<boolean> {
-    try {
-      logger.info(`Deleting ${this.documentType} document ${documentId}`);
-
-      const result = await stateTransitionService.deleteDocument(
-        this.contractId,
-        this.documentType,
-        documentId,
-        ownerId
-      );
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to delete document');
-      }
-
-      // Clear cache
-      this.cache.delete(documentId);
-
-      return true;
-    } catch (error) {
-      logger.error(`Error deleting ${this.documentType} document:`, error);
-      return false;
-    }
-  }
-
-  /**
-   * Transform raw document to typed object
-   * Override in subclasses for custom transformation
-   */
-  protected abstract transformDocument(doc: Record<string, unknown>, options?: Record<string, unknown>): T;
-
-  /**
-   * Clear cache
-   */
-  clearCache(documentId?: string): void {
-    if (documentId) {
-      this.cache.delete(documentId);
-    } else {
-      this.cache.clear();
-    }
-  }
-
-  /**
-   * Clean up expired cache entries
-   */
-  cleanupCache(): void {
-    const now = Date.now();
-    for (const [key, value] of Array.from(this.cache.entries())) {
-      if (now - value.timestamp > this.CACHE_TTL) {
-        this.cache.delete(key);
-      }
-    }
-  }
+  const document = new Document({
+    properties: existing.properties,
+    documentTypeName: existing.documentTypeName,
+    dataContractId: CONTRACT_ID,
+    ownerId: identityId,
+    revision: existing.revision,
+    id: existing.id,
+  })
+  await sdk.documents.delete({ document, identityKey: sign.identityKey as never, signer: sign.signer })
 }

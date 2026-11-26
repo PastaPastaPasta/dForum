@@ -9,3 +9,6 @@ out/
 coverage/
 test-results/
 playwright-report/
+data/*
+!data/snapshot.json
+tsconfig.tsbuildinfo
