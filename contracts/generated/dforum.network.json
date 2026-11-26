@@ -42,7 +42,9 @@
         },
         "interim": {
           "$type": "appointedModerators",
-          "identities": []
+          "identities": [
+            "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM"
+          ]
         }
       }
     }

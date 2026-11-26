@@ -340,9 +340,11 @@ function profileType(mode) {
 
 function moderatorsFor(mode, deployer) {
   if (mode === 'team') {
-    return { $type: 'appointedModerators', identities: deployer ? [deployer] : [] };
+    if (!deployer) throw new Error('team mode requires --deployer <identityId>: the appointed moderator set must be non-empty (an appointedModerators config with an empty set is refused). The deployer is the initial moderator; add team members later with a contract update.');
+    return { $type: 'appointedModerators', identities: [deployer] };
   }
   if (mode === 'network') {
+    if (!deployer) throw new Error('network mode requires --deployer <identityId> for the interim appointed set');
     return {
       $type: 'elected',
       seatContestable: false,
@@ -354,7 +356,7 @@ function moderatorsFor(mode, deployer) {
         report: ['deleteDocuments', 'changeDocumentFields'],
         profile: ['deleteDocuments', 'changeDocumentFields'],
       },
-      interim: { $type: 'appointedModerators', identities: deployer ? [deployer] : [] },
+      interim: { $type: 'appointedModerators', identities: [deployer] },
     };
   }
   return null;

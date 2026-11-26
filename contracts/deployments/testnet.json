@@ -1,0 +1,24 @@
+{
+  "network": "testnet",
+  "identity": {
+    "id": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
+    "registeredAt": "2026-11-26T07:03:00Z",
+    "assetLockHeight": 1598723,
+    "assetLockTxid": "2c478aff82332c8e4b3dc5bfcd86e643b6b83884f57389fe0575f2d4be10b390",
+    "assetLockCreditIndex": 0,
+    "balanceCreditsAfterCreate": "99865840240"
+  },
+  "contracts": {
+    "team": {
+      "contractId": "ozZNp21WNWLx79aJXFo2ScEaMtBc9vvfUonqmzADM16",
+      "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
+      "mode": "team",
+      "version": 1,
+      "identityNonce": "1",
+      "registeredAt": "2026-11-26T07:06:00Z",
+      "costCredits": "84722365420",
+      "sizeBytes": 7587,
+      "note": "registered via scripts/register-contract.mjs; wait phase failed on the discovered testnet nodes but the broadcast landed (nonce 1 consumed, balance dropped exactly the computed cost, contract fetches with version 1)"
+    }
+  }
+}
