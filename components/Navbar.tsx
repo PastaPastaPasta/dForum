@@ -8,6 +8,8 @@ import { useSession } from '@/lib/session'
 import { Avatar } from '@/components/Avatar'
 import { getRoster } from '@/lib/services/moderation-service'
 
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ''
+
 export function Navbar() {
   const { session, ready, signOut } = useSession()
   const pathname = usePathname()
@@ -71,14 +73,21 @@ export function Navbar() {
         </Link>
 
         <div className="flex-1 flex justify-center min-w-0">
-          <Link
-            href="/search"
-            aria-label="Search dForum"
+          <form
+            action={`${BASE_PATH}/search/`}
+            method="get"
+            role="search"
             className="group flex items-center gap-2 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 h-9 w-full max-w-md text-sm text-[#93a1bd] hover:border-[#008CE7] transition"
           >
             <Search className="w-4 h-4 shrink-0" aria-hidden="true" />
-            <span className="truncate flex-1 text-left">Search dForum…</span>
-          </Link>
+            <input
+              type="search"
+              name="q"
+              aria-label="Search threads"
+              placeholder="Search dForum…"
+              className="bg-transparent flex-1 min-w-0 outline-none placeholder:text-[#93a1bd] text-left"
+            />
+          </form>
         </div>
 
         <nav aria-label="Account" className="flex items-center gap-1 text-sm">

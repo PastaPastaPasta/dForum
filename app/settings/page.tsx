@@ -9,6 +9,7 @@ import { Avatar } from '@/components/Avatar'
 import { useSession } from '@/lib/session'
 import { query, createDocument, replaceDocument } from '@/lib/services/document-service'
 import { LIMITS } from '@/lib/constants'
+import { redactWif } from '@/lib/redact'
 import { shortId, safeHttpUrl } from '@/lib/utils'
 
 interface ProfileDraft {
@@ -168,7 +169,7 @@ export default function SettingsPage() {
       }
       setSaved(true)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save — try again in a moment')
+      setError(redactWif(e instanceof Error ? e.message : 'Failed to save — try again in a moment'))
     } finally {
       setSaving(false)
     }
@@ -265,14 +266,14 @@ export default function SettingsPage() {
                 )}
               </div>
               <div>
-                <label htmlFor="signature" className="text-sm font-medium text-[#93a1bd]">Signature</label>
+                <label htmlFor="signature" className="text-sm font-medium text-[#93a1bd]">Signature <span className="text-[#93a1bd] font-normal">(shown on your profile)</span></label>
                 <input
                   id="signature"
                   value={draft.signature}
                   onChange={(e) => { setDraft((d) => ({ ...d, signature: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.signature}
                   className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
-                  placeholder="A sign-off for your posts"
+                  placeholder="Shown on your profile"
                 />
                 <CharCount count={draft.signature.length} max={LIMITS.signature} />
               </div>

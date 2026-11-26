@@ -122,7 +122,7 @@ async function main() {
         if (newBalance !== undefined) break;
       } catch (e) {
         const msg = String(e?.message ?? e);
-        console.log(`  top-up attempt ${attempt} refused: ${msg.slice(0, 200)}`);
+        console.log(`  top-up attempt ${attempt} refused: ${redactWif(msg.slice(0, 200))}`);
         if (attempt === 8) throw e;
         await new Promise((r) => setTimeout(r, 20000));
       }

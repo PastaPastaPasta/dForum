@@ -34,10 +34,20 @@ describe('buildAuthorUpdate — stored moderator fields pass through unchanged',
     expect(out.bio).toBe('old') // untouched
   })
 
-  it('adds author-owned fields and ignores unknown attempts that are not moderator-owned', () => {
+  it('adds author-owned fields; unknown non-moderator fields pass through (the chain rejects them)', () => {
+    // Documents the actual behavior: buildAuthorUpdate only guarantees that
+    // moderator-owned fields are dropped from the author's attempt. Author-
+    // owned and unknown fields are passed through to the write — the contract
+    // then validates and rejects anything not in the profile type.
     const out = buildAuthorUpdate('profile', {}, { displayName: 'N', website: 'https://x', bogus: 1 })
     expect(out.displayName).toBe('N')
     expect(out.website).toBe('https://x')
+    expect(out.bogus).toBe(1)
+  })
+
+  it('refuses a change that tries to set a moderator-owned field via the changes object', () => {
+    const out = buildAuthorUpdate('profile', {}, { modState: 99 })
+    expect(out.modState).toBeUndefined()
   })
 })
 

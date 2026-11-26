@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { MessageSquare, Send, Lock, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
@@ -15,6 +15,7 @@ import { useLive } from '@/components/LiveFeed'
 import type { SnapshotThread, StaticPost } from '@/lib/services/snapshot-server'
 import { LIMITS } from '@/lib/constants'
 import { beforePost, earliestOwnerPost, type OpeningPost } from '@/lib/services/orphan'
+import { redactWif } from '@/lib/redact'
 import { LiveUnavailable } from '@/components/LiveUnavailable'
 
 interface LiveThread {
@@ -41,7 +42,7 @@ interface LivePost {
 }
 
 type LoadResult =
-  | { status: 'ok'; thread: LiveThread; posts: LivePost[]; truncated: boolean; opening: OpeningPost | null }
+  | { status: 'ok'; thread: LiveThread; posts: LivePost[]; truncated: boolean; opening: OpeningPost | null | undefined }
   | { status: 'missing' }
   | { status: 'error' }
 
@@ -65,11 +66,15 @@ export default function ThreadClient({
   const [moreCursor, setMoreCursor] = useState<string | null>(null)
   const [moreLoading, setMoreLoading] = useState(false)
   const [moreError, setMoreError] = useState(false)
+  const [posted, setPosted] = useState<string | null>(null)
 
+  const loadMoreTokenRef = useRef(0)
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
-  // Reset the paging state when the thread changes.
+  // Reset the paging state when the thread changes; any in-flight loadMore
+  // for the previous thread is abandoned.
   useEffect(() => {
+    loadMoreTokenRef.current += 1
     setMorePosts([])
     setMoreCursor(null)
     setMoreError(false)
@@ -125,6 +130,9 @@ export default function ThreadClient({
   const visiblePosts = lockedAt != null
     ? atOrAfterOpening.filter((p) => p.createdAt <= lockedAt)
     : atOrAfterOpening
+  // Hidden posts render as indicators, not content — they are not counted as
+  // posts in the header.
+  const shownPosts = visiblePosts.filter((p) => !isModerated(p.modState))
 
   // Resolve author display names for every visible post.
   const authorIds = visiblePosts.map((p) => p.authorId)
@@ -133,6 +141,8 @@ export default function ThreadClient({
 
   async function loadMore() {
     if (moreLoading || !moreCursor) return
+    const token = loadMoreTokenRef.current
+    const expected = threadId
     setMoreLoading(true)
     setMoreError(false)
     try {
@@ -152,16 +162,20 @@ export default function ThreadClient({
         modState: (p.properties.modState as number | null) ?? null,
         replyToId: (p.properties.replyToId as string | null) ?? null,
       }))
+      // A thread change or newer loadMore supersedes this response — drop it.
+      if (token !== loadMoreTokenRef.current || expected !== threadId) return
       setMorePosts((prev) => [...prev, ...mapped.filter((m) => !prev.some((x) => x.id === m.id))])
       setMoreCursor(docs.length === POST_LIMIT && last ? last.id : null)
     } catch {
+      if (token !== loadMoreTokenRef.current || expected !== threadId) return
       setMoreError(true)
     } finally {
-      setMoreLoading(false)
+      if (token === loadMoreTokenRef.current && expected === threadId) setMoreLoading(false)
     }
   }
 
   async function handlePost() {
+    if (posting) return // double-click / Enter during the platform write
     if (!session || !thread) return
     if (!replyBody.trim()) {
       setPostError('Write something first — a reply needs text.')
@@ -173,6 +187,7 @@ export default function ThreadClient({
     }
     setPosting(true)
     setPostError(null)
+    setPosted(null)
     const body = replyBody.trim()
     if (new TextEncoder().encode(body).length > LIMITS.bodyMaxBytes) {
       setPostError(`Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes.`)
@@ -186,6 +201,7 @@ export default function ThreadClient({
         body,
       })
       setReplyBody('')
+      setPosted('Reply posted')
       setCreatedPosts((prev) => [
         ...prev,
         {
@@ -199,7 +215,8 @@ export default function ThreadClient({
         },
       ])
     } catch (e) {
-      setPostError(e instanceof Error ? e.message : 'Failed to post — try again in a moment')
+      setPostError(redactWif(e instanceof Error ? e.message : 'Failed to post — try again in a moment'))
+      setPosted(null)
     } finally {
       setPosting(false)
     }
@@ -288,10 +305,10 @@ export default function ThreadClient({
             </div>
           ) : (
             <>
-              <h1 className="mt-3 text-2xl sm:text-3xl font-bold tracking-tight">{thread?.title ?? '…'}</h1>
+              <h1 className="mt-3 text-2xl sm:text-3xl font-bold tracking-tight break-words">{thread?.title ?? '…'}</h1>
               <div className="mt-3 flex items-center gap-3 text-sm text-[#93a1bd] flex-wrap">
                 {(isLiveOk || staticPosts.length > 0) && (
-                  <span className="inline-flex items-center gap-1.5"><MessageSquare className="w-4 h-4" aria-hidden="true" />{visiblePosts.length} post{visiblePosts.length === 1 ? '' : 's'}</span>
+                  <span className="inline-flex items-center gap-1.5"><MessageSquare className="w-4 h-4" aria-hidden="true" />{shownPosts.length} post{shownPosts.length === 1 ? '' : 's'}</span>
                 )}
                 {liveLoading && staticPosts.length === 0 && <span className="inline-flex items-center gap-1.5"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Loading posts…</span>}
                 {locked && <span className="inline-flex items-center gap-1 text-amber-400"><Lock className="w-3.5 h-3.5" aria-hidden="true" /> locked</span>}
@@ -321,8 +338,8 @@ export default function ThreadClient({
                     {isLiveOk ? 'No visible posts in this thread.' : 'Posts unavailable — the live read failed and the snapshot had none.'}
                   </p>
                 )}
-                {truncated && (
-                  <p className="text-xs text-[#93a1bd]">Showing the first {POST_LIMIT + morePosts.length} posts of this thread.</p>
+                {truncated && moreCursor != null && (
+                  <p className="text-xs text-[#93a1bd]">Showing the first {visiblePosts.length} posts of this thread — load more below.</p>
                 )}
                 {isLiveOk && moreCursor && (
                   <div className="mt-2">
@@ -360,15 +377,17 @@ export default function ThreadClient({
                       placeholder="Write your reply…"
                       className="mt-2 w-full rounded-lg border border-input bg-[#0b1220] p-3 text-sm placeholder:text-[#93a1bd] resize-y"
                     />
-                    <div className="mt-1 flex items-center justify-between text-xs text-[#93a1bd]">
-                      <span role="status" className="min-h-[1rem]">{postError ? <span className="text-red-400">{postError}</span> : ''}</span>
-                      <span>{new TextEncoder().encode(replyBody).length}/{LIMITS.bodyMaxBytes} bytes</span>
+                    <div className="mt-1 flex items-center justify-between text-xs text-[#93a1bd] gap-2">
+                      <span role="alert" className="min-h-[1rem]">
+                        {postError ? <span className="text-red-400">{postError}</span> : posted ? <span className="text-emerald-400">{posted}</span> : ''}
+                      </span>
+                      <span>{replyBody.length}/{LIMITS.body} chars</span>
                     </div>
                     <div className="mt-2 flex justify-end">
                       <button
                         onClick={handlePost}
-                        aria-disabled={posting || !replyBody.trim()}
-                        className="btn-primary inline-flex items-center gap-2 px-4 py-2 font-medium aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
+                        disabled={posting || !replyBody.trim()}
+                        className="btn-primary inline-flex items-center gap-2 px-4 py-2 font-medium"
                       >
                         {posting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
                         {posting ? 'Posting…' : 'Post reply'}
@@ -456,9 +475,26 @@ async function loadThread(id: string): Promise<LoadResult> {
     if (!thread) return { status: 'missing' }
     const ownerId = thread.ownerId ?? null
     const forumId = (thread.properties.forumId as string) ?? ''
-    const [posts, opening, forumDoc] = await Promise.all([
-      query('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: POST_LIMIT + 1 }),
-      ownerId ? earliestOwnerPost(thread.id, ownerId, thread.createdAt) : Promise.resolve(null),
+    // Resolve the opening post first and start the posts slice AT it — pre-
+    // opening spam must not fill the first page. A failed orphan read is not
+    // a "this thread no longer exists" verdict: opening stays undefined
+    // (fail open) and the live posts render without the orphan claim.
+    let opening: OpeningPost | null | undefined
+    if (ownerId) {
+      try {
+        opening = await earliestOwnerPost(thread.id, ownerId, thread.createdAt)
+      } catch {
+        opening = undefined
+      }
+    } else {
+      opening = null
+    }
+    const [posts, forumDoc] = await Promise.all([
+      query('post', {
+        where: [['threadId', '==', thread.id], ...(opening ? [['$createdAt', '>=', opening.createdAt]] as [string, string, unknown][] : [])],
+        orderBy: [['$createdAt', 'asc']],
+        limit: POST_LIMIT + 1,
+      }),
       forumId ? get('forum', forumId).catch(() => null) : Promise.resolve(null),
     ])
     const truncated = posts.length > POST_LIMIT
@@ -469,7 +505,7 @@ async function loadThread(id: string): Promise<LoadResult> {
         id: thread.id,
         title: (thread.properties.title as string) ?? '',
         forumId,
-        forumSlug: null,
+        forumSlug: (forumDoc?.properties.slug as string) ?? null,
         forumTitle: (forumDoc?.properties.title as string) ?? null,
         tags: Array.isArray(thread.properties.tags) ? (thread.properties.tags as string[]) : [],
         sticky: Boolean(thread.properties.sticky),

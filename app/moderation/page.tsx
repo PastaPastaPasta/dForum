@@ -289,6 +289,7 @@ export default function ModerationPage() {
 
   async function handleValidate() {
     if (!hostIsCanon) return // hard refusal on non-canonical hosts (H1)
+    if (inFlightRef.current > 0) return // a moderator lease is in flight — do not start a second sign path
     if (!identityId.trim() || !wif.trim()) return
     const gen = wipeGenRef.current
     const identity = identityId.trim()
@@ -524,7 +525,7 @@ export default function ModerationPage() {
             return
           }
         }
-        if (!window.confirm(`Delete this ${doc.type}? It is removed from view — the chain keeps no copy of its contents. This cannot be undone in the UI.`)) {
+        if (!window.confirm(`Delete this ${doc.type}? It is removed from live view — the chain keeps only a short reference (no contents), and the prerendered static page can keep serving until the next snapshot rebuild. This cannot be undone.`)) {
           setDocActionBusy(null)
           return
         }
@@ -655,17 +656,15 @@ export default function ModerationPage() {
                 )}
               </div>
               <p className="mt-2 text-sm text-[#93a1bd]">
-                Moderation is signed with a <strong>CRITICAL</strong> authentication key — the session key you log in with is HIGH and
-                cannot moderate. Paste your own CRITICAL key WIF (from your moderator identity). It is kept in
-                this tab&apos;s memory only — never stored, never written to any other origin. The{' '}
-                <strong>owner</strong> identity holds full contract authority (roster + moderation config) and is refused on non-localhost
-                hosts: keep it offline for contract updates. Use an appointed moderator identity here.
+                Moderation is signed with a <strong>CRITICAL</strong> key from your moderator identity — the session key (HIGH) cannot moderate.
+                Your WIF is kept in this tab&apos;s memory only. The <strong>owner</strong> holds full contract authority and is refused on non-localhost hosts — keep it offline; use an appointed moderator identity here.
               </p>
               <div className="mt-4 grid sm:grid-cols-2 gap-3">
                 <label className="block">
                   <span className="text-xs text-[#93a1bd]">Moderator identity ID</span>
                   <input
                     value={identityId}
+                    disabled={validating || actionBusy != null || docActionBusy != null}
                     onChange={(e) => {
                       wipeGenRef.current += 1
                       try { signerRef.current?.free() } catch { /* freed */ }
@@ -683,6 +682,7 @@ export default function ModerationPage() {
                   <input
                     type="password"
                     value={wif}
+                    disabled={validating || actionBusy != null || docActionBusy != null}
                     onChange={(e) => {
                       wipeGenRef.current += 1
                       try { signerRef.current?.free() } catch { /* freed */ }
@@ -708,7 +708,7 @@ export default function ModerationPage() {
               <div className="mt-3 flex items-center gap-3 flex-wrap">
                 <button
                   onClick={handleValidate}
-                  disabled={validating || !identityId.trim() || !wif.trim() || !hostIsCanon || !host}
+                  disabled={validating || actionBusy != null || docActionBusy != null || !identityId.trim() || !wif.trim() || !hostIsCanon || !host}
                   className="btn-primary px-4 py-2 text-sm font-semibold"
                 >
                   {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
@@ -721,7 +721,7 @@ export default function ModerationPage() {
                 )}
               </div>
               {validation && !validation.ok && (
-                <p role="alert" className="mt-3 text-sm text-red-400">✗ {validation.reason}</p>
+                <p role="alert" className="mt-3 text-sm text-red-400">✗ {redactWif(validation.reason ?? 'Validation failed')}</p>
               )}
               {validation?.ok && isModerator && (
                 <p role="status" className="mt-3 text-sm text-emerald-400">✓ Signed in as a contract moderator ({isOwner ? 'owner' : 'appointed'}).</p>
@@ -943,11 +943,6 @@ export default function ModerationPage() {
               )}
             </section>
 
-            <footer className="text-xs text-[#93a1bd] flex items-center gap-2 flex-wrap">
-              <span>dForum moderation · {NETWORK}</span>
-              <span>·</span>
-              <Link href="/" className="text-[#4db3ff] hover:underline">back to the forum</Link>
-            </footer>
           </div>
         )}
       </main>
@@ -1050,7 +1045,8 @@ function SmallButton({ icon, label, active, danger, disabled, busy, onClick }: {
     <button
       onClick={onClick}
       disabled={disabled}
-      title={active ? `${label} (currently on — click to toggle off)` : label}
+      aria-pressed={active === undefined || active === null ? undefined : Boolean(active)}
+      title={active ? `${label} — currently on, click to turn off` : label}
       className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition disabled:opacity-40 disabled:cursor-not-allowed ${cls}`}
     >
       {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}

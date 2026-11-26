@@ -1,12 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { MessageSquare, MessagesSquare, Heart, TrendingUp, FolderOpen, Loader2, Pencil } from 'lucide-react'
+import { MessageSquare, TrendingUp, FolderOpen, Loader2, Pencil } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
 import { useSession } from '@/lib/session'
-import { query, count } from '@/lib/services/document-service'
+import { query } from '@/lib/services/document-service'
 import { useLive } from '@/components/LiveFeed'
 import { useProfileNames } from '@/lib/use-profiles'
 import { filterListable } from '@/lib/services/orphan'
@@ -22,28 +22,29 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   const { live, loading, error } = useLive(() => loadLive(snap), 'home')
   const byStickyThenRecent = (a: SnapshotThread, b: SnapshotThread) =>
     a.sticky !== b.sticky ? (a.sticky ? -1 : 1) : b.createdAt - a.createdAt
-  // Live threads come first; snapshot threads fill the rest (deduped) so a
-  // live scan that finds nothing never blanks the page.
+  // First paint shows the snapshot (build-time listed surface). Once live
+  // resolves, the live list wins outright — snapshot threads that are hidden
+  // or orphaned since the snapshot must not be resurrected.
   const liveThreads = (live?.threads ?? []).filter((t) => t.modState == null)
-  const seenIds = new Set(liveThreads.map((t) => t.id))
-  const filler = snap.threads.filter((t) => t.modState == null && !seenIds.has(t.id))
-  const threads = [...liveThreads, ...filler].sort(byStickyThenRecent)
+  const threads = live != null ? liveThreads : snap.threads.filter((t) => t.modState == null)
+  const listedThreads = threads.slice().sort(byStickyThenRecent)
   const forumCategoryTitle = new Map(snap.categories.map((c) => [c.id, c.title || c.slug || null]))
   const forums = (live?.forums ?? snap.forums)
     .filter((f) => !f.archived)
     .map((f) => ({ ...f, categoryLabel: forumCategoryTitle.get(f.categoryId ?? '') ?? null }))
     .sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title))
 
-  const authorIds = threads.slice(0, 12).map((t) => t.ownerId)
+  const authorIds = listedThreads.slice(0, 12).map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
   const nameOf = (id: string): string => snap.profiles[id] ?? profiles[id] ?? id.slice(0, 12)
 
+  // Honest counts — every tile is derived from the same listed surface the
+  // page shows. Hidden/orphaned threads are deliberately not public numbers,
+  // so raw chain totals are never displayed.
   const counts = {
-    categories: live?.counts?.categories ?? snap.counts.categories,
-    forums: live?.forums.length ?? snap.forums.length,
-    threads: live?.counts?.threads ?? snap.counts.threads,
-    posts: live?.counts?.posts ?? snap.counts.posts,
-    reactions: live?.counts?.reactions ?? snap.counts.reactions,
+    categories: snap.categories.length,
+    forums: forums.length,
+    threads: listedThreads.length,
   }
 
   return (
@@ -58,13 +59,13 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
           </div>
         )}
 
-        <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
+        <section id="latest-threads" className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
           <SectionHeader title="Latest threads" subtitle="Newest conversations across all forums" />
           <div className="grid grid-cols-1 gap-3">
-            {threads.slice(0, 12).map((t) => (
+            {listedThreads.slice(0, 12).map((t) => (
               <ThreadRow key={t.id} thread={t as Parameters<typeof ThreadRow>[0]['thread']} nameOf={nameOf} />
             ))}
-            {threads.length === 0 && (
+            {listedThreads.length === 0 && (
               <div className="text-sm text-[#93a1bd] py-8 text-center">
                 {session ? (
                   <Link href="/new" className="text-[#4db3ff] hover:underline">Start the first thread</Link>
@@ -107,7 +108,7 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   )
 }
 
-function Hero({ counts, session, loading, error }: { counts: Snapshot['counts']; session: { identityId: string } | null; loading: boolean; error: boolean }) {
+function Hero({ counts, session, loading, error }: { counts: { categories: number; forums: number; threads: number }; session: { identityId: string } | null; loading: boolean; error: boolean }) {
   return (
     <section className="border-b border-[#22304e] bg-gradient-to-b from-[#101b31] to-[#0b1220]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
@@ -124,10 +125,10 @@ function Hero({ counts, session, loading, error }: { counts: Snapshot['counts'];
               </p>
             )}
             <h1 className="mt-4 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
-              A decentralized forum<br />on Dash Platform
+              A forum on<br />Dash Platform
             </h1>
             <p className="mt-4 text-[#93a1bd]">
-              Centralized ownership, team-based moderation, every message on-chain. Login with Dash — no accounts, no servers.
+              Centralized ownership, team-based moderation, every message on-chain. Login with Dash.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -139,12 +140,12 @@ function Hero({ counts, session, loading, error }: { counts: Snapshot['counts'];
                 Explore threads
               </Link>
             ) : (
-              <Link
-                href="/login"
+              <a
+                href="#latest-threads"
                 className="btn-primary px-4 py-2.5 font-medium"
               >
-                Login with Dash
-              </Link>
+                Explore threads
+              </a>
             )}
             {session && (
               <Link
@@ -156,12 +157,10 @@ function Hero({ counts, session, loading, error }: { counts: Snapshot['counts'];
             )}
           </div>
         </div>
-        <dl className="mt-8 flex gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible lg:grid-cols-5">
+        <dl className="mt-8 flex gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-3 sm:overflow-visible">
           <Stat icon={<FolderOpen className="w-4 h-4" />} value={counts.categories} label="Categories" />
           <Stat icon={<MessageSquare className="w-4 h-4" />} value={counts.forums} label="Forums" />
           <Stat icon={<TrendingUp className="w-4 h-4" />} value={counts.threads} label="Threads" />
-          <Stat icon={<MessagesSquare className="w-4 h-4" />} value={counts.posts} label="Posts" />
-          <Stat icon={<Heart className="w-4 h-4" />} value={counts.reactions} label="Reactions" />
         </dl>
       </div>
     </section>
@@ -210,17 +209,7 @@ const HOME_LIMIT = 25
 async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
   const snap = snapshot
   const forumById = new Map(snap.forums.map((f) => [f.id, f.slug ?? null]))
-  const [forumDocs, threadCount, postCount, reactionCount] = await Promise.all([
-    query('forum', { limit: 50 }),
-    count('thread'),
-    count('post'),
-    count('reaction'),
-  ])
-  const sum = (m: Map<string, bigint>) => {
-    let total = 0n
-    for (const v of m.values()) total += v
-    return Number(total)
-  }
+  const forumDocs = await query('forum', { limit: 50 })
   // Paginate through the thread index until HOME_TARGET listable threads are
   // found or the page budget is exhausted — so orphan spam cannot push real
   // threads out of the window.
@@ -278,11 +267,5 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
     ...snap,
     threads: listed,
     forums,
-    counts: {
-      ...snap.counts,
-      threads: sum(threadCount),
-      posts: sum(postCount),
-      reactions: sum(reactionCount),
-    },
   }
 }

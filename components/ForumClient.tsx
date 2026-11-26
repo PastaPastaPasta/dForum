@@ -32,7 +32,6 @@ interface LiveForum {
   title?: string
   description?: string
   threads: LiveThread[]
-  truncated: boolean
   /** Exclusive $id cursor of the last doc in the recent-page — null when the recent window is complete. */
   cursor: string | null
 }
@@ -49,8 +48,6 @@ type LoadResult =
   | { status: 'missing' }
   | { status: 'error' }
 
-const MAX_LIST = 25
-
 export default function ForumClient({ slug, snapshot }: { slug: string; snapshot: Snapshot | null }) {
   const snap = snapshot
   const { session } = useSession()
@@ -61,6 +58,15 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   const [moreCursor, setMoreCursor] = useState<string | null>(null)
   const [moreLoading, setMoreLoading] = useState(false)
   const [moreError, setMoreError] = useState(false)
+
+  // Reset the paging state when the slug changes — the 404 fallback can
+  // reuse this component with a new slug.
+  useEffect(() => {
+    setMoreThreads([])
+    setMoreCursor(null)
+    setMoreError(false)
+    setMoreLoading(false)
+  }, [slug])
 
   // Arm load-more once the live window comes back: anything past the recent
   // page is unreachable without a button.
@@ -81,7 +87,9 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
         limit: 25,
         startAfter: moreCursor,
       })
-      const mapped = docs.map(docToThread).filter((t) => !moreThreads.some((x) => x.id === t.id))
+      const initial = live?.status === 'ok' ? live.forum.threads : []
+      const seenIds = new Set([...initial, ...moreThreads].map((t) => t.id))
+      const mapped = docs.map(docToThread).filter((t) => !seenIds.has(t.id))
       const listed = await filterListable(mapped, 4)
       const last = docs[docs.length - 1] ?? null
       setMoreThreads((prev) => [...prev, ...listed])
@@ -94,8 +102,16 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   }
 
   const snapThreads = (snap?.threads ?? []).filter((t) => t.forumSlug === slug).map(snapshotThreadToLive)
-  const rawThreads = live?.status === 'ok' ? ([...live.forum.threads, ...moreThreads] as LiveThread[]) : [...snapThreads, ...moreThreads]
-  const listed = rawThreads.filter((t) => !isModerated(t.modState)).sort(byStickyThenRecent).slice(0, 60)
+  // Dedupe the merged list — the live list and the snapshot fallback are
+  // different surfaces; a thread can appear in both after a connection flip.
+  const seenIds = new Set<string>()
+  const rawThreads: LiveThread[] = []
+  for (const t of (live?.status === 'ok' ? [...live.forum.threads, ...moreThreads] : [...snapThreads, ...moreThreads]) as LiveThread[]) {
+    if (seenIds.has(t.id)) continue
+    seenIds.add(t.id)
+    rawThreads.push(t)
+  }
+  const listed = rawThreads.filter((t) => !isModerated(t.modState)).sort(byStickyThenRecent)
   const forumTitle = forum?.title ?? (live?.status === 'ok' ? live.forum.title : null) ?? slug
   const forumDesc = forum?.description ?? (live?.status === 'ok' ? live.forum.description : null) ?? ''
   const status = live?.status ?? null
@@ -162,13 +178,8 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
             {showStaleNote && <LiveUnavailable className="mt-4" />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
-              <span>{listed.length} shown</span>
-              <span>·</span>
-              {session ? (
-                <span className="text-emerald-400">Open</span>
-              ) : (
-                <Link href="/login" className="text-amber-400 hover:underline">Login to post</Link>
-              )}
+              <span>{listed.length} thread{listed.length === 1 ? '' : 's'}</span>
+              {!session && <Link href="/login" className="text-[#4db3ff] hover:underline">Login to post</Link>}
             </div>
           </div>
         </section>
@@ -286,7 +297,6 @@ async function loadLiveForum(slug: string): Promise<LoadResult> {
     // Orphan rule — drop threads with no visible opening post (bounded to
     // the threads we'd list; one ascending query per thread).
     const threads = await filterListable([...byId.values()], 4)
-    const truncated = recent.length === 25 || pinned.length === 10
     return {
       status: 'ok',
       forum: {
@@ -294,7 +304,6 @@ async function loadLiveForum(slug: string): Promise<LoadResult> {
         title: (fdoc.properties.title as string) ?? undefined,
         description: (fdoc.properties.description as string) ?? undefined,
         threads,
-        truncated,
         cursor: recent.length === 25 ? recent[recent.length - 1].id : null,
       },
     }

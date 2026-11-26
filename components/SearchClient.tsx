@@ -8,7 +8,7 @@ import type { Snapshot } from '@/lib/services/snapshot-server'
 import { query } from '@/lib/services/document-service'
 import { isModerated, shortId } from '@/lib/utils'
 import { useProfileNames } from '@/lib/use-profiles'
-import { filterListable } from '@/lib/services/orphan'
+import { filterListableWithFailures } from '@/lib/services/orphan'
 import { ThreadRow } from '@/components/ThreadRow'
 import { LiveUnavailable } from '@/components/LiveUnavailable'
 
@@ -27,15 +27,19 @@ interface SearchResult {
 const MAX_LIST = 25
 
 /** Orphan verdicts are cached module-wide — a successful live verdict must
- * not be re-queried on every keystroke. */
+ * not be re-queried on every keystroke. Only checks that succeeded are
+ * cached; a failed check is an unknown, not a verdict, and is retried. */
 const orphanCache = new Map<string, boolean>()
 
 async function cachedFilter(threads: SearchResult[]): Promise<SearchResult[]> {
   const fresh = threads.filter((t) => !orphanCache.has(t.id))
   if (fresh.length) {
-    const listed = await filterListable(fresh, 4)
+    const { listed, failed } = await filterListableWithFailures(fresh, 4)
     const listedIds = new Set(listed.map((t) => t.id))
-    for (const t of fresh) orphanCache.set(t.id, listedIds.has(t.id))
+    for (const t of fresh) {
+      if (failed.has(t.id)) continue // unknown verdict — do not cache
+      orphanCache.set(t.id, listedIds.has(t.id))
+    }
   }
   return threads.filter((t) => orphanCache.get(t.id) !== false)
 }
@@ -74,7 +78,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
           createdAt: t.createdAt,
         }))
         // Orphan rule — bounded (the threads we'd show).
-        const listed = await filterListable(mapped.slice(0, MAX_LIST), 4)
+        const { listed } = await filterListableWithFailures(mapped.slice(0, MAX_LIST), 4)
         if (cancelled) return
         setLiveThreads(listed)
         setLoading(false)
@@ -173,7 +177,6 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#93a1bd]" aria-hidden="true" />
               <input
                 aria-label="Search threads"
-                autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search by title, tag, or forum…"
@@ -210,7 +213,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
             </div>
           )}
           <p className="mt-3 text-xs text-[#93a1bd]" role="status">
-            {results.length} {results.length === 1 ? 'thread' : 'threads'}
+            {loading ? 'Loading…' : `${results.length} ${results.length === 1 ? 'thread' : 'threads'}`}
           </p>
         </section>
       </main>

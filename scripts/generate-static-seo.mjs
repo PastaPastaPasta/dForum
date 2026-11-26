@@ -58,6 +58,9 @@ function sitemap() {
 function robots() {
   // Signed-in / operator surfaces are never indexed. The login page is a
   // public entry point but carries no content worth indexing.
+  // Note: crawlers only read robots.txt at the HOST ROOT, so the file is
+  // honored only when this site serves at the root (e.g. forum.dashhq.org) —
+  // on the GH Pages project site (/dForum) it is a best-effort artifact.
   const body = [
     'User-agent: *',
     'Allow: /',

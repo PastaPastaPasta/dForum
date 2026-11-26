@@ -10,6 +10,7 @@ import { useSession } from '@/lib/session'
 import { query, createDocument } from '@/lib/services/document-service'
 import type { Snapshot } from '@/lib/services/snapshot-server'
 import { LIMITS } from '@/lib/constants'
+import { redactWif } from '@/lib/redact'
 
 interface ForumOption {
   id: string
@@ -136,6 +137,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (submitting) return // a Platform write is in flight — never write twice
     // Already created a thread — the core button routes to the opening-post
     // retry instead of creating a second thread.
     if (threadCreated) {
@@ -155,7 +157,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
     if (titleTrim.length < 3) errs.title = 'A title is required (at least 3 characters)'
     const bodyTrim = body.trim()
     if (!bodyTrim) errs.body = 'An opening post is required — a thread with no posts is never listed.'
-    else if (new TextEncoder().encode(bodyTrim).length > LIMITS.bodyMaxBytes) errs.body = `Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes (4000 chars max).`
+    else if (new TextEncoder().encode(bodyTrim).length > LIMITS.bodyMaxBytes) errs.body = `Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes (${LIMITS.body} chars max).`
     if (Object.keys(errs).length) {
       setFieldError(errs)
       const first = ['forum', 'title', 'tags', 'body'].find((k) => errs[k as keyof typeof errs])
@@ -198,17 +200,18 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
         // unlisted until the post lands).
         setSubmitting(false)
         setError(
-          `Thread created, but the opening post failed: ${postError instanceof Error ? postError.message : 'error'}. Click "Finish opening post" to retry — your thread is already saved.`,
+          `Thread created, but the opening post failed: ${redactWif(postError instanceof Error ? postError.message : 'error')}. Click "Finish opening post" to retry — your thread is already saved.`,
         )
         return
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create thread — try again in a moment')
+      setError(redactWif(e instanceof Error ? e.message : 'Failed to create thread — try again in a moment'))
       setSubmitting(false)
     }
   }
 
   async function handleFinishOpeningPost() {
+    if (submitting) return
     if (!session || !session.authKeyWif || !createdThreadId || !createdForumId) return
     const bodyTrim = body.trim()
     if (!bodyTrim) {
@@ -233,7 +236,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
       setBody('')
       router.push(`/t/${encodeURIComponent(threadId)}`)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Opening post failed — try again in a moment')
+      setError(redactWif(e instanceof Error ? e.message : 'Opening post failed — try again in a moment'))
       setSubmitting(false)
     }
   }
@@ -326,7 +329,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
               {fieldError?.body ? (
                 <p id="body-error" className="mt-1 text-xs text-red-400">{fieldError.body}</p>
               ) : (
-                <p className="mt-1 text-xs text-[#93a1bd] text-right">{new TextEncoder().encode(body.trim()).length}/{LIMITS.bodyMaxBytes} bytes</p>
+                <p className="mt-1 text-xs text-[#93a1bd] text-right">{body.length}/{LIMITS.body} chars</p>
               )}
             </div>
 
@@ -339,8 +342,8 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
 
             <button
               type="submit"
-              aria-disabled={submitting}
-              className="w-full btn-primary justify-center px-5 py-3 font-semibold aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
+              disabled={submitting}
+              className="w-full btn-primary justify-center px-5 py-3 font-semibold"
             >
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Send className="w-5 h-5" aria-hidden="true" />}
               {threadCreated ? 'Finish opening post' : submitting ? 'Creating…' : 'Start thread'}

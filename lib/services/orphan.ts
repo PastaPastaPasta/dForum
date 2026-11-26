@@ -16,7 +16,7 @@
  * path (scripts/snapshot.mjs, which throws).
  */
 import bs58 from 'bs58'
-import { query } from '@/lib/services/document-service'
+import { queryRaw } from '@/lib/services/document-service'
 
 export interface Listable {
   id: string
@@ -84,11 +84,10 @@ export async function earliestOwnerPost(
   if (threadCreatedAt != null) where.push(['$createdAt', '>=', threadCreatedAt])
   let after: string | undefined
   // Bounded: 12 pages of 25 posts = the first 300 owner posts. An author
-  // who has anything really pathological past that point is outside the
-  // practical range for a forum index; movement past 12 pages still fails
-  // closed on the snapshot side (which throws) and open on the live side.
+  // with anything really pathological past that point is outside the
+  // practical range for a forum index.
   for (let page = 0; page < 12; page++) {
-    const posts = await query('post', {
+    const { docs: posts, rawCount, lastId } = await queryRaw('post', {
       where,
       orderBy: [['$createdAt', 'asc']],
       limit: 25,
@@ -104,8 +103,9 @@ export async function earliestOwnerPost(
         modState: (opening.properties?.modState as number | null) ?? null,
       }
     }
-    if (posts.length < 25) break
-    after = posts[posts.length - 1].id
+    if (rawCount < 25) break // short raw page — the author's index is exhausted
+    if (lastId == null) break // could not compute a cursor — refuse to loop forever
+    after = lastId
   }
   return null
 }
@@ -123,17 +123,32 @@ export async function hasOpeningPost(thread: Listable): Promise<boolean> {
 
 /** Orphan-filter a list of threads. Fails open (keeps the thread) on errors. */
 export async function filterListable<T extends Listable>(threads: T[], concurrency = 4): Promise<T[]> {
+  const { listed } = await filterListableWithFailures(threads, concurrency)
+  return listed
+}
+
+/** Orphan-filter, reporting which threads the checks failed on. Callers that
+ * cache verdicts (e.g. the search page) must keep only verdicts for threads
+ * that did NOT fail — a failed check is an unknown, not a "listable". */
+export async function filterListableWithFailures<T extends Listable>(
+  threads: T[],
+  concurrency = 4,
+): Promise<{ listed: T[]; failed: Set<string> }> {
   const out: T[] = []
+  const failed = new Set<string>()
   for (let i = 0; i < threads.length; i += concurrency) {
     const batch = threads.slice(i, i + concurrency)
     const results = await Promise.all(batch.map(async (t) => {
       try {
-        return [t, await hasOpeningPost(t)] as const
+        return [t, await hasOpeningPost(t), false] as const
       } catch {
-        return [t, true] as const
+        return [t, true, true] as const
       }
     }))
-    for (const [t, ok] of results) if (ok) out.push(t)
+    for (const [t, ok, failedCheck] of results) {
+      if (failedCheck) failed.add(t.id)
+      if (ok) out.push(t)
+    }
   }
-  return out
+  return { listed: out, failed }
 }

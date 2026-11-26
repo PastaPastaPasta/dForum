@@ -2,20 +2,25 @@ import type { Metadata, Viewport } from 'next'
 import { SessionProvider } from '@/lib/session'
 import './globals.css'
 
+// SITE_URL is the bare public origin (no base path); BASE_PATH is where the
+// build was served under (GH Pages: /dForum). metadataBase carries the full
+// prefix so Next joins canonicals onto the deployed path instead of the bare
+// origin — posix.join('/dForum', '/') = '/dForum', so a missing prefix here
+// means canonicals point at 404s.
 const SITE_URL = (process.env.SITE_URL || 'https://forum.dashhq.org').replace(/\/+$/, '')
+const BASE_PATH = (process.env.BASE_PATH || '').replace(/\/+$/, '')
 
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
+  metadataBase: new URL(SITE_URL + BASE_PATH),
   title: {
     default: 'dForum — a forum on Dash Platform',
     template: '%s · dForum',
   },
-  description: 'A decentralized forum on Dash Platform — centralized team moderation, all data on-chain, login with Dash.',
+  description: 'Centralized team-based moderation, every message stored on Dash Platform, login with Dash.',
   applicationName: 'dForum',
-  alternates: { canonical: '/' },
   openGraph: {
     title: 'dForum — a forum on Dash Platform',
-    description: 'A decentralized forum on Dash Platform.',
+    description: 'Centralized ownership, team-based moderation, on-chain storage — login with Dash.',
     type: 'website',
     siteName: 'dForum',
   },

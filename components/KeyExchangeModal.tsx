@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle } from 'lucide-react'
+import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle, ExternalLink } from 'lucide-react'
 import { useYapprKeyExchangeLogin, useYapprKeyRegistration } from 'platform-auth'
 import { useSession } from '@/lib/session'
 import { formatTime } from '@/lib/utils'
@@ -246,7 +246,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   {copyFailed && (
                     <div className="w-full">
                       <p className="text-xs text-amber-400">Copy failed — select the URI below</p>
-                      <input readOnly value={displayUri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-[10px] font-mono text-[#93a1bd]" aria-label="Login URI" />
+                      <input readOnly value={displayUri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-xs font-mono text-[#c4cfe0] break-all" aria-label="Login URI" />
                     </div>
                   )}
                   <p className="text-xs text-[#93a1bd] text-center">
@@ -315,6 +315,32 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   <p className="text-sm font-medium flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-[#4db3ff]" aria-hidden="true" /> Verifying keys…</p>
                 )}
               </div>
+              {registration.uri && registration.state !== 'verifying' && (
+                <div className="flex flex-col items-center gap-2">
+                  <a
+                    href={registration.uri}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-xs text-[#4db3ff] hover:border-[#008CE7] hover:text-white transition"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> Open in wallet
+                  </a>
+                  <button
+                    onClick={copy}
+                    className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? 'URI copied' : 'Copy URI'}
+                  </button>
+                  {copyFailed && (
+                    <div className="w-full">
+                      <p className="text-xs text-amber-400">Copy failed — select the URI below</p>
+                      <input readOnly value={registration.uri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-xs font-mono text-[#c4cfe0] break-all" aria-label="Key registration URI" />
+                    </div>
+                  )}
+                  <p className="text-xs text-[#93a1bd] text-center">
+                    Scan the QR with your wallet, use the link above, or paste the URI.
+                  </p>
+                </div>
+              )}
             </>
           )}
 
@@ -360,7 +386,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
-          Your wallet signs — dForum holds a HIGH-level signing key for this tab only. It can post on your behalf but cannot move funds.
+          Your wallet signs the registration; dForum then holds a HIGH-level key for this tab only — it can post on your behalf but cannot move funds or moderate.
         </p>
       </div>
     </div>

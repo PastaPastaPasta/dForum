@@ -10,26 +10,7 @@ import { useSession } from '@/lib/session'
 import { hostIsCanonical, canonicalHost } from '@/lib/host'
 import { useFrameBuster } from '@/lib/use-frame-buster'
 import { redactWif } from '@/lib/redact'
-
-/** Only same-origin paths survive — never a protocol-relative or backslash
- * href (browsers treat \\ as /, which would resolve to an external host). */
-function safeNextPath(raw: string | null, origin: string): string | null {
-  if (!raw) return null
-  const trimmed = raw.trim()
-  // Same-origin absolute paths only — reject backslashes (browsers treat
-  // \\ as /) and protocol-relative URLs.
-  if (!trimmed.startsWith('/')) return null
-  if (/[\\]/.test(trimmed)) return null
-  if (trimmed.startsWith('//')) return null
-  try {
-    const url = new URL(trimmed, origin)
-    if (url.origin !== origin) return null
-    if (!url.pathname.startsWith('/')) return null
-    return url.pathname + url.search + url.hash
-  } catch {
-    return null
-  }
-}
+import { safeNextPath } from '@/lib/safe-next'
 
 export default function LoginPage() {
   const { session, ready, authError } = useSession()
@@ -124,23 +105,36 @@ export default function LoginPage() {
                 Sign in with your<br />Dash identity
               </h1>
               <p className="mt-4 text-[#93a1bd]">
-                No accounts, no passwords, no email. Your identity is a Dash Platform
-                identity — you sign in by scanning a QR code with your wallet.
+                No passwords, no sign-up forms. Your identity is a Dash Platform identity —
+                you sign in by scanning a QR code with your wallet.
               </p>
 
               <div className="mt-6 space-y-3 text-sm">
-                <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — no central server" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum holds a HIGH-level signing key for this tab only. It can post on your behalf but cannot move funds" />
-                <Benefit icon={<MessageSquare className="w-4 h-4" />} text="All posts, profiles and reactions live on-chain" />
+                <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — dForum is a static site over the Dash Platform" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level signing key that lives in this tab only — it can post on your behalf, but it cannot move funds" />
+                <Benefit icon={<MessageSquare className="w-4 h-4" />} text="Posts, profiles, forums and settings all live on-chain" />
               </div>
 
               {alreadySignedIn ? (
                 <div ref={signedInRef} tabIndex={-1} className="mt-8 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4">
                   <p className="text-sm font-medium text-emerald-400">You are signed in</p>
                   <p className="text-xs text-[#93a1bd] mt-1 font-mono truncate">{session?.identityId}</p>
-                  <Link href={nextPath ?? '/'} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30 transition">
-                    {nextPath ? 'Continue to your page' : 'Go to dForum'}
-                  </Link>
+                  {nextPath ? (
+                    // Same validation + base-path re-rooting as the post-login
+                    // redirect — a plain Link would re-apply the basePath to a
+                    // path that already carries it.
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign(nextPath)}
+                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30 transition"
+                    >
+                      Continue to your page
+                    </button>
+                  ) : (
+                    <Link href="/" className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/30 transition">
+                      Go to dForum
+                    </Link>
+                  )}
                 </div>
               ) : (
                 <>
@@ -168,7 +162,7 @@ export default function LoginPage() {
                   <button
                     onClick={openModal}
                     disabled={!ready || !hostGateOpen}
-                    className="mt-8 btn-primary px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20"
+                    className="mt-8 btn-primary px-5 py-3 font-semibold"
                   >
                     {!ready ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
                     Login with Dash
@@ -185,7 +179,7 @@ export default function LoginPage() {
                 <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dash-key: code shown in the login modal." />
                 <Step number={2} title="Approve the request" body="Confirm the key-exchange request in your wallet." />
                 <Step number={3} title="Keys registered (first login)" body="On first login you'll register auth keys with dForum — scan a second code." />
-                <Step number={4} title="You're in" body="Your session lives in this tab only — your wallet key never leaves your wallet." />
+                <Step number={4} title="You're in" body="Your session lives in this tab only — your wallet key never leaves your wallet. Logging out clears it from this browser." />
               </ol>
             </div>
           </div>

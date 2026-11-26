@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { MessageSquare, Pencil, UserPlus, AlertTriangle, Loader2 } from 'lucide-react'
+import { MessageSquare, Pencil, UserPlus, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
@@ -65,9 +65,15 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
   const [profile, setProfile] = useState<ProfileData | null>(null)
   const [threads, setThreads] = useState<OwnedThread[]>(snapThreads)
   const [postCount, setPostCount] = useState(0)
+  const [postCountCapped, setPostCountCapped] = useState(false)
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [modState, setModState] = useState<number | null>(null)
   const [staleNote, setStaleNote] = useState(false)
+  // Pagination state for the owned-thread window.
+  const [moreThreads, setMoreThreads] = useState<OwnedThread[]>([])
+  const [moreCursor, setMoreCursor] = useState<string | null>(null)
+  const [moreLoading, setMoreLoading] = useState(false)
+  const [moreError, setMoreError] = useState(false)
 
   useEffect(() => {
     if (!identityId) {
@@ -77,6 +83,9 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
     let cancelled = false
     // Re-fill from the snapshot on identity change (first paint) before the
     // live read resolves.
+    setMoreThreads([])
+    setMoreCursor(null)
+    setMoreError(false)
     setThreads((snap?.threads ?? []).filter((t) => t.ownerId === identityId).map((t) => ({
       id: t.id,
       title: t.title,
@@ -89,66 +98,101 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
       createdAt: t.createdAt,
     })))
 
-    Promise.all([
-      query('profile', { where: [['$ownerId', '==', identityId]], limit: 1 }).then((d) => d[0] ?? null).catch(() => null),
-      query('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: THREAD_WINDOW }),
-      count('post', { where: [['$ownerId', '==', identityId]] }).catch(() => new Map<string, bigint>()),
-    ])
-      .then(async ([profileDoc, ownedThreads, postCounts]) => {
+    // Every read is tracked individually — a failure must surface honestly,
+    // never masquerade as "no profile" or "0 posts".
+    const profileQ = query('profile', { where: [['$ownerId', '==', identityId]], limit: 1 })
+      .then((d) => ({ ok: true as const, docs: d }))
+      .catch(() => ({ ok: false as const, docs: null }))
+    const threadsQ = query('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: THREAD_WINDOW })
+      .then((d) => ({ ok: true as const, docs: d }))
+      .catch(() => ({ ok: false as const, docs: null }))
+    // Visible posts only — raw counts include moderated/hidden posts and the
+    // orphaned threads they were posted in, which is not an honest number.
+    const postsQ = query('post', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: 100 })
+      .then((d) => ({ ok: true as const, docs: d }))
+      .catch(() => ({ ok: false as const, docs: null }))
+
+    Promise.all([profileQ, threadsQ, postsQ])
+      .then(async ([profileRes, threadsRes, postsRes]) => {
         if (cancelled) return
-        // Orphan rule — a hidden/orphan thread must never list.
-        const listed = await filterListable(
-          ownedThreads.map((t) => ({
-            id: t.id,
-            ownerId: t.ownerId || null,
-            lockedAt: (t.properties.lockedAt as number | null) ?? null,
-            createdAt: t.createdAt,
-          })),
-          4,
-        )
-        const listedIds = new Set(listed.map((t) => t.id))
-        if (cancelled) return
-        if (profileDoc) {
-          const p = profileDoc.properties
-          setProfile({
-            displayName: (p.displayName as string) || shortId(identityId, 16),
-            bio: (p.bio as string) || '',
-            website: (p.website as string) || '',
-            signature: (p.signature as string) || null,
-            customTitle: (p.customTitle as string | null) ?? null,
-            createdAt: profileDoc.createdAt,
-            modState: (p.modState as number | null) ?? null,
-          })
-          setModState((p.modState as number | null) ?? null)
-        } else {
-          setProfile(null)
-        }
-        setThreads(
-          ownedThreads
-            .filter((t) => listedIds.has(t.id))
-            .map((t) => ({
+        const anyFailed = !profileRes.ok || !threadsRes.ok || !postsRes.ok
+        const docs = threadsRes.ok ? (threadsRes.docs ?? []) : []
+        let listedIds = new Set<string>()
+        if (docs.length) {
+          const listed = await filterListable(
+            docs.map((t) => ({
               id: t.id,
-              title: (t.properties.title as string) ?? '',
-              tags: Array.isArray(t.properties.tags) ? (t.properties.tags as string[]) : [],
-              forumSlug: forumById.get((t.properties.forumId as string) ?? '') ?? null,
-              sticky: Boolean(t.properties.sticky),
+              ownerId: t.ownerId || null,
               lockedAt: (t.properties.lockedAt as number | null) ?? null,
-              modState: (t.properties.modState as number | null) ?? null,
-              ownerId: t.ownerId ?? null,
               createdAt: t.createdAt,
             })),
-        )
-        setPostCount(Number(Array.from(postCounts.values()).reduce((a, b) => a + b, 0n)))
-        setStatus('ok')
+            4,
+          ).catch(() => docs.map((t) => ({ id: t.id, ownerId: t.ownerId || null, lockedAt: null, createdAt: t.createdAt })))
+          listedIds = new Set(listed.map((t) => t.id))
+        }
+        if (cancelled) return
+        if (profileRes.ok) {
+          const profileDoc = profileRes.docs[0] ?? null
+          if (profileDoc) {
+            const p = profileDoc.properties
+            setProfile({
+              displayName: (p.displayName as string) || shortId(identityId, 16),
+              bio: (p.bio as string) || '',
+              website: (p.website as string) || '',
+              signature: (p.signature as string) || null,
+              customTitle: (p.customTitle as string | null) ?? null,
+              createdAt: profileDoc.createdAt,
+              modState: (p.modState as number | null) ?? null,
+            })
+            setModState((p.modState as number | null) ?? null)
+          } else {
+            setProfile(null)
+          }
+        }
+        if (threadsRes.ok) {
+          setThreads(
+            docs
+              .filter((t) => listedIds.has(t.id))
+              .map((t) => ({
+                id: t.id,
+                title: (t.properties.title as string) ?? '',
+                tags: Array.isArray(t.properties.tags) ? (t.properties.tags as string[]) : [],
+                forumSlug: forumById.get((t.properties.forumId as string) ?? '') ?? null,
+                sticky: Boolean(t.properties.sticky),
+                lockedAt: (t.properties.lockedAt as number | null) ?? null,
+                modState: (t.properties.modState as number | null) ?? null,
+                ownerId: t.ownerId ?? null,
+                createdAt: t.createdAt,
+              })),
+          )
+          setMoreCursor(docs.length === THREAD_WINDOW ? docs[docs.length - 1].id : null)
+        }
+        if (postsRes.ok) {
+          const visible = postsRes.docs.filter((p) => p.properties?.modState == null)
+          // The window is 100 posts — honest about the bound rather than
+          // claiming an exact total.
+          setPostCount(visible.length)
+          setPostCountCapped(postsRes.docs.length === 100)
+        }
+        if (anyFailed) {
+          if (snapThreads.length === 0 && !snap?.profiles?.[identityId]) {
+            setStatus('error')
+            setStaleNote(false)
+          } else {
+            // Snapshot first-render keeps its data honest: show it with a stale note.
+            setStaleNote(true)
+            setStatus('ok')
+          }
+        } else {
+          setStatus('ok')
+        }
       })
       .catch(() => {
         if (cancelled) return
-        // No snapshot data → surface the failure instead of "Profile not found".
         if (snapThreads.length === 0 && !snap?.profiles?.[identityId]) {
           setStatus('error')
           setStaleNote(false)
         } else {
-          // Snapshot first-render keeps its data honest: show it with a stale note.
           setStaleNote(true)
           setStatus('ok')
         }
@@ -159,11 +203,57 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identityId])
 
+  async function loadMoreThreads() {
+    const expected = identityId
+    if (moreLoading || !moreCursor || !expected) return
+    setMoreLoading(true)
+    setMoreError(false)
+    try {
+      const docs = await query('thread', {
+        where: [['$ownerId', '==', expected]],
+        orderBy: [['$createdAt', 'desc']],
+        limit: THREAD_WINDOW,
+        startAfter: moreCursor,
+      })
+      const listed = await filterListable(
+        docs.map((t) => ({
+          id: t.id,
+          ownerId: t.ownerId || null,
+          lockedAt: (t.properties.lockedAt as number | null) ?? null,
+          createdAt: t.createdAt,
+        })),
+        4,
+      )
+      const listedIds = new Set(listed.map((t) => t.id))
+      setMoreThreads((prev) => [
+        ...prev,
+        ...docs
+          .filter((t) => listedIds.has(t.id))
+          .map((t) => ({
+            id: t.id,
+            title: (t.properties.title as string) ?? '',
+            tags: Array.isArray(t.properties.tags) ? (t.properties.tags as string[]) : [],
+            forumSlug: forumById.get((t.properties.forumId as string) ?? '') ?? null,
+            sticky: Boolean(t.properties.sticky),
+            lockedAt: (t.properties.lockedAt as number | null) ?? null,
+            modState: (t.properties.modState as number | null) ?? null,
+            ownerId: t.ownerId ?? null,
+            createdAt: t.createdAt,
+          })),
+      ])
+      setMoreCursor(docs.length === THREAD_WINDOW ? docs[docs.length - 1].id : null)
+    } catch {
+      setMoreError(true)
+    } finally {
+      setMoreLoading(false)
+    }
+  }
+
   const isHidden = isModerated(modState)
   const isSelf = session?.identityId === identityId
-  const isEmptySelf = isSelf && !profile && threads.length === 0 && postCount === 0
+  const isEmptySelf = isSelf && status === 'ok' && !staleNote && !profile && threads.length === 0 && postCount === 0
   const displayName = profile?.displayName || snapProfileName || (identityId ? shortId(identityId, 20) : 'Unknown')
-  const visibleThreads = threads.filter((t) => !isModerated(t.modState))
+  const visibleThreads = [...threads, ...moreThreads].filter((t) => !isModerated(t.modState))
   const threadsReady = status !== 'loading'
   const authorIds = visibleThreads.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
@@ -191,7 +281,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
 
   // A profile with no profile doc, no threads and no posts is a missing
   // identity — anything else renders (an empty profile is not "not found").
-  const isMissing = status === 'ok' && !profile && threads.length === 0 && postCount === 0
+  const isMissing = status === 'ok' && !staleNote && !profile && threads.length === 0 && postCount === 0
   if ((status === 'missing' || isMissing) && !isSelf) {
     return (
       <>
@@ -252,8 +342,8 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                     </>
                   ) : (
                     <>
-                      <span>{staleNote ? '—' : `${visibleThreads.length} thread${visibleThreads.length === 1 ? '' : 's'}`}{!staleNote && threads.length >= THREAD_WINDOW ? ` (showing latest ${THREAD_WINDOW})` : ''}</span>
-                      <span>{staleNote ? '—' : `${postCount} post${postCount === 1 ? '' : 's'}`}</span>
+                      <span>{staleNote ? '—' : `${visibleThreads.length} thread${visibleThreads.length === 1 ? '' : 's'}`}</span>
+                      <span>{staleNote ? '—' : postCountCapped ? '100+ posts' : `${postCount} post${postCount === 1 ? '' : 's'}`}</span>
                     </>
                   )}
                 </div>
@@ -302,6 +392,22 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
               ))
             )}
           </div>
+          {moreCursor != null && status === 'ok' && !staleNote && (
+            <div className="mt-4">
+              {moreError ? (
+                <p className="text-sm text-red-400">Couldn&apos;t load more threads. <button onClick={() => loadMoreThreads()} className="text-[#4db3ff] hover:underline">Retry</button></p>
+              ) : (
+                <button
+                  onClick={() => loadMoreThreads()}
+                  disabled={moreLoading}
+                  className="btn-secondary inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                >
+                  {moreLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
+                  {moreLoading ? 'Loading…' : 'Load older threads'}
+                </button>
+              )}
+            </div>
+          )}
         </section>
         )}
       </main>

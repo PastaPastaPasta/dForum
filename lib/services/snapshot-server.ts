@@ -49,7 +49,7 @@ export interface Snapshot {
   generatedAt: string | null
   network: string
   contractId: string | null
-  counts: { categories: number; forums: number; threads: number; posts: number; reactions: number }
+  counts: { categories: number; forums: number; threads: number; posts: number }
   categories: SnapshotCategory[]
   forums: SnapshotForum[]
   threads: SnapshotThread[]
@@ -71,7 +71,7 @@ const empty: Snapshot = {
   generatedAt: null,
   network: 'testnet',
   contractId: null,
-  counts: { categories: 0, forums: 0, threads: 0, posts: 0, reactions: 0 },
+  counts: { categories: 0, forums: 0, threads: 0, posts: 0 },
   categories: [],
   forums: [],
   threads: [],

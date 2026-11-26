@@ -172,11 +172,10 @@ async function main() {
     : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } });
   await sdk.connect();
 
-  const [categories, forums, threadCount, reactionCount] = await Promise.all([
+  const [categories, forums, threadCount] = await Promise.all([
     queryList(sdk, 'category', { limit: 50 }),
     queryList(sdk, 'forum', { limit: 50 }),
     countDocuments(sdk, 'thread'),
-    countDocuments(sdk, 'reaction'),
   ]);
 
   // Forum/category are NOT documentsCountable in this deployment — the only
@@ -230,16 +229,30 @@ async function main() {
   for (const { thread: t, opening } of listable) {
     const lockedAt = t.properties?.lockedAt ?? null;
     // Start the static-posts query at the opening post — a thread whose
-    // opening post sits far down the log must not ship zero posts.
-    const posts = await queryList(sdk, 'post', {
-      where: [['threadId', '==', t.id], ['$createdAt', '>=', opening.$createdAt]],
-      orderBy: [['$createdAt', 'asc']],
-      limit: STATIC_POSTS,
-    });
-    const fromOpening = posts.filter((p) => !isBefore(p, opening));
-    const visible = fromOpening
-      .filter((p) => p.properties?.modState == null && (lockedAt == null || p.$createdAt <= lockedAt))
-      .slice(0, STATIC_POSTS)
+    // opening post sits far down the log must not ship zero posts. Page
+    // until STATIC_POSTS visible posts are collected (or the thread runs
+    // out) so hidden posts cannot silently eat the budget and ship fewer.
+    const collected = [];
+    let after = null;
+    for (let page = 0; page < 4 && collected.length < STATIC_POSTS; page++) {
+      const posts = await queryList(sdk, 'post', {
+        where: [['threadId', '==', t.id], ['$createdAt', '>=', opening.$createdAt]],
+        orderBy: [['$createdAt', 'asc']],
+        limit: 25,
+        ...(after ? { startAfter: after } : {}),
+      });
+      if (posts.length === 0) break;
+      const fromOpening = posts.filter((p) => !isBefore(p, opening));
+      for (const p of fromOpening) {
+        if (collected.length >= STATIC_POSTS) break;
+        if (p.properties?.modState != null) continue;
+        if (lockedAt != null && p.$createdAt > lockedAt) continue;
+        collected.push(p);
+      }
+      if (posts.length < 25) break;
+      after = posts[posts.length - 1].id;
+    }
+    const visible = collected.slice(0, STATIC_POSTS)
       .map((p) => ({
         id: p.id,
         body: shortStr(p.properties?.body, 4000),
@@ -264,7 +277,6 @@ async function main() {
       forums: forums.filter((f) => !f.properties?.archived).length,
       threads: listable.length,
       posts: visiblePosts,
-      reactions: Number(reactionCount),
     },
     categories: categories.map((c) => ({
       id: c.id,
@@ -302,7 +314,7 @@ async function main() {
   mkdirSync('data', { recursive: true });
   writeFileSync(OUT, JSON.stringify(snapshot, null, 2) + '\n');
   const size = JSON.stringify(snapshot).length;
-  console.log(`snapshot written: ${OUT} (${(size / 1024).toFixed(1)} KB) — ${listable.length} listed threads (of ${Number(threadCount)} proved), ${snapshot.counts.posts} posts, ${snapshot.counts.forums} forums`);
+  console.log(`snapshot written: ${OUT} (${(size / 1024).toFixed(1)} KB) — ${listable.length} listed threads (of ${Number(threadCount)} proved), ${snapshot.counts.posts} posts shipped, ${snapshot.counts.forums} forums`);
   process.exit(0);
 }
 

@@ -12,6 +12,7 @@ import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { decodeWif, decodeKeyDataBytes } from '@/lib/auth/decoder'
+import { redactWif } from '@/lib/redact'
 
 export interface ModerationIdentity {
   identityId: string
@@ -58,7 +59,9 @@ export async function validateCriticalKey(identityId: string, criticalWif: strin
     }
     return { ok: false, reason: 'This key is not registered on the identity' }
   } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : 'Validation failed' }
+    // Redact here too — callers render `reason` verbatim and the chain
+    // error can carry the WIF in the message.
+    return { ok: false, reason: redactWif(err instanceof Error ? err.message : 'Validation failed') }
   }
 }
 

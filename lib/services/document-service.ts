@@ -133,6 +133,24 @@ export async function query(
     startAfter?: string
   } = {},
 ): Promise<DocRef[]> {
+  const { docs } = await queryRaw(type, options)
+  return docs
+}
+
+/** Like query(), but also reports the RAW page length — callers that page
+ * need to know when the index is exhausted even when some docs fail
+ * normalization (a short raw page means no more results, regardless of how
+ * many were kept). */
+export async function queryRaw(
+  type: string,
+  options: {
+    where?: [string, string, unknown][]
+    orderBy?: [string, 'asc' | 'desc'][]
+    limit?: number
+    /** Exclusive $id cursor — page past the document it names. */
+    startAfter?: string
+  } = {},
+): Promise<{ docs: DocRef[]; rawCount: number; lastId: string | null }> {
   const sdk = await getSdk()
   const page = await sdk.documents.query({
     dataContractId: CONTRACT_ID,
@@ -142,12 +160,25 @@ export async function query(
     limit: options.limit ?? 100,
     ...(options.startAfter !== undefined ? { startAfter: options.startAfter } : {}),
   })
+  const rawDocs = [...page.values()]
   const out: DocRef[] = []
-  for (const doc of page.values()) {
+  for (const doc of rawDocs) {
     const normalized = normalizeDoc(doc)
     if (normalized) out.push(normalized)
   }
-  return out
+  // Raw last-doc id for the startAfter cursor — the normalized last doc's id
+  // is not necessarily the raw last doc, since docs that fail normalization
+  // are dropped from `out`.
+  const lastRaw = rawDocs[rawDocs.length - 1]
+  let lastId: string | null = null
+  if (lastRaw) {
+    const obj = (lastRaw as { toObject?: () => unknown }).toObject?.() as Record<string, unknown> | undefined
+    const rid = obj?.$id ?? obj?.id
+    if (rid != null) {
+      try { lastId = bs58.encode(bs58.decode(String(rid))) } catch { lastId = String(rid) }
+    }
+  }
+  return { docs: out, rawCount: rawDocs.length, lastId }
 }
 
 export async function count(

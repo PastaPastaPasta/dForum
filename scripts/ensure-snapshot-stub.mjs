@@ -22,7 +22,7 @@ const stub = {
   generatedAt: null,
   network: record.network ?? 'testnet',
   contractId: record.contractId,
-  counts: { categories: 0, forums: 0, threads: 0, posts: 0, reactions: 0 },
+  counts: { categories: 0, forums: 0, threads: 0, posts: 0 },
   categories: [],
   forums: [],
   threads: [],
