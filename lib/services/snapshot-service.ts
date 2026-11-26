@@ -2,8 +2,10 @@
  * Build-time snapshot for the static shell.
  *
  * scripts/snapshot.mjs writes data/snapshot.json at build time. The static
- * pages render from it; the session-aware LiveSection re-queries the platform
- * after hydration. Never throws — falls back to empty data when absent.
+ * pages render from it; client components re-query the platform after hydration.
+ * Never throws — falls back to empty data when absent. The file ships no post
+ * bodies — only threads/forums/categories/counts (and only listed threads) —
+ * so nothing beyond what the sitemap lists is in every visitor's JS.
  */
 import snapshotJson from '@/data/snapshot.json'
 
@@ -19,17 +21,6 @@ export interface SnapshotThread {
   ownerId: string | null
   createdAt: number
   updatedAt: number
-}
-
-export interface SnapshotPost {
-  id: string
-  threadId: string | null
-  forumId: string | null
-  forumSlug: string | null
-  body: string
-  modState: number | null
-  ownerId: string | null
-  createdAt: number
 }
 
 export interface SnapshotCategory {
@@ -59,7 +50,6 @@ export interface Snapshot {
   categories: SnapshotCategory[]
   forums: SnapshotForum[]
   threads: SnapshotThread[]
-  posts: SnapshotPost[]
 }
 
 const empty: Snapshot = {
@@ -70,7 +60,6 @@ const empty: Snapshot = {
   categories: [],
   forums: [],
   threads: [],
-  posts: [],
 }
 
 try {

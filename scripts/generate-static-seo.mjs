@@ -14,7 +14,13 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const OUT = 'out';
-const SITE = 'https://forum.dashhq.org';
+// The public origin the deployed site is served from, plus the base path the
+// build was served under (GH Pages serves project sites at /<repo>). Set
+// SITE_URL/BASE_PATH when the site moves — the sitemap, robots.txt and
+// llms.txt all use them, so a wrong host here means bad indexing.
+const SITE = (process.env.SITE_URL || 'https://forum.dashhq.org').replace(/\/+$/, '');
+const BASE_PATH = (process.env.BASE_PATH || '').replace(/\/+$/, '');
+const SITE_PREFIX = SITE + BASE_PATH;
 
 function readSnapshot() {
   try {
@@ -27,12 +33,12 @@ function readSnapshot() {
 
 function sitemap() {
   const snap = readSnapshot();
-  const urls = [`${SITE}/`, `${SITE}/login`, `${SITE}/search`];
+  const urls = [`${SITE_PREFIX}/`, `${SITE_PREFIX}/login/`, `${SITE_PREFIX}/search/`];
   for (const f of snap.forums || []) {
-    if (f.slug && !f.archived) urls.push(`${SITE}/f/${encodeURIComponent(f.slug)}/`);
+    if (f.slug && !f.archived) urls.push(`${SITE_PREFIX}/f/${encodeURIComponent(f.slug)}/`);
   }
   for (const t of snap.threads || []) {
-    if (t.id && !t.modState && !t.archived) urls.push(`${SITE}/t/${encodeURIComponent(t.id)}/`);
+    if (t.id && !t.modState && !t.archived) urls.push(`${SITE_PREFIX}/t/${encodeURIComponent(t.id)}/`);
   }
   const body = urls
     .map((loc) => `  <url><loc>${loc}</loc><lastmod>${snap.generatedAt ? snap.generatedAt.slice(0, 10) : new Date().toISOString().slice(0, 10)}</lastmod></url>`)
@@ -45,7 +51,7 @@ function sitemap() {
 }
 
 function robots() {
-  const body = `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`;
+  const body = `User-agent: *\nAllow: /\n\nSitemap: ${SITE_PREFIX}/sitemap.xml\n`;
   writeFileSync(join(OUT, 'robots.txt'), body);
 }
 
@@ -53,7 +59,7 @@ function llms() {
   const snap = readSnapshot();
   const forums = (snap.forums || [])
     .filter((f) => f.slug && !f.archived)
-    .map((f) => `- [${escapeMd(f.title)}](${SITE}/f/${encodeURIComponent(f.slug)}/)`)
+    .map((f) => `- [${escapeMd(f.title)}](${SITE_PREFIX}/f/${encodeURIComponent(f.slug)}/)`)
     .join('\n');
   const body = `# dForum — a decentralized forum on Dash Platform
 
@@ -65,13 +71,13 @@ ${forums || '- (none yet)'}
 ## Threads
 ${(snap.threads || [])
   .slice(0, 20)
-  .map((t) => `- [${escapeMd(t.title)}](${SITE}/t/${encodeURIComponent(t.id)}/)`)
+  .map((t) => `- [${escapeMd(t.title)}](${SITE_PREFIX}/t/${encodeURIComponent(t.id)}/)`)
   .join('\n') || '- (none yet)'}
 
 ## Live
-- [/](${SITE}/) — latest threads, forums, real-time data on the platform
-- [/search](${SITE}/search/) — search threads
-- [/login](${SITE}/login/) — login with Dash
+- [/](${SITE_PREFIX}/) — latest threads, forums, real-time data on the platform
+- [/search](${SITE_PREFIX}/search/) — search threads
+- [/login](${SITE_PREFIX}/login/) — login with Dash
 `;
   writeFileSync(join(OUT, 'llms.txt'), body);
 }

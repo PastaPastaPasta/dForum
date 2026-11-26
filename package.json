@@ -6,6 +6,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/ensure-snapshot-stub.mjs",
     "build": "next build",
     "lint": "next lint",
     "index:static": "node scripts/snapshot.mjs",

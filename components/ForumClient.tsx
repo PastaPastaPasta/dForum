@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Users, Lock, Pencil, AlertTriangle, Loader2 } from 'lucide-react'
+import { Users, Pencil, AlertTriangle, Loader2 } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { query } from '@/lib/services/document-service'
@@ -10,7 +9,7 @@ import { loadSnapshot, type SnapshotThread } from '@/lib/services/snapshot-servi
 import { useSession } from '@/lib/session'
 import { useLive } from '@/components/LiveFeed'
 import { useProfileNames } from '@/lib/use-profiles'
-import { formatRelativeTime, isModerated } from '@/lib/utils'
+import { isModerated } from '@/lib/utils'
 import { ThreadRow } from '@/components/ThreadRow'
 
 interface LiveThread {
@@ -30,33 +29,37 @@ interface LiveForum {
   threads: LiveThread[]
 }
 
+/** Sticky-first, newest-first ordering — matches the forum contract's
+ * byForumSticky index intent. */
+function byStickyThenRecent(a: LiveThread, b: LiveThread): number {
+  if (a.sticky !== b.sticky) return a.sticky ? -1 : 1
+  return b.createdAt - a.createdAt
+}
+
 type LoadResult =
   | { status: 'ok'; forum: LiveForum }
   | { status: 'missing' }
   | { status: 'error' }
 
-export default function ForumClient({ slug }: { slug: string }) {
-  return <ForumInner slug={slug} />
-}
 
-function ForumInner({ slug }: { slug: string }) {
+export default function ForumClient({ slug }: { slug: string }) {
   const snap = loadSnapshot()
   const { session } = useSession()
   const forum = snap.forums.find((f) => f.slug === slug)
 
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
   const snapThreads = snap.threads.filter((t) => t.forumSlug === slug).map(snapshotThreadToLive)
-  const liveThreads = (live?.status === 'ok' ? live.forum.threads : snapThreads).filter((t) => !isModerated(t.modState))
-  const knownForum = Boolean(forum) || Boolean(live?.status === 'ok' && live.forum.title)
+  const rawThreads = live?.status === 'ok' ? live.forum.threads : snapThreads
+  const liveThreads = rawThreads.filter((t) => !isModerated(t.modState)).sort(byStickyThenRecent)
   const forumTitle = forum?.title ?? (live?.status === 'ok' ? live.forum.title : null) ?? slug
   const forumDesc = forum?.description ?? (live?.status === 'ok' ? live.forum.description : null) ?? ''
   const status = live?.status ?? null
-  const threadsKnown = live?.status === 'ok' || snap.threads.length > 0
+  const showStaleNote = status === 'error' && forum != null && !liveLoading
 
   const authorIds = liveThreads.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
 
-  if (status === 'error' && !forum && !liveLoading) {
+  if (status === 'error' && !forum && !liveLoading && snap.threads.length === 0) {
     return (
       <>
         <Navbar />
@@ -74,7 +77,7 @@ function ForumInner({ slug }: { slug: string }) {
     )
   }
 
-  if (status === 'missing' && !forum && !liveLoading) {
+  if (status === 'missing' && !liveLoading) {
     return (
       <>
         <Navbar />
@@ -99,13 +102,18 @@ function ForumInner({ slug }: { slug: string }) {
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <Link href="/" className="text-sm text-[#93a1bd] hover:text-white transition">← All forums</Link>
               {session ? (
-                <Link href={`/new?forum=${encodeURIComponent(forum?.id ?? '')}`} className="btn-primary px-3 py-2 text-sm font-medium">
+                <Link href={`/new?forum=${encodeURIComponent(forum?.id ?? slug)}`} className="btn-primary px-3 py-2 text-sm font-medium">
                   <Pencil className="w-4 h-4" aria-hidden="true" /> New thread
                 </Link>
               ) : null}
             </div>
             <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">{forumTitle}</h1>
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
+            {showStaleNote && (
+              <div className="mt-4 rounded-lg border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-amber-400" role="status">
+                Live data unavailable — showing the snapshot from the last index refresh.
+              </div>
+            )}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
               <span>{liveThreads.length} thread{liveThreads.length === 1 ? '' : 's'}</span>
               <span>·</span>
@@ -117,10 +125,13 @@ function ForumInner({ slug }: { slug: string }) {
         </section>
 
         <section className="max-w-6xl mx-auto px-4 sm:px-6 mt-6">
+          {live?.status === 'ok' && live.forum.threads.length >= 50 ? (
+            <p className="mb-3 text-xs text-[#93a1bd]">Showing the 50 most recent threads.</p>
+          ) : null}
           {liveThreads.length === 0 && liveLoading ? (
             <LoadingSkeleton />
           ) : liveThreads.length === 0 ? (
-            <EmptyForum slug={slug} session={session} />
+            <EmptyForum forum={forum} slug={slug} session={session} />
           ) : (
             <div className="space-y-3">
               {liveThreads.map((t) => (
@@ -135,13 +146,13 @@ function ForumInner({ slug }: { slug: string }) {
   )
 }
 
-function EmptyForum({ slug, session }: { slug: string; session: { identityId: string } | null }) {
+function EmptyForum({ forum, slug, session }: { forum: { id: string } | undefined; slug: string; session: { identityId: string } | null }) {
   return (
     <div className="rounded-xl border border-dashed border-[#22304e] bg-[#111a2e]/50 p-8 text-center fade-up">
       <Users className="w-8 h-8 text-[#93a1bd] mx-auto" aria-hidden="true" />
       <p className="mt-3 text-[#93a1bd]">No threads in this forum yet.</p>
       {session ? (
-        <Link href={`/new?forum=${encodeURIComponent(slug)}`} className="mt-3 btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-medium">
+        <Link href={`/new?forum=${encodeURIComponent(forum?.id ?? slug)}`} className="mt-3 btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-medium">
           <Pencil className="w-4 h-4" aria-hidden="true" /> Start the first one
         </Link>
       ) : (

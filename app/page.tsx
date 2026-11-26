@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { MessageSquare, MessagesSquare, Heart, TrendingUp, FolderOpen, Loader2, Pencil } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
-import { loadSnapshot, type Snapshot } from '@/lib/services/snapshot-service'
+import { loadSnapshot, type Snapshot, type SnapshotThread } from '@/lib/services/snapshot-service'
 import { useSession } from '@/lib/session'
 import { query, count } from '@/lib/services/document-service'
 import { useLive } from '@/components/LiveFeed'
@@ -15,8 +15,14 @@ export default function HomePage() {
   const { session } = useSession()
   // Live fill — re-queries the platform after hydration
   const { live, loading } = useLive(() => loadLive(), 'home')
-  const threads = (live?.threads ?? snap.threads).filter((t) => t.modState == null)
-  const forums = live?.forums ?? snap.forums
+  const byStickyThenRecent = (a: SnapshotThread, b: SnapshotThread) =>
+    a.sticky !== b.sticky ? (a.sticky ? -1 : 1) : b.createdAt - a.createdAt
+  const threads = (live?.threads ?? snap.threads).filter((t) => t.modState == null).sort(byStickyThenRecent)
+  const forumCategorySlug = new Map(snap.categories.map((c) => [c.id, c.slug ?? null]))
+  const forums = (live?.forums ?? snap.forums)
+    .filter((f) => !f.archived)
+    .map((f) => ({ ...f, categorySlug: f.categorySlug ?? forumCategorySlug.get(f.categoryId ?? '') ?? null }))
+    .sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title))
 
   const counts = {
     categories: live?.counts?.categories ?? snap.counts.categories,

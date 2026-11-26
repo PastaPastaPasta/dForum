@@ -3,7 +3,7 @@
 /**
  * Client-side EvoSDK singleton. Imported by client components only.
  *
- * The SDK is loaded lazily (dynamic import) so the ~15 MB WASM chunk never
+ * The SDK is loaded lazily (dynamic import) so the ~30 MB WASM chunk never
  * blocks the initial page load — it is only fetched when a page actually
  * needs the platform. connect() resolves the current trusted nodes.
  */
@@ -49,7 +49,7 @@ type SdkClasses = {
 
 let sdkClassesPromise: Promise<SdkClasses> | null = null
 
-/** Lazily load the SDK's classes — the ~15 MB chunk stays off the first paint. */
+/** Lazily load the SDK's classes — the ~30 MB chunk stays off the first paint. */
 export function getSdkClasses(): Promise<SdkClasses> {
   if (!sdkClassesPromise) {
     sdkClassesPromise = import('@dashevo/evo-sdk').then((mod) => ({
@@ -60,9 +60,3 @@ export function getSdkClasses(): Promise<SdkClasses> {
   return sdkClassesPromise
 }
 
-/** Reset the singleton (e.g. on logout). The next getSdk() reconnects. */
-export function resetSdk(): void {
-  sdk = null
-  initPromise = null
-  sdkClassesPromise = null
-}

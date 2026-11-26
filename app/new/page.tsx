@@ -18,6 +18,24 @@ interface ForumOption {
   archived: boolean
 }
 
+/** Split/clean tags the same way the contract accepts: ^[a-z0-9-]{1,32}$,
+ * ≤5, unique. Invalid ones are reported so the form can reject them instead of
+ * letting the chain reject the whole thread. */
+function parseTags(raw: string): { valid: string[]; rejected: string[] } {
+  const seen = new Set<string>()
+  const valid: string[] = []
+  const rejected: string[] = []
+  for (const part of raw.split(/[,\s#]+/)) {
+    const tag = part.trim().toLowerCase()
+    if (!tag) continue
+    if (!/^[a-z0-9-]{1,32}$/.test(tag)) { rejected.push(tag); continue }
+    if (seen.has(tag)) continue
+    seen.add(tag)
+    valid.push(tag)
+  }
+  return { valid, rejected }
+}
+
 export default function NewThreadPage() {
   const router = useRouter()
   const { session, ready } = useSession()
@@ -35,7 +53,7 @@ export default function NewThreadPage() {
   const [body, setBody] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [fieldError, setFieldError] = useState<{ forum?: string; title?: string } | null>(null)
+  const [fieldError, setFieldError] = useState<{ forum?: string; title?: string; tags?: string; body?: string } | null>(null)
   const createdThreadId = useRef('')
 
   // Live forum list
@@ -97,9 +115,18 @@ export default function NewThreadPage() {
       await handleFinishOpeningPost()
       return
     }
-    const errs: { forum?: string; title?: string } = {}
+    const errs: { forum?: string; title?: string; tags?: string; body?: string } = {}
     if (!selected) errs.forum = 'Choose a forum'
-    if (!title.trim()) errs.title = 'A title is required'
+    const titleLen = title.trim()
+    if (titleLen.length < 3) errs.title = 'A title is required (at least 3 characters)'
+    // Tags must match the contract: ^[a-z0-9-]{1,32}$, ≤5, unique.
+    const tagList = parseTags(tags)
+    const rejectedTag = tagList.rejected.find((t) => !/^[a-z0-9-]{1,32}$/.test(t))
+    if (rejectedTag) errs.tags = `Invalid tag “${rejectedTag}” — use lowercase letters, numbers and hyphens (1–32 chars).`
+    else if (tagList.valid.length === 0 && tags.trim()) errs.tags = 'No usable tags — fix the tags or leave the field empty.'
+    const bodyLen = body.trim()
+    if (!bodyLen) errs.body = 'An opening post is required — a thread with no posts is never listed.'
+    else if (new TextEncoder().encode(bodyLen).length > LIMITS.bodyMaxBytes) errs.body = `Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes (4000 chars max).`
     if (Object.keys(errs).length) { setFieldError(errs); return }
     setFieldError(null)
     if (!session || !selected || !title.trim()) return
@@ -110,11 +137,7 @@ export default function NewThreadPage() {
     setSubmitting(true)
     setError(null)
     try {
-      const tagList = tags
-        .split(/[,\s#]+/)
-        .map((t) => t.trim().toLowerCase())
-        .filter(Boolean)
-        .slice(0, LIMITS.maxTags)
+      const tagList = parseTags(tags).valid.slice(0, LIMITS.maxTags)
 
       const thread = await createDocument('thread', session.identityId, session.authKeyWif, {
         forumId: selected.id,
@@ -123,28 +146,26 @@ export default function NewThreadPage() {
       })
       createdThreadId.current = thread.id
 
-      if (body.trim()) {
-        try {
-          await createDocument('post', session.identityId, session.authKeyWif, {
-            threadId: thread.id,
-            forumId: selected.id,
-            body: body.trim().slice(0, LIMITS.body),
-          })
-          createdThreadId.current = ''
-          router.push(`/t/${encodeURIComponent(thread.id)}`)
-          return
-        } catch (postError) {
-          // The thread exists. Do not create a second one — let the author
-          // retry just the opening post (or leave the thread empty and finish it later).
-          setError(
-            `Thread created, but the opening post failed: ${postError instanceof Error ? postError.message : 'error'}. Click "Finish opening post" to retry — your thread is already saved.`,
-          )
-          setSubmitting(false)
-          return
-        }
+      // The opening post is required — a thread with no posts is never listed.
+      try {
+        await createDocument('post', session.identityId, session.authKeyWif, {
+          threadId: thread.id,
+          forumId: selected.id,
+          body: body.trim(),
+        })
+        createdThreadId.current = ''
+        router.push(`/t/${encodeURIComponent(thread.id)}`)
+        return
+      } catch (postError) {
+        // The thread exists. Do not create a second one — let the author
+        // retry just the opening post (the orphan rule keeps the thread
+        // unlisted until the post lands).
+        setError(
+          `Thread created, but the opening post failed: ${postError instanceof Error ? postError.message : 'error'}. Click "Finish opening post" to retry — your thread is already saved.`,
+        )
+        setSubmitting(false)
+        return
       }
-
-      router.push(`/t/${encodeURIComponent(thread.id)}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create thread — try again in a moment')
       setSubmitting(false)
@@ -157,13 +178,17 @@ export default function NewThreadPage() {
       setError('Write the opening post first, then tap "Finish opening post".')
       return
     }
+    if (new TextEncoder().encode(body.trim()).length > LIMITS.bodyMaxBytes) {
+      setError(`Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes.`)
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
       await createDocument('post', session.identityId, session.authKeyWif, {
         threadId: createdThreadId.current,
         forumId: selected.id,
-        body: body.trim().slice(0, LIMITS.body),
+        body: body.trim(),
       })
       const threadId = createdThreadId.current
       createdThreadId.current = ''
@@ -233,13 +258,19 @@ export default function NewThreadPage() {
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
                 placeholder="announcement, discussion, feature"
+                aria-invalid={Boolean(fieldError?.tags)}
+                aria-describedby={fieldError?.tags ? 'tags-error' : undefined}
                 className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7]"
               />
-              <p className="mt-1 text-xs text-[#93a1bd]">Comma, space or # separated — up to {LIMITS.maxTags}.</p>
+              {fieldError?.tags ? (
+                <p id="tags-error" className="mt-1 text-xs text-red-400">{fieldError.tags}</p>
+              ) : (
+                <p className="mt-1 text-xs text-[#93a1bd]">Comma, space or # separated — up to {LIMITS.maxTags}. Lowercase, digits and hyphens (max 32 chars).</p>
+              )}
             </div>
 
             <div>
-              <label htmlFor="body" className="text-sm font-medium text-[#93a1bd]">Opening post <span className="text-[#93a1bd]/70 font-normal">(optional)</span></label>
+              <label htmlFor="body" className="text-sm font-medium text-[#93a1bd]">Opening post</label>
               <textarea
                 id="body"
                 rows={6}
@@ -247,9 +278,18 @@ export default function NewThreadPage() {
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="What would you like to discuss?"
+                aria-invalid={Boolean(fieldError?.body)}
+                aria-describedby={fieldError?.body ? 'body-error' : undefined}
                 className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] p-3 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7] resize-y"
               />
-              <p className="mt-1 text-xs text-[#93a1bd] text-right">{body.length}/{LIMITS.body}</p>
+              {fieldError?.body ? (
+                <p id="body-error" className="mt-1 text-xs text-red-400">{fieldError.body}</p>
+              ) : (
+                <div className="mt-1 flex justify-between text-xs text-[#93a1bd]">
+                  <span>{new TextEncoder().encode(body.trim()).length}/{LIMITS.bodyMaxBytes} bytes</span>
+                  <span>{body.length}/{LIMITS.body}</span>
+                </div>
+              )}
             </div>
 
             {error && (
@@ -261,7 +301,7 @@ export default function NewThreadPage() {
 
             <button
               type="submit"
-              disabled={submitting || !forumId || !title.trim()}
+              disabled={submitting || !forumId || title.trim().length < 3 || !body.trim()}
               className="w-full btn-primary justify-center px-5 py-3 font-semibold"
             >
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Send className="w-5 h-5" aria-hidden="true" />}

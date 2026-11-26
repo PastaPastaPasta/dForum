@@ -42,8 +42,8 @@ export async function validateCriticalKey(identityId: string, criticalWif: strin
     } catch {
       return { ok: false, reason: 'Not a valid WIF' }
     }
-    // WIF version byte: mainnet 0x80, testnet 0xef. Anything else is not a secp256k1 WIF.
-    if (decoded[0] !== 0x80 && decoded[0] !== 0xef) return { ok: false, reason: 'Not a secp256k1 WIF (unknown version byte)' }
+    // WIF version byte (Dash): mainnet 0xcc, testnet 0xef. Anything else is not a secp256k1 WIF.
+    if (decoded[0] !== 0xcc && decoded[0] !== 0xef) return { ok: false, reason: 'Not a secp256k1 WIF (unknown version byte)' }
     if (decoded.length !== 34 && decoded.length !== 33) return { ok: false, reason: 'Not a valid secp256k1 WIF' }
     const compressed = decoded.length === 34
     const privateKey = decoded.slice(1, 33)
@@ -139,21 +139,6 @@ export async function deleteDocument(
 }
 
 /** Restore a moderator-deleted document. */
-export async function restoreDocument(
-  moderator: ModerationIdentity,
-  documentTypeName: 'thread' | 'post' | 'report' | 'profile',
-  document: unknown,
-): Promise<void> {
-  const sdk = await getSdk()
-  await sdk.contracts.moderatorRestoreDocument({
-    identity: moderator.wasmIdentity as never,
-    contractId: CONTRACT_ID,
-    documentTypeName,
-    signer: moderator.signer,
-    document: document as never,
-  })
-}
-
 /** Ban an identity on the contract. */
 export async function banUser(moderator: ModerationIdentity, targetIdentityId: string, reasonText: string): Promise<void> {
   const sdk = await getSdk()

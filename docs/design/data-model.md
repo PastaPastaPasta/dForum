@@ -150,7 +150,7 @@ documentsCountable: thread, post, reaction, profile.
 - No global uniqueness on usernames — DPNS identity; display name is not unique.
 - Every post is a post; thread is title/meta only. No edit history (documentsKeepHistory incompatible with moderator delete) — "edited" when `$updatedAt > $createdAt`.
 - No thread moves in v1 (forumId immutable, verified against thread by reference).
-- No sequence numbers (moderator deletion breaks dense numbering) — cursor pagination with counts for pages.
+- No sequence numbers (moderator deletion breaks dense numbering); pagination is a client-side bounded window (threads/forums show the latest N with a truncation note), not server-side page routes yet.
 - Opening post = the earliest visible post whose owner equals the thread owner, ordered by (`$createdAt`, `$id`); the thread is listed iff such a post exists (orphan rule; see Moderation semantics).
 - Reports are public on-chain, reporter included (UI says so). Only moderators set status/resolution.
 - Body limit: maxLength 4000, maxBytes 5120 (platform hard cap 5120/value).

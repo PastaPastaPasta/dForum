@@ -25,7 +25,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
   const [completing, setCompleting] = useState(false)
-  const [finishError, setFinishError] = useState<string | null>(null)
+  const [completeError, setCompleteError] = useState<string | null>(null)
   const registrationStartedRef = useRef(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const previouslyFocused = useRef<HTMLElement | null>(null)
@@ -50,7 +50,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     if (completing) return
     if (!login.result) return
     setCompleting(true)
-    setFinishError(null)
+    setCompleteError(null)
     try {
       await controller.loginWithLoginKey(
         login.result.identityId,
@@ -62,7 +62,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
       onClose?.()
     } catch (err) {
       setCompleting(false)
-      setFinishError(err instanceof Error ? err.message : 'Signing you in failed — try again')
+      setCompleteError(err instanceof Error ? err.message : 'Signing you in failed — try again')
     }
   }, [completing, controller, login, registration, onClose])
 
@@ -96,8 +96,6 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
       setCopyFailed(true)
     }
   }
-
-  const closing = login.state === 'complete' || registration.state === 'complete'
 
   // Escape closes; focus moves into the dialog on open; restore on close.
   useEffect(() => {
@@ -140,28 +138,41 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   }, [])
 
   const retry = () => {
-    registrationStartedRef.current = false
-    setFinishError(null)
     setCopied(false)
     setCopyFailed(false)
+    setCompleteError(null)
+    // Sign-in itself failed after the exchange completed — retry in place,
+    // no QR rescan needed.
+    if ((login.state === 'complete' || registration.state === 'complete') && login.result && !completing) {
+      void handleComplete()
+      return
+    }
+    // Registration failed — resume just the registration step with the same
+    // identity and keys (no new QR for the login exchange).
+    if (login.state === 'registering' && registration.state === 'error') {
+      registration.retry()
+      return
+    }
+    // Login-level failure — restart the exchange. Reset the registration
+    // guard so a re-registration can be driven when the flow returns.
+    registrationStartedRef.current = false
     login.retry()
   }
 
+  // Registration failures render inside the registering block (see the JSX),
+  // so the bottom alert only covers login failures and completion failures.
   const showError =
-    finishError != null ||
+    completeError != null ||
     login.state === 'error' ||
-    login.state === 'timeout' ||
-    registration.state === 'error'
+    login.state === 'timeout'
 
   const errorText =
-    finishError ??
+    completeError ??
     (login.state === 'timeout'
       ? 'Your wallet did not respond in time. Scan the QR again — or open dForum in a browser on the same device your wallet is installed on.'
       : login.state === 'error'
         ? (login.error ?? 'Something went wrong. Try again.')
-        : login.state === 'registering' && registration.state === 'error'
-          ? `Key registration failed${registration.error ? `: ${registration.error}` : '.'}`
-          : null)
+        : null)
 
   const stepText =
     login.state === 'complete' || registration.state === 'complete'
@@ -244,7 +255,31 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             </>
           )}
 
-          {login.state === 'registering' && (
+          {login.state === 'registering' && registration.state === 'error' ? (
+            <>
+              <div role="alert" className="text-center">
+                <p className="text-sm font-medium text-red-400 inline-flex items-center gap-2 justify-center">
+                  <AlertTriangle className="w-4 h-4" aria-hidden="true" /> Key registration failed
+                </p>
+                <p className="text-xs text-[#93a1bd] mt-2">
+                  {registration.error ?? 'Something went wrong — your keys were not registered.'}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => registration.retry()} className="btn-primary px-4 py-2 text-sm font-medium">
+                  Retry registration
+                </button>
+                {onClose && (
+                  <button
+                    onClick={onClose}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm hover:bg-[#18233c] transition"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </>
+          ) : login.state === 'registering' && (
             <>
               <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
                 {registration.uri ? (
@@ -273,7 +308,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             </>
           )}
 
-          {(login.state === 'complete' || registration.state === 'complete') && (
+          {(login.state === 'complete' || registration.state === 'complete') && !completeError && (
             <>
               <div className="flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/15">
                 <ShieldCheck className="w-8 h-8 text-emerald-400" aria-hidden="true" />
@@ -286,7 +321,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             <>
               <div role="alert" className="text-center">
                 <p className="text-sm font-medium text-red-400 inline-flex items-center gap-2 justify-center">
-                  <AlertTriangle className="w-4 h-4" aria-hidden="true" /> {finishError ? 'Login failed' : (login.state === 'timeout' ? 'Timed out' : 'Login failed')}
+                  <AlertTriangle className="w-4 h-4" aria-hidden="true" /> {completeError ? 'Sign-in failed' : (login.state === 'timeout' ? 'Timed out' : 'Login failed')}
                 </p>
                 <p className="text-xs text-[#93a1bd] mt-2">{errorText}</p>
               </div>

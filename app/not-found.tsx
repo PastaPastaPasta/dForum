@@ -32,10 +32,25 @@ export default function NotFound() {
     const fullPath = typeof window !== 'undefined' ? window.location.pathname : pathname
     const stripped = basePath && fullPath.startsWith(basePath) ? fullPath.slice(basePath.length) : fullPath
     const parts = stripped.split('/').filter(Boolean)
-    if (parts.length === 2 && parts[0] === 't') setMode({ kind: 'thread', value: decodeURIComponent(parts[1]) })
-    else if (parts.length === 2 && parts[0] === 'f') setMode({ kind: 'forum', value: decodeURIComponent(parts[1]) })
-    else if (parts.length === 2 && parts[0] === 'u') setMode({ kind: 'profile', value: decodeURIComponent(parts[1]) })
-    else setMode(null)
+    const decode = (seg: string): string | null => {
+      try { return decodeURIComponent(seg) } catch { return null }
+    }
+    try {
+      if (parts.length === 2 && parts[0] === 't') {
+        const value = decode(parts[1])
+        setMode(value ? { kind: 'thread', value } : null)
+      } else if (parts.length === 2 && parts[0] === 'f') {
+        const value = decode(parts[1])
+        setMode(value ? { kind: 'forum', value } : null)
+      } else if (parts.length === 2 && parts[0] === 'u') {
+        const value = decode(parts[1])
+        setMode(value ? { kind: 'profile', value } : null)
+      } else {
+        setMode(null)
+      }
+    } catch {
+      setMode(null)
+    }
   }, [pathname])
 
   // Set the title once we know what we're rendering instead of the default 404.

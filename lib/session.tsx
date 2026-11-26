@@ -130,6 +130,3 @@ export function useSession() {
   return useContext(SessionContext)
 }
 
-export function identityOf(session: SessionData | null): string | null {
-  return session?.identityId ?? null
-}

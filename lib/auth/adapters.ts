@@ -25,15 +25,14 @@ import {
   type SessionStore,
   type YapprKeyExchangePort,
 } from 'platform-auth'
-import { CONTRACT_ID, NETWORK } from '@/lib/constants'
+import { CONTRACT_ID, NETWORK, STORAGE_KEY_PREFIX } from '@/lib/constants'
 import { getSdk } from '@/lib/services/evo-sdk-service'
 import { buildUnsignedKeyRegistrationTransition, checkKeysRegistered } from '@/lib/auth/key-registration-builder'
 import { KEY_EXCHANGE_CONTRACT_ID } from '@/lib/constants'
 
-const NS = 'dforum:auth:'
+const NS = `${STORAGE_KEY_PREFIX}:auth:`
 const SESSION_KEY = `${NS}session`
 const SK_PREFIX = `${NS}sk:`
-const LK_PREFIX = `${NS}lk:`
 const ENC_PREFIX = `${NS}enc:`
 const ENC_TYPE_PREFIX = `${NS}enc-type:`
 const DEK_PREFIX = `${NS}dek:`
@@ -57,6 +56,29 @@ function write(key: string, value: string | null): void {
   }
 }
 
+/** Decode a key-data field the same way document-service does: hex if it
+ * decodes as hex, else base64. */
+function decodeKeyDataBytes(data: Uint8Array | string): Uint8Array {
+  if (data instanceof Uint8Array) return data
+  const str = String(data)
+  if (/^(?:[0-9a-fA-F]{2})+$/.test(str) && str.length % 2 === 0) {
+    const bytes = new Uint8Array(str.length / 2)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16)
+    return bytes
+  }
+  return fromBase64(str)
+}
+
+function toBase64FromString(str: string): string {
+  // Mirror document-service: hex if it decodes as hex, else assume base64 already.
+  if (/^(?:[0-9a-fA-F]{2})+$/.test(str) && str.length % 2 === 0) {
+    const bytes = new Uint8Array(str.length / 2)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16)
+    return toBase64(bytes)
+  }
+  return str
+}
+
 function toBase64(bytes: Uint8Array): string {
   let binary = ''
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
@@ -68,10 +90,6 @@ function fromBase64(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 // ---- storage ports ----------------------------------------------------------
@@ -190,7 +208,7 @@ export const identityPort = {
         type: keyTypeToNumber(key.keyType),
         purpose: purposeToNumber(key.purpose),
         securityLevel: securityLevelToNumber(key.securityLevel),
-        data: key.data instanceof Uint8Array ? toBase64(key.data) : String(key.data),
+        data: key.data instanceof Uint8Array ? toBase64(key.data) : toBase64FromString(String(key.data)),
       })
     }
     const balance = await sdk.identities.balance(identityId)
@@ -279,8 +297,7 @@ export const cryptoPort = {
       const identity = await sdk.identities.fetch(identityId)
       if (!identity) return false
       return (identity.publicKeys as Array<{ data: Uint8Array | string; keyType: string }>).some((key) => {
-        const raw = key.data instanceof Uint8Array ? key.data : bytesToHex(fromBase64(String(key.data)))
-        const data = key.data instanceof Uint8Array ? key.data : Uint8Array.from((String(key.data).match(/.{2}/g) || []).map((h) => parseInt(h, 16)))
+        const data = decodeKeyDataBytes(key.data)
         if (data.length === hash.length) return data.every((b, i) => b === hash[i])
         if (data.length === publicKey.length) return data.every((b, i) => b === publicKey[i])
         return false

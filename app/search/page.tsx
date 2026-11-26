@@ -63,9 +63,10 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Merge live + snapshot (dedupe by id) — the snapshot is the first paint
+  // and the live set refines it, never replaces it.
   const allThreads: SearchResult[] = useMemo(() => {
-    if (liveThreads) return liveThreads.filter((t) => !isModerated(t.modState))
-    return snap.threads.map((t) => ({
+    const snapList = snap.threads.map((t) => ({
       id: t.id,
       title: t.title,
       tags: t.tags,
@@ -75,7 +76,11 @@ export default function SearchPage() {
       modState: t.modState,
       ownerId: t.ownerId,
       createdAt: t.createdAt,
-    })).filter((t) => !isModerated(t.modState))
+    }))
+    if (!liveThreads) return snapList.filter((t) => !isModerated(t.modState))
+    const byId = new Map(snapList.map((t) => [t.id, t]))
+    for (const t of liveThreads) byId.set(t.id, t)
+    return [...byId.values()].filter((t) => !isModerated(t.modState))
   }, [liveThreads, snap])
 
   // Keep the URL in sync with the query (no history spam).

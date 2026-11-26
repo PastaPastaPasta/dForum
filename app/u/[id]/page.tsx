@@ -8,7 +8,6 @@ export function generateStaticParams() {
   const snap = loadSnapshot()
   const owners = new Set<string>()
   for (const t of snap.threads) if (t.ownerId) owners.add(t.ownerId)
-  for (const p of snap.posts) if (p.ownerId) owners.add(p.ownerId)
   return [...owners].map((id) => ({ id }))
 }
 

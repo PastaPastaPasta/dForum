@@ -118,6 +118,10 @@ export default function SettingsPage() {
         signature: draft.signature.trim().slice(0, LIMITS.signature),
       }
       if (profileId) {
+        // Strip moderator-owned fields before merging — the author cannot
+        // set them (consensus rejects with 41124), so sending them back in
+        // the replace would make a profile a moderator has touched unsaveable.
+        const { customTitle: _customTitle, modState: _modState, modNote: _modNote, ...authorProps } = existingProps as Record<string, unknown>
         const updated = await replaceDocument(
           {
             id: profileId,
@@ -127,7 +131,7 @@ export default function SettingsPage() {
             revision,
             createdAt: 0,
             updatedAt: 0,
-            properties: existingProps,
+            properties: authorProps,
           },
           identityId ?? '',
           session.authKeyWif,

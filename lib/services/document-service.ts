@@ -171,20 +171,6 @@ export async function get(type: string, documentId: string): Promise<DocRef | nu
   return normalizeDoc(raw)
 }
 
-export async function findOne(type: string, where: [string, string, unknown][]): Promise<DocRef | null> {
-  const docs = await query(type, { where, limit: 1 })
-  return docs[0] ?? null
-}
-
-/** Post count per thread via groupBy on an In-constrained index. */
-export async function countPostsPerThread(threadIds: string[]): Promise<Map<string, number>> {
-  if (threadIds.length === 0) return new Map()
-  const counts = await count('post', { where: [['threadId', 'in', threadIds]], groupBy: ['threadId'] })
-  const out = new Map<string, number>()
-  for (const [key, value] of counts.entries()) out.set(key, Number(value))
-  return out
-}
-
 // ---- writes ------------------------------------------------------------------
 
 export interface SigningContext {
@@ -223,11 +209,15 @@ export async function buildSigning(
     securityLevel: string
     data: Uint8Array | string
     isReadOnly: boolean
+    disabledAt?: bigint | number | null
   }>
 
   const hash160Pub = hash160(publicKey)
   for (const key of identityKeys) {
-    const data = key.data instanceof Uint8Array ? key.data : hexToBytes(String(key.data))
+    // skipped below — purpose/level are checked before any match is trusted.
+    const disabledAt = key.disabledAt === undefined || key.disabledAt === null ? null : Number(key.disabledAt)
+    if (disabledAt !== null && disabledAt > 0) continue
+    const data = decodeKeyData(key.data)
     const keyType = key.keyType.toUpperCase()
     let match = false
     if (keyType === 'ECDSA_SECP256K1' && data.length === publicKey.length && bytesEqual(data, publicKey)) {
@@ -236,6 +226,7 @@ export async function buildSigning(
       match = true
     }
     if (!match) continue
+    if (String(key.purpose).toUpperCase() !== 'AUTHENTICATION') continue
     const levelNum = securityLevelNumber(key.securityLevel)
     // document writes allow CRITICAL or HIGH (1 or 2); moderation needs CRITICAL (1)
     if (levelNum === 0) continue
@@ -267,6 +258,21 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
+}
+
+/** Decode a key-data field. The SDK hands bytes as Uint8Array; when a string
+ * ever appears, hex is the app's canonical encoding — hex if it matches,
+ * otherwise base64. Both decodes are shapes, never guessed silently. */
+function decodeKeyData(data: Uint8Array | string): Uint8Array {
+  if (data instanceof Uint8Array) return data
+  const str = String(data)
+  if (/^(?:[0-9a-fA-F]{2})+$/.test(str) && str.length % 2 === 0) {
+    return hexToBytes(str)
+  }
+  const binary = atob(str)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -348,21 +354,3 @@ export async function replaceDocument(
   return after
 }
 
-export async function deleteDocument(existing: DocRef, identityId: string, authKeyWif: string): Promise<void> {
-  const sdk = await getSdk()
-  const { Document } = await getSdkClasses()
-  const sign = await buildSigning(identityId, authKeyWif)
-  if (!sign) throw new Error('Signing context unavailable — identity or key not found')
-
-  const nonce = await freshNonce(identityId)
-  const document = new Document({
-    properties: existing.properties,
-    documentTypeName: existing.documentTypeName,
-    dataContractId: CONTRACT_ID,
-    ownerId: identityId,
-    revision: existing.revision,
-    id: existing.id,
-    identityContractNonce: nonce,
-  })
-  await sdk.documents.delete({ document, identityKey: sign.identityKey as never, signer: sign.signer })
-}

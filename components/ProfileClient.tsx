@@ -32,11 +32,8 @@ interface OwnedThread {
 
 type LoadStatus = 'loading' | 'ok' | 'missing' | 'error'
 
-export default function ProfileClient({ identityId }: { identityId: string }) {
-  return <ProfileInner identityId={identityId} />
-}
 
-function ProfileInner({ identityId }: { identityId: string }) {
+export default function ProfileClient({ identityId }: { identityId: string }) {
   const { session, ready } = useSession()
   const snap = loadSnapshot()
   const isSelf = session?.identityId === identityId

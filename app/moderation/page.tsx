@@ -55,6 +55,7 @@ export default function ModerationPage() {
   const [validating, setValidating] = useState(false)
   const [validation, setValidation] = useState<{ ok: boolean; reason?: string } | null>(null)
 
+  const [host, setHost] = useState('')
   const [roster, setRoster] = useState<Roster | null>(null)
   const [rosterError, setRosterError] = useState(false)
   const [targetId, setTargetId] = useState('')
@@ -87,6 +88,9 @@ export default function ModerationPage() {
   }, [])
 
   useEffect(() => {
+    // Read the host after hydration — during prerender there is no window,
+    // and reading it during render would cause a hydration mismatch.
+    setHost(typeof window !== 'undefined' ? window.location.hostname : '')
     try {
       const storedId = sessionStorage.getItem(CRITICAL_ID_STORAGE)
       if (storedId) setIdentityId(storedId)
@@ -151,6 +155,7 @@ export default function ModerationPage() {
             createdAt: t.createdAt,
             sticky: Boolean(t.properties.sticky),
             lockedAt: (t.properties.lockedAt as number | null) ?? null,
+            modState: (t.properties.modState as number | null) ?? null,
           })),
           ...posts.map((p) => ({
             id: p.id,
@@ -184,7 +189,6 @@ export default function ModerationPage() {
   const isAppointed = Boolean(roster?.appointed.includes(identityId))
   const isModerator = isOwner || isAppointed
 
-  const host = typeof window !== 'undefined' ? window.location.hostname : ''
   const hostIsLocal = host === 'localhost' || host === '127.0.0.1' || /^127\.0\.0\./.test(host)
   const canonicalHost = host === 'forum.dashhq.org' || hostIsLocal
   const hostGateOpen = canonicalHost || hostAcknowledged
@@ -297,12 +301,13 @@ export default function ModerationPage() {
   async function toggleHide(doc: ModeratableDoc) {
     if (!admin) return
     const hiding = doc.modState == null
-    if (!window.confirm(hiding ? 'Hide this post? The body will be hidden from everyone.' : 'Unhide this post? It will be shown again.')) return
+    const label = doc.type === 'post' ? 'post' : 'thread'
+    if (!window.confirm(hiding ? `Hide this ${label}? It will be hidden from everyone.` : `Unhide this ${label}? It will be shown again.`)) return
     setDocActionBusy(`${doc.id}:hide`)
     setActionError(null)
     try {
       const hidden = doc.modState != null
-      await changeDocumentFields(admin, 'post', doc.id, { modState: hidden ? null : 1 }, hidden ? 'post unhide' : 'post hide')
+      await changeDocumentFields(admin, doc.type, doc.id, { modState: hidden ? null : 1 }, hidden ? `${label} unhide` : `${label} hide`)
       setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, modState: hidden ? null : 1 } : d)))
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Hide toggle failed')
@@ -326,7 +331,7 @@ export default function ModerationPage() {
     }
   }
 
-  const canOperate = Boolean(admin)
+  const canOperate = Boolean(admin) && isModerator
   const adminIdentityId = identityId.trim()
   // Consensus forbids moderating documents (or identities) the moderator owns.
   const ownsDoc = (doc: ModeratableDoc) => Boolean(admin && adminIdentityId && doc.ownerId === adminIdentityId)
@@ -393,7 +398,7 @@ export default function ModerationPage() {
                 />
               </label>
             </div>
-            {!canonicalHost && (
+            {host && !canonicalHost && (
               <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300">
                 <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
                 <div>
@@ -418,7 +423,7 @@ export default function ModerationPage() {
             <div className="mt-3 flex items-center gap-3 flex-wrap">
               <button
                 onClick={handleValidate}
-                disabled={validating || !identityId.trim() || !wif.trim() || !hostGateOpen}
+                disabled={validating || !identityId.trim() || !wif.trim() || !hostGateOpen || !host}
                 className="btn-primary px-4 py-2 text-sm font-semibold"
               >
                 {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
@@ -437,7 +442,7 @@ export default function ModerationPage() {
               <p className="mt-3 text-sm text-emerald-400">✓ Signed in as a contract moderator ({isOwner ? 'owner' : 'appointed'}).</p>
             )}
             {validation?.ok && !isModerator && (
-              <p className="mt-3 text-sm text-amber-400">Key valid but <strong>this identity is not the owner or an appointed moderator</strong> of the contract. Actions will fail on-chain.</p>
+              <p className="mt-3 text-sm text-amber-400">Key valid but <strong>this identity is not the owner or an appointed moderator</strong> of the contract. Actions are disabled — the roster gate blocks them, and the chain would refuse them anyway.</p>
             )}
           </section>
 
@@ -610,6 +615,7 @@ export default function ModerationPage() {
                     <>
                       <SmallButton icon={<Pin className="w-3.5 h-3.5" />} label={doc.sticky ? 'Unpin' : 'Pin'} active={doc.sticky} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:sticky`} onClick={() => toggleSticky(doc)} />
                       <SmallButton icon={doc.lockedAt != null ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} label={doc.lockedAt != null ? 'Unlock' : 'Lock'} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:lock`} onClick={() => toggleLock(doc)} />
+                      <SmallButton icon={doc.modState != null ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState != null ? 'Unhide' : 'Hide'} active={doc.modState != null} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:hide`} onClick={() => toggleHide(doc)} />
                     </>
                   ) : (
                     <SmallButton icon={doc.modState != null ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState != null ? 'Unhide' : 'Hide'} active={doc.modState != null} disabled={!canOperate || docActionBusy != null || ownsDoc(doc)} busy={docActionBusy === `${doc.id}:hide`} onClick={() => toggleHide(doc)} />

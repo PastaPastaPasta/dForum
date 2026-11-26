@@ -2,8 +2,10 @@ import type { Metadata, Viewport } from 'next'
 import { SessionProvider } from '@/lib/session'
 import './globals.css'
 
+const SITE_URL = (process.env.SITE_URL || 'https://forum.dashhq.org').replace(/\/+$/, '')
+
 export const metadata: Metadata = {
-  metadataBase: new URL('https://forum.dashhq.org'),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: 'dForum — a forum on Dash Platform',
     template: '%s · dForum',

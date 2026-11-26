@@ -40,22 +40,10 @@ export function initials(name: string): string {
   return (first + second).toUpperCase()
 }
 
-/** Truncate to maxLen without cutting mid-word where possible. */
-export function truncate(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text
-  const cut = text.slice(0, maxLen)
-  const lastSpace = cut.lastIndexOf(' ')
-  return `${lastSpace > maxLen * 0.5 ? cut.slice(0, lastSpace) : cut}…`
-}
-
 export function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60)
   const secs = seconds % 60
   return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-export function cx(...classes: Array<string | false | null | undefined>): string {
-  return classes.filter(Boolean).join(' ')
 }
 
 /** Returns the URL unchanged when it is a safe http(s) link, otherwise null. */

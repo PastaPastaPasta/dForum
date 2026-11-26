@@ -20,7 +20,7 @@ Recorded 2026-11-26. Contract `ozZNp21WNWLx79aJXFo2ScEaMtBc9vvfUonqmzADM16` (tea
 **PASS.** `documents.count` with `where: [['threadId', 'in', [id]]]`, `groupBy: ['threadId']` returns per-thread counts (seeded thread: 1 post). `documents.count` with `groupBy: ['threadId']` and a `forumId ==`-only where is refused by the server (GROUP BY on a field not constrained by In/range). Forum-wide post counts should be computed per-thread instead.
 
 ## S6 — platform-auth (App Connect v2) with evo-sdk 5.0.x
-**PENDING** — tested in Phase 4 QA. Vendored platform-auth is built against evo-sdk 5.0.x; the app pins 5.1.0-rc.1.
+**IMPLEMENTED, E2E UNVERIFIED.** The vendored platform-auth client is wired into the app (login flow via `PlatformAuthController` + `useYapprKeyExchangeLogin`, `features: { keyExchangeLogin: true }` only, everything else disabled). The app pins evo-sdk 5.1.0-rc.1; the vendored client was built against 5.0.x, so the socket + SDK interop needs the manual QR-scan pass against a real wallet before launch. Do not call login "proven" until that run happens.
 
 ## S7 — testnet node version at registration
 **PASS.** Protocol 14; `DataContract.fromJSON(json, true, 14)` validated offline; the registered contract reads back with version 1 and the team moderation block (appointedModerators naming the deployer). Note: **5.0.x SDKs cannot read this chain** — the V2 config shape trips their proof decoder (`UnexpectedVariant DataContractInSerializationFormat`). Use 5.1.0-rc.1.

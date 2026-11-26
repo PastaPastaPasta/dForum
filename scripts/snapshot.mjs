@@ -3,10 +3,23 @@
  * Static-index snapshot builder.
  *
  * Queries the dForum contract on Platform and writes data/snapshot.json — the
- * build-time data the static pages render first. The Vercel/GitHub Pages build
- * reads only this file (never the network) so the site stays static + indexable.
+ * build-time data the static pages render first. The Pages build reads only
+ * this file (never the network) so the site stays static + indexable.
  *
- * Bounded: all forums/categories, latest threads + posts, counts — no full history.
+ * Bounded: all forums/categories, the latest threads, and proved counts.
+ * The lists are a bounded window, not the full history — every page re-queries
+ * the platform live after hydration, and the sitemap carries the SEO surface.
+ *
+ * Orphan rule (settled 2026-11-26, data-model.md): the opening post of a
+ * thread is the earliest *visible* post whose $ownerId equals the thread
+ * owner, ordered by ($createdAt, $id). A thread is listed only if such a post
+ * exists. Orphan status is decided per thread (one ascending query per
+ * thread) so the rule holds no matter how old the window is — no dependence
+ * on a global post window.
+ *
+ * Posts are deliberately NOT shipped: every client page imports the snapshot
+ * bundle, so shipping bodies would put all content in every visitor's JS.
+ * Threads carry title/tags/owner/forum and are re-queried live after hydration.
  *
  * Usage: node scripts/snapshot.mjs
  */
@@ -18,7 +31,8 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readContractId
 const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
 const OUT = 'data/snapshot.json';
 const THREAD_LIMIT = 60;
-const POST_LIMIT = 80;
+const LIST_LIMIT = 50;
+const FETCH_CONCURRENCY = 4;
 
 function readContractId() {
   try {
@@ -49,12 +63,11 @@ async function main() {
     : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } });
   await sdk.connect();
 
-  const [categories, forums, threads, posts, reactionCounts] = await Promise.all([
-    queryList(sdk, 'category', { limit: 50 }),
-    queryList(sdk, 'forum', { limit: 50 }),
+  const [categories, forums, threads, reactionCount] = await Promise.all([
+    queryList(sdk, 'category', { limit: LIST_LIMIT }),
+    queryList(sdk, 'forum', { limit: LIST_LIMIT }),
     queryList(sdk, 'thread', { orderBy: [['$createdAt', 'desc']], limit: THREAD_LIMIT }),
-    queryList(sdk, 'post', { orderBy: [['$createdAt', 'desc']], limit: POST_LIMIT }),
-    countReactions(sdk),
+    countDocuments(sdk, 'reaction'),
   ]);
 
   const forumMap = new Map(forums.map((f) => [f.id, f]));
@@ -64,35 +77,49 @@ async function main() {
   // on-chain (the records remain public) but neither the sitemap nor any
   // prerendered page shows it.
   const visibleThreads = threads.filter((t) => t.properties?.modState == null);
-  // Lock enforcement: a post created after its thread was locked is not
-  // shown in the static index (the lock is moderator-set by hand; the
-  // network never enforces it).
-  const lockedAtById = new Map(visibleThreads.map((t) => [t.id, t.properties?.lockedAt ?? null]));
-  const visiblePosts = posts.filter((p) => {
-    if (p.properties?.modState != null) return false;
-    const lockedAt = lockedAtById.get(p.properties?.threadId);
-    if (lockedAt != null && (p.$createdAt ?? 0) > lockedAt) return false;
-    return true;
-  });
 
-  // Orphan rule (settled 2026-11-26, data-model.md): the opening post of a
-  // thread is the earliest visible post whose $ownerId equals the thread
-  // owner, ordered by ($createdAt, $id). A thread is listed only if such a
-  // post exists; posts by other authors created before it are dropped.
+  // Lock enforcement: a post created after its thread was locked is not
+  // visible to the static index (the lock is moderator-set by hand; the
+  // network never enforces it).
   const isBefore = (a, b) => a.$createdAt < b.$createdAt || (a.$createdAt === b.$createdAt && a.id < b.id);
-  const postsByThread = new Map();
-  for (const p of visiblePosts) {
-    const threadId = p.properties?.threadId;
-    if (!threadId) continue;
-    if (!postsByThread.has(threadId)) postsByThread.set(threadId, []);
-    postsByThread.get(threadId).push(p);
-  }
+
+  // Orphan rule, per thread: the thread is listed iff it has a visible post
+  // whose $ownerId equals the thread owner — the opening post. One ascending
+  // query per thread (in batches) — the window is never guessed.
   const openingByThread = new Map();
-  for (const t of visibleThreads) {
-    const ownerPosts = (postsByThread.get(t.id) ?? []).filter((p) => p.$ownerId === t.$ownerId);
-    if (ownerPosts.length === 0) continue;
-    openingByThread.set(t.id, ownerPosts.reduce((a, b) => (isBefore(b, a) ? b : a)));
+  for (let i = 0; i < visibleThreads.length; i += FETCH_CONCURRENCY) {
+    const batch = visibleThreads.slice(i, i + FETCH_CONCURRENCY);
+    const results = await Promise.all(batch.map(async (t) => {
+      const ownerId = t.$ownerId;
+      if (!ownerId) return { thread: t, opening: null };
+      const lockedAt = t.properties?.lockedAt ?? null;
+      // The opening post is the earliest visible owner-owned post of the
+      // thread. One ascending byThread query per thread (the two-key
+      // owner+thread where is rejected by the network — no index covers it),
+      // with a wider fallback when the first 10 posts hide the opening post.
+      const visibleAndOwned = (p) =>
+        p.$ownerId === ownerId && p.properties?.modState == null && (lockedAt == null || p.$createdAt <= lockedAt);
+      const early = await queryList(sdk, 'post', {
+        where: [['threadId', '==', t.id]],
+        orderBy: [['$createdAt', 'asc']],
+        limit: 10,
+      });
+      let opening = early.find(visibleAndOwned) ?? null;
+      if (!opening) {
+        const wide = await queryList(sdk, 'post', {
+          where: [['threadId', '==', t.id]],
+          orderBy: [['$createdAt', 'asc']],
+          limit: 50,
+        });
+        opening = wide.find(visibleAndOwned) ?? null;
+      }
+      return { thread: t, opening };
+    }));
+    for (const { thread, opening } of results) {
+      if (opening) openingByThread.set(thread.id, opening);
+    }
   }
+
   const hiddenByOrphan = new Set(visibleThreads.filter((t) => !openingByThread.has(t.id)).map((t) => t.id));
   const listedThreads = visibleThreads.filter((t) => !hiddenByOrphan.has(t.id));
 
@@ -110,33 +137,24 @@ async function main() {
     updatedAt: t.$updatedAt ?? 0,
   }));
 
-  const snapshotPosts = visiblePosts
-    .filter((p) => {
-      const opening = openingByThread.get(p.properties?.threadId);
-      if (!opening) return false; // whose thread is not listed (dropped)
-      return !isBefore(p, opening); // post created before the opening post is dropped
-    })
-    .map((p) => ({
-    id: p.id,
-    threadId: p.properties?.threadId ?? null,
-    forumId: p.properties?.forumId ?? null,
-    forumSlug: forumMap.get(p.properties?.forumId)?.properties?.slug ?? null,
-    body: shortStr(p.properties?.body, 2000),
-    modState: null,
-    ownerId: p.$ownerId ?? null,
-    createdAt: p.$createdAt ?? 0,
-  }));
-
-  // Completeness gate: if the proved count says there is content the raw
-  // queries did not return, fail loudly — the deploy keeps the last good
-  // snapshot. (Moderated content is counted separately and excluded.)
+  // Completeness gate: with the thread window bounded to the latest 60 and
+  // the count proved authoritative, fail loudly if we could not list any
+  // content that exists. (Moderated content is excluded from the static
+  // index by design, so the gate compares what is *listed*, not what exists.)
+  // Completeness gate. Only documentsCountable types expose a proved count;
+  // forum/category are NOT countable in this deployment, so the only honest
+  // check for them is the window-limit tell — a fetch filling the window
+  // means content we cannot count, so fail loudly rather than silently cap.
   const provedThreads = await countDocuments(sdk, 'thread');
   const provedPosts = await countDocuments(sdk, 'post');
-  if (threads.length === 0 && provedThreads > 0) {
-    throw new Error(`completeness gate: proved ${provedThreads} threads but listed 0`);
+  if (forums.length >= LIST_LIMIT) {
+    throw new Error(`completeness gate: forum fetch filled the ${LIST_LIMIT}-doc window — more forums exist than the static index can list`);
   }
-  if (posts.length === 0 && provedPosts > 0) {
-    throw new Error(`completeness gate: proved ${provedPosts} posts but listed 0`);
+  if (categories.length >= LIST_LIMIT) {
+    throw new Error(`completeness gate: category fetch filled the ${LIST_LIMIT}-doc window — more categories exist than the static index can list`);
+  }
+  if (provedThreads > 0 && listedThreads.length === 0) {
+    throw new Error(`completeness gate: proved ${provedThreads} threads but listed 0 (or none in the window)`);
   }
 
   const counts = {
@@ -144,12 +162,16 @@ async function main() {
     forums: forums.length,
     threads: provedThreads,
     posts: provedPosts,
-    reactions: reactionCounts,
+    reactions: reactionCount,
   };
 
-  const hiddenTotal = (threads.length - visibleThreads.length) + (posts.length - visiblePosts.length);
-  if (hiddenTotal > 0) {
-    console.log(`snapshot: excluded ${hiddenTotal} moderated document(s) from the static index`);
+  const hiddenModerated = threads.length - visibleThreads.length;
+  const hiddenOrphan = hiddenByOrphan.size;
+  if (hiddenModerated > 0) {
+    console.log(`snapshot: excluded ${hiddenModerated} moderated thread(s) from the static index`);
+  }
+  if (hiddenOrphan > 0) {
+    console.log(`snapshot: excluded ${hiddenOrphan} thread(s) hidden by the orphan rule`);
   }
 
   const snapshot = {
@@ -175,13 +197,12 @@ async function main() {
       archived: Boolean(f.properties?.archived),
     })),
     threads: snapshotThreads,
-    posts: snapshotPosts,
   };
 
   mkdirSync('data', { recursive: true });
   writeFileSync(OUT, JSON.stringify(snapshot, null, 2) + '\n');
   const size = JSON.stringify(snapshot).length;
-  console.log(`snapshot written: ${OUT} (${(size / 1024).toFixed(1)} KB) — ${threads.length} threads, ${posts.length} posts`);
+  console.log(`snapshot written: ${OUT} (${(size / 1024).toFixed(1)} KB) — ${listedThreads.length} threads (of ${provedThreads} proved), ${counts.posts} posts, ${counts.forums} forums`);
   process.exit(0);
 }
 
@@ -189,6 +210,7 @@ async function queryList(sdk, type, options) {
   const page = await sdk.documents.query({
     dataContractId: CONTRACT_ID,
     documentTypeName: type,
+    where: options.where,
     orderBy: options.orderBy,
     limit: options.limit,
   });
@@ -224,10 +246,8 @@ function identifierify(value) {
     if (/^[0-9a-fA-F]{64}$/.test(value)) return bs58.encode(Buffer.from(value, 'hex'));
     try { return bs58.encode(bs58.decode(value)); } catch { return value; }
   }
-  // Uint8Array / Array of bytes
   if (value instanceof Uint8Array) return bs58.encode(value);
   if (Array.isArray(value) && value.length === 32) return bs58.encode(Uint8Array.from(value));
-  // object with numeric keys (byte array as plain object)
   if (typeof value === 'object' && value !== null) {
     const keys = Object.keys(value);
     if (keys.length === 32 && keys.every((k) => /^\d+$/.test(k))) {
@@ -241,7 +261,6 @@ function identifierify(value) {
 
 function normalizeValue(value) {
   if (Array.isArray(value)) {
-    // identifier array (e.g. tags is NOT an identifier; leave scalars)
     if (value.length === 0) return [];
     if (value.every((v) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
       return value.map((v) => normalizeValue(v));
@@ -261,31 +280,15 @@ function normalizeValue(value) {
 }
 
 async function countDocuments(sdk, type) {
-  try {
-    const map = await sdk.documents.count({
-      dataContractId: CONTRACT_ID,
-      documentTypeName: type,
-    });
-    let total = 0n;
-    for (const v of map.values()) total += v;
-    return Number(total);
-  } catch {
-    return 0;
-  }
-}
-
-async function countReactions(sdk) {
-  try {
-    const map = await sdk.documents.count({
-      dataContractId: CONTRACT_ID,
-      documentTypeName: 'reaction',
-    });
-    let total = 0n;
-    for (const v of map.values()) total += v;
-    return Number(total);
-  } catch {
-    return 0;
-  }
+  // Errors here fail the build — the gate is the whole point; a swallowed
+  // count would let a broken snapshot through silently.
+  const map = await sdk.documents.count({
+    dataContractId: CONTRACT_ID,
+    documentTypeName: type,
+  });
+  let total = 0n;
+  for (const v of map.values()) total += v;
+  return Number(total);
 }
 
 main().catch((e) => {
