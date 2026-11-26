@@ -35,9 +35,9 @@ Recorded 2026-11-26. Contract `ozZNp21WNWLx79aJXFo2ScEaMtBc9vvfUonqmzADM16` (tea
 | post | 134,324,720 | 0.00134 |
 | reaction | 90,951,960 | 0.00091 |
 
-All five document types land well under the 0.005 DASH aspiration (post 0.00134, thread 0.00164). Fee is dominated by the six indexes on post (byThread, byForum, byAuthor, recent, byUpdated, moderated) — consistent with the platform's per-index write model. No re-registration needed. Fee target (< 0.005 DASH) verified across the board.
+All five document types land well under the 0.005 DASH aspiration (post 0.00134, thread 0.00164). A post create writes five index entries (byThread, byForum, byAuthor, recent, byUpdated) — `moderated` is skipped because $moderatedAt is absent at create. A thread create writes four plus one byTag entry per tag (byForum, byAuthor, recent, byUpdated). Fee follows the platform's per-index write model. No re-registration needed. Fee target (< 0.005 DASH) verified across the board.
 
-**S8 probe — DONE (2026-11-26).** One live ~2 KB body post (1,898 bytes, 1,896 chars) on the seeded contract: 151,910,540 credits = **0.00152 DASH** (7229 ms). Body length does not materially move the fee — the six post indexes dominate as expected. Fee target (< 0.005 DASH per write) is met across the board.
+**S8 probe — DONE (2026-11-26).** One live ~2 KB body post (1,898 bytes, 1,896 chars) on the seeded contract: 151,910,540 credits = **0.00152 DASH** (7229 ms). Body length does not materially move the fee — the per-index write model (5 entries at create) dominates as expected. Fee target (< 0.005 DASH per write) is met across the board.
 
 ## Seed documents (real test data on the testnet contract)
 | type | id |

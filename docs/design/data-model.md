@@ -7,7 +7,7 @@ One contract per deployment (bans/suspensions apply to a single contract; one de
 ### forumSettings — creationRestrictionMode 1, one doc per deployment
 | field | type | notes |
 |---|---|---|
-| key | string, const "main" | unique index byKey |
+| key | string, pattern `^[a-z0-9-]{1,16}$` | unique index byKey (app uses "main") |
 | name | string ≤80 | |
 | tagline | string ≤160 | optional |
 | description | string ≤1000 | optional |
@@ -36,7 +36,7 @@ One contract per deployment (bans/suspensions apply to a single contract; one de
 ### teamMember — creationRestrictionMode 1 (display metadata only, never authority)
 | field | type | notes |
 |---|---|---|
-| memberId | identifier | refersTo identity; unique index byMember |
+| memberId | identifier (plain, no refersTo — display metadata) | unique index byMember |
 | role | string ≤40 | e.g. "moderator", "owner" |
 | sort | integer 0..65535 | |
 
@@ -55,13 +55,13 @@ One contract per deployment (bans/suspensions apply to a single contract; one de
 | field | type | notes |
 |---|---|---|
 | threadId | identifier, refersTo thread moderatedDocument (where forumId==forumId), immutable | kept for removal record |
-| forumId | integer... no: identifier, refersTo forum permanentDocument, immutable | kept for removal record |
+| forumId | identifier, refersTo forum permanentDocument, immutable | kept for removal record |
 | body | string ≤4000 (maxBytes 5120) | author-editable |
 | replyToId | identifier (plain, no refersTo) | optional, not enforced |
 | modState | integer 1..3 | changeFields, optional, moderator-only (1=hidden) |
 | modNote | string ≤200 | changeFields, optional |
 
-Every message is a `post` including the opening post. Thread listed only when earliest post belongs to thread owner (orphan check).
+Every message is a `post` including the opening post. A thread is listed only when its opening post exists — the earliest visible post whose `$ownerId` equals the thread's `$ownerId`, ordered by (`$createdAt`, `$id`) (orphan rule). Posts by others created before it are dropped/hidden for listing.
 
 "Edited" is `$updatedAt > $createdAt` (not `$revision > 1`): moderator changeFields bumps `$revision` without moving `$updatedAt`.
 
@@ -109,14 +109,14 @@ Every message is a `post` including the opening post. Thread listed only when ea
 | thread | byAuthor | $ownerId, $createdAt | rangeCountable |
 | thread | recent | $createdAt | |
 | thread | byUpdated | $updatedAt | |
-| thread | moderated | $moderatedAt | skipIfAbsent |
+| thread | moderated | $moderatedAt | nullSearchable: false |
 | thread | byTag | tags, $createdAt | |
 | post | byThread | threadId, $createdAt | rangeCountable |
 | post | byForum | forumId, $createdAt | rangeCountable |
 | post | byAuthor | $ownerId, $createdAt | rangeCountable |
 | post | recent | $createdAt | |
 | post | byUpdated | $updatedAt | |
-| post | moderated | $moderatedAt | skipIfAbsent |
+| post | moderated | $moderatedAt | nullSearchable: false |
 | reaction | byPostOwner | postId, $ownerId | unique |
 | reaction | byPostKind | postId, kind | countable |
 | reaction | byRecipient | postOwnerId | countable |
@@ -131,7 +131,18 @@ documentsCountable: thread, post, reaction, profile.
 - `modState` non-null = hidden (console writes 1; every renderer — client, snapshot, sitemap — treats any non-null modState as hidden: body suppressed, listing suppressed, snapshot-excluded). `banned` never appears on profiles; bans live in the ban list.
 - Moderator changeFields on a thread/post bumps `$revision` but NOT `$updatedAt` — display edited badges from `$updatedAt > $createdAt`.
 - Locked threads: client ignores posts with `$createdAt > lockedAt`; the snapshot drops posts created after lockedAt (S3: never consensus-enforced).
-- Snapshot orphan rule: a thread is listed only when the earliest visible post's owner == thread owner.
+- Orphan rule: a thread is listed only when its opening post exists — the earliest visible post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`). Snapshot and client both apply it.
+
+## Pending at next registration (indexes are frozen in this deployment)
+- `reaction.byPostKind`: in a fresh registration, use `rangeCountable: true` so per-post counts can be served without `kind in [...]` group-by. The current contract uses `countable` — per-post totals need `postId == X, kind in [1..8]` with groupBy [kind] (one request per post); spike before building the reaction UI.
+- `profile`: no `moderated` index (`$moderatedAt`) — hidden profiles must be found by full scan; `profile.byOwner` is the only index.
+- `report`: no status index (`byStatus`) — the moderation queue scans `recent` and filters client-side; also add `where: { threadId: 'threadId' }` on `report.postId` so the cached threadId is validated.
+- `teamMember.canBeDeleted`: `false` today — a former moderator's display row can be edited but never deleted; set `true` at next registration (nothing refers to `teamMember`).
+- `website` field: add `^(https?://\S+)?$` pattern (app-side check in the meantime).
+- `forumSettings.rules`: `maxBytes: 8192` is a no-op (maxLength 1000 caps the value below the 5120-byte platform cap). In a fresh registration use maxLength 4000 + maxBytes 5120.
+- `reaction.byPostKind` and others: nothing here changes this deployment; schema edits require a new contract.
+
+- `$moderatedAt` is set only by `changeFields` (and moderator-applied changes); owner deletes and owner replace do NOT set it. Owner deletions are tracked via `documentRemovals`.
 
 ## Invariants
 
@@ -140,6 +151,6 @@ documentsCountable: thread, post, reaction, profile.
 - Every post is a post; thread is title/meta only. No edit history (documentsKeepHistory incompatible with moderator delete) — "edited" when `$updatedAt > $createdAt`.
 - No thread moves in v1 (forumId immutable, verified against thread by reference).
 - No sequence numbers (moderator deletion breaks dense numbering) — cursor pagination with counts for pages.
-- Opening post = earliest post in thread; thread listed only if that post's owner == thread owner (orphan check).
+- Opening post = the earliest visible post whose owner equals the thread owner, ordered by (`$createdAt`, `$id`); the thread is listed iff such a post exists (orphan rule; see Moderation semantics).
 - Reports are public on-chain, reporter included (UI says so). Only moderators set status/resolution.
 - Body limit: maxLength 4000, maxBytes 5120 (platform hard cap 5120/value).

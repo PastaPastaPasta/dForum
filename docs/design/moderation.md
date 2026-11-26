@@ -30,9 +30,10 @@ Moderation transitions need a CRITICAL authentication key WITHOUT contract bound
 
 ## Behavior rules
 
-- Hidden content (modState non-null = 1=hidden): snapshot drops the document entirely (not listed, not prerendered); the client suppresses bodies and listings and badges it "hidden". Console writes 1 for hide; any non-null value is treated as hidden everywhere.
+- Hidden content (modState non-null = 1=hidden): snapshot drops the document entirely (not listed, not prerendered); the client suppresses bodies and listings and badges it "hidden". Console writes 1 for hide; any non-null value is treated as hidden everywhere. Note: an owner can hide nothing about a post except by deleting it — hidden posts render as a placeholder in threads.
 - `banned` is never written on profiles — bans live in the ban list (moderation config), not in profile modState.
 - Deleted docs: removal record kept (restore within a week); stores just threadId/forumId.
 - Locked threads (lockedAt set): clients ignore posts with $createdAt > lockedAt; the snapshot drops those posts from the static index and the thread is listed too (URL still renders live). The network never enforces the lock (S3).
 - Reports are public on-chain, reporter included (UI says so).
 - Moderation semantics (settled 2026-11-26): every render path (client, snapshot, sitemap) treats a non-null modState as hidden. Snapshot exclusion happens at both thread and post level; orphan-filtered threads are also excluded from the static index.
+- Orphan rule (settled 2026-11-26): a thread is listed only when its opening post exists — the earliest visible post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`). Posts by others created before it are dropped for listing. The snapshot and the client both apply it.

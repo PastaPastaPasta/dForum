@@ -8,6 +8,9 @@
  * pre-built HTML. For those paths this page renders the same client
  * components live, so shared links to new content still work. Any other
  * URL gets the plain not-found page.
+ *
+ * The pre-hydrated HTML should be a neutral skeleton — a "Page not found"
+ * flash before the client component mounts is worse than a loading state.
  */
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -35,7 +38,33 @@ export default function NotFound() {
     else setMode(null)
   }, [pathname])
 
-  if (ready && mode) {
+  // Set the title once we know what we're rendering instead of the default 404.
+  useEffect(() => {
+    if (!ready) return
+    const prev = document.title
+    if (mode) {
+      document.title = mode.kind === 'profile' ? 'Member profile · dForum' : mode.kind === 'forum' ? 'Forum · dForum' : 'Thread · dForum'
+    }
+    return () => { document.title = prev }
+  }, [ready, mode])
+
+  if (!ready) {
+    return (
+      <>
+        <Navbar />
+        <main className="flex-1 flex items-center justify-center px-6">
+          <div className="w-full max-w-3xl space-y-3">
+            <div className="h-4 w-24 rounded bg-[#18233c] animate-pulse" />
+            <div className="h-8 w-3/4 rounded bg-[#18233c] animate-pulse" />
+            <div className="h-4 w-1/2 rounded bg-[#18233c] animate-pulse" />
+          </div>
+        </main>
+        <Footer />
+      </>
+    )
+  }
+
+  if (mode) {
     if (mode.kind === 'thread') return <ThreadClient threadId={mode.value} />
     if (mode.kind === 'forum') return <ForumClient slug={mode.value} />
     return <ProfileClient identityId={mode.value} />
@@ -49,7 +78,7 @@ export default function NotFound() {
           <p className="text-sm uppercase tracking-widest text-[#93a1bd]">404</p>
           <h1 className="text-3xl font-bold mt-2">Page not found</h1>
           <p className="text-[#93a1bd] mt-2">That page is gone — or never was.</p>
-          <Link href="/" className="mt-6 inline-block rounded-lg bg-[#0070c0] px-4 py-2 font-medium text-white hover:bg-[#005fa0] transition">
+          <Link href="/" className="mt-6 btn-primary px-4 py-2">
             Back to home
           </Link>
         </div>

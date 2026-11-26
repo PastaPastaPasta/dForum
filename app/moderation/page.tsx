@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import {
   Shield, Ban, Undo2, Clock, AlertTriangle, Trash2, Bell, BellOff, Loader2, ShieldCheck,
   Eye, EyeOff, Pin, Lock, Unlock, KeyRound, Search, RefreshCw, ShieldAlert,
@@ -17,8 +18,10 @@ import {
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { shortId, formatDate, formatRelativeTime } from '@/lib/utils'
 
-// The CRITICAL key lives only in component state — never in storage, so it
-// can't outlive the tab and can't be read by later same-origin pages.
+// The CRITICAL key lives only in this tab's memory — never in storage, never
+// written anywhere except the platform's request. “Dropped from app state”,
+// not a guarantee about memory: JS strings can't be zeroed, and the WASM
+// signer is freed on wipe (free()) and on navigation.
 const CRITICAL_ID_STORAGE = 'dforum:moderator:identityId'
 
 interface Roster {
@@ -69,23 +72,65 @@ export default function ModerationPage() {
   const [docsLoading, setDocsLoading] = useState(true)
   const [docActionBusy, setDocActionBusy] = useState<string | null>(null)
 
+  // Signer is held in a ref (never in state) and freed on wipe — drop the
+  // WASM handle, not just a string reference.
+  const signerRef = useRef<{ free(): void } | null>(null)
+  const pathname = usePathname()
+
+  const wipe = useCallback(() => {
+    try { signerRef.current?.free() } catch { /* signer may already be freed */ }
+    signerRef.current = null
+    setWif('')
+    setAdmin(null)
+    setValidation(null)
+    setStatus(null)
+  }, [])
+
   useEffect(() => {
     try {
       const storedId = sessionStorage.getItem(CRITICAL_ID_STORAGE)
       if (storedId) setIdentityId(storedId)
     } catch { /* ignore */ }
-    // Wipe the key from the UI when the tab hides/closes.
-    const wipe = () => {
-      setWif('')
-      setAdmin(null)
-      setValidation(null)
-    }
     window.addEventListener('pagehide', wipe)
     window.addEventListener('beforeunload', wipe)
+    // The console is a CRITICAL-key surface: leaving it in-app, or the tab
+    // being hidden, wipes the key rather than letting it linger.
+    const onVisibility = () => { if (document.visibilityState === 'hidden') wipe() }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       window.removeEventListener('pagehide', wipe)
       window.removeEventListener('beforeunload', wipe)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
+  }, [wipe])
+
+  // Idle auto-wipe: drop the key after 10 minutes without interaction.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const reset = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(wipe, 10 * 60 * 1000)
+    }
+    reset()
+    const onActivity = () => reset()
+    window.addEventListener('pointerdown', onActivity)
+    window.addEventListener('keydown', onActivity)
+    return () => {
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('pointerdown', onActivity)
+      window.removeEventListener('keydown', onActivity)
+    }
+  }, [wipe])
+
+  // Wipe when navigating away from the console (SPA navigation stays mounted
+  // logic; this is the in-app path that never fires pagehide).
+  useEffect(() => {
+    if (pathname && !pathname.startsWith('/moderation')) wipe()
+  }, [pathname, wipe])
+
+  // Free the signer on unmount.
+  useEffect(() => {
+    return () => { try { signerRef.current?.free() } catch { /* freed */ }; signerRef.current = null }
   }, [])
 
   useEffect(() => {
@@ -140,7 +185,8 @@ export default function ModerationPage() {
   const isModerator = isOwner || isAppointed
 
   const host = typeof window !== 'undefined' ? window.location.hostname : ''
-  const canonicalHost = host === 'forum.dashhq.org' || host === 'localhost' || host === '127.0.0.1' || /^127\.0\.0\./.test(host)
+  const hostIsLocal = host === 'localhost' || host === '127.0.0.1' || /^127\.0\.0\./.test(host)
+  const canonicalHost = host === 'forum.dashhq.org' || hostIsLocal
   const hostGateOpen = canonicalHost || hostAcknowledged
 
   async function handleValidate() {
@@ -152,7 +198,18 @@ export default function ModerationPage() {
       const result = await validateCriticalKey(identityId.trim(), wif.trim())
       setValidation(result)
       if (result.ok) {
+        // The owner's CRITICAL key is full contract authority (roster +
+        // moderation config). The console is for appointed moderators; the
+        // owner keeps that key offline for contract updates. Only allow the
+        // owner key on localhost.
+        const isOwnerNow = Boolean(roster?.ownerId && identityId.trim() === roster.ownerId)
+        if (isOwnerNow && !hostIsLocal) {
+          setValidation({ ok: false, reason: 'The owner key is refused on this host — the owner keeps a full contract-authority key offline. Use an appointed moderator identity, or run this console on localhost.' })
+          setAdmin(null)
+          return
+        }
         const prepared = await prepareModerator(identityId.trim(), wif.trim())
+        signerRef.current = prepared.signer
         setAdmin(prepared)
       } else {
         setAdmin(null)
@@ -166,6 +223,8 @@ export default function ModerationPage() {
   }
 
   async function handleClearAdmin() {
+    try { signerRef.current?.free() } catch { /* already freed */ }
+    signerRef.current = null
     sessionStorage.removeItem(CRITICAL_ID_STORAGE)
     setIdentityId('')
     setWif('')
@@ -304,17 +363,19 @@ export default function ModerationPage() {
             </div>
             <p className="mt-2 text-sm text-[#93a1bd]">
               Moderation is signed with a <strong>CRITICAL</strong> authentication key — the session key you log in with is HIGH and
-              cannot moderate. Paste your own CRITICAL key WIF (from your admin identity). It is kept in
-              memory for this tab only — never stored, never written to any other origin.
+              cannot moderate. Paste your own CRITICAL key WIF (from your moderator identity). It is kept in
+              this tab&apos;s memory only — never stored, never written to any other origin. The <strong>owner</strong> identity
+              holds full contract authority (roster + moderation config) and is refused on this host: keep it offline for contract
+              updates. Use an appointed moderator identity here.
             </p>
             <div className="mt-4 grid sm:grid-cols-2 gap-3">
               <label className="block">
                 <span className="text-xs text-[#93a1bd]">Moderator identity ID</span>
                 <input
                   value={identityId}
-                  onChange={(e) => { setIdentityId(e.target.value); setValidation(null); setAdmin(null) }}
+                  onChange={(e) => { try { signerRef.current?.free() } catch { /* freed */ }; signerRef.current = null; setIdentityId(e.target.value); setValidation(null); setAdmin(null) }}
                   placeholder="6Dft…"
-                  className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7] focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
                 />
               </label>
               <label className="block">
@@ -322,10 +383,13 @@ export default function ModerationPage() {
                 <input
                   type="password"
                   value={wif}
-                  onChange={(e) => { setWif(e.target.value); setValidation(null); setAdmin(null) }}
+                  onChange={(e) => { try { signerRef.current?.free() } catch { /* freed */ }; signerRef.current = null; setWif(e.target.value); setValidation(null); setAdmin(null) }}
                   placeholder="L…"
-                  className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7] focus:outline-none"
-                  autoComplete="off"
+                  className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                  autoComplete="one-time-code"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                 />
               </label>
             </div>
@@ -355,7 +419,7 @@ export default function ModerationPage() {
               <button
                 onClick={handleValidate}
                 disabled={validating || !identityId.trim() || !wif.trim() || !hostGateOpen}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#0070c0] hover:bg-[#005fa0] transition px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                className="btn-primary px-4 py-2 text-sm font-semibold"
               >
                 {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                 Validate &amp; sign in as admin
@@ -381,7 +445,7 @@ export default function ModerationPage() {
             <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>{actionError}</span>
-              <button onClick={() => setActionError(null)} className="ml-auto text-xs text-[#93a1bd] hover:text-white">dismiss</button>
+              <button onClick={() => setActionError(null)} className="ml-auto rounded-lg px-2 py-1 text-xs text-[#93a1bd] hover:text-white hover:bg-[#18233c] transition">Dismiss</button>
             </div>
           )}
 
@@ -409,12 +473,15 @@ export default function ModerationPage() {
 
             <section className="rounded-2xl border border-[#22304e] bg-[#111a2e] p-5 flex flex-col">
               <h2 className="font-semibold flex items-center gap-2"><Search className="w-4 h-4 text-[#4db3ff]" /> Identity status &amp; actions</h2>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3">
+              <label htmlFor="target-id" className="text-xs text-[#93a1bd]">Identity ID to look up</label>
+              <div className="mt-1 flex gap-2">
                 <input
+                  id="target-id"
                   value={targetId}
                   onChange={(e) => setTargetId(e.target.value)}
                   placeholder="identity ID to look up"
-                  className="flex-1 rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7] focus:outline-none"
+                  className="flex-1 rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
                   onKeyDown={(e) => e.key === 'Enter' && refreshStatus()}
                 />
                 <button
@@ -425,6 +492,7 @@ export default function ModerationPage() {
                 >
                   {statusLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 </button>
+              </div>
               </div>
 
               {status && (
@@ -624,9 +692,10 @@ function TextInput({ label, value, onChange, type = 'text' }: { label: string; v
     <label className="block">
       <span className="text-xs text-[#93a1bd]">{label}</span>
       <input
+        type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-xs focus:border-[#008CE7] focus:outline-none"
+        className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-xs focus:border-[#008CE7]"
       />
     </label>
   )

@@ -22,6 +22,7 @@ export default function NewThreadPage() {
   const router = useRouter()
   const { session, ready } = useSession()
   const snap = loadSnapshot()
+  const forumParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('forum') : null
 
   const [forums, setForums] = useState<ForumOption[]>(() =>
     snap.forums
@@ -34,6 +35,7 @@ export default function NewThreadPage() {
   const [body, setBody] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldError, setFieldError] = useState<{ forum?: string; title?: string } | null>(null)
   const createdThreadId = useRef('')
 
   // Live forum list
@@ -61,6 +63,16 @@ export default function NewThreadPage() {
   const forumOptions = useMemo(() => forums, [forums])
   const selected = forumOptions.find((f) => f.id === forumId)
 
+  // Preselect the forum passed via ?forum= (from a forum page's "new thread").
+  useEffect(() => {
+    if (!forumParam) return
+    const byId = forums.find((f) => f.id === forumParam)
+    if (byId) { setForumId(byId.id); return }
+    const bySlug = forums.find((f) => f.slug === forumParam)
+    if (bySlug) setForumId(bySlug.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forums, forumParam])
+
   if (ready && !session) {
     return (
       <>
@@ -69,7 +81,7 @@ export default function NewThreadPage() {
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Login required</p>
             <h1 className="text-2xl font-bold mt-2">Sign in to start a thread</h1>
-            <Link href="/login" className="mt-6 inline-block rounded-lg bg-[#0070c0] px-4 py-2 font-medium text-white hover:bg-[#005fa0] transition">Login with Dash</Link>
+            <Link href="/login" className="mt-6 btn-primary">Login with Dash</Link>
           </div>
         </main>
         <Footer />
@@ -79,6 +91,17 @@ export default function NewThreadPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // Already created a thread — the core "Start thread" button must not
+    // create a second one. Route it to the opening-post retry instead.
+    if (createdThreadId.current) {
+      await handleFinishOpeningPost()
+      return
+    }
+    const errs: { forum?: string; title?: string } = {}
+    if (!selected) errs.forum = 'Choose a forum'
+    if (!title.trim()) errs.title = 'A title is required'
+    if (Object.keys(errs).length) { setFieldError(errs); return }
+    setFieldError(null)
     if (!session || !selected || !title.trim()) return
     if (!session.authKeyWif) {
       setError('Your session has no signable key. Try logging in again.')
@@ -161,38 +184,46 @@ export default function NewThreadPage() {
           <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">Start a thread</h1>
           <p className="mt-1 text-sm text-[#93a1bd]">Posts are stored on-chain — think it through before you send.</p>
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+          <form noValidate onSubmit={handleSubmit} className="mt-6 space-y-5">
             <div>
               <label htmlFor="forum" className="text-sm font-medium text-[#93a1bd]">Forum</label>
               <select
                 id="forum"
-                required
                 value={forumId}
                 onChange={(e) => setForumId(e.target.value)}
-                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] focus:outline-none"
+                aria-invalid={Boolean(fieldError?.forum)}
+                aria-describedby={fieldError?.forum ? 'forum-error' : undefined}
+                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7]"
               >
                 <option value="">Choose a forum…</option>
                 {forumOptions.map((f) => (
                   <option key={f.id} value={f.id}>{f.title}</option>
                 ))}
               </select>
-              {forumOptions.length === 0 && (
+              {fieldError?.forum ? (
+                <p id="forum-error" className="mt-1.5 text-xs text-red-400">{fieldError.forum}</p>
+              ) : forumOptions.length === 0 ? (
                 <p className="mt-1.5 text-xs text-amber-400">No forums available yet.</p>
-              )}
+              ) : null}
             </div>
 
             <div>
               <label htmlFor="title" className="text-sm font-medium text-[#93a1bd]">Title</label>
               <input
                 id="title"
-                required
                 maxLength={LIMITS.title}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Give your thread a clear, specific title"
-                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] focus:outline-none"
+                aria-invalid={Boolean(fieldError?.title)}
+                aria-describedby={fieldError?.title ? 'title-error' : undefined}
+                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7]"
               />
-              <p className="mt-1 text-xs text-[#93a1bd] text-right">{title.length}/{LIMITS.title}</p>
+              {fieldError?.title ? (
+                <p id="title-error" className="mt-1 text-xs text-red-400">{fieldError.title}</p>
+              ) : (
+                <p className="mt-1 text-xs text-[#93a1bd] text-right">{title.length}/{LIMITS.title}</p>
+              )}
             </div>
 
             <div>
@@ -202,7 +233,7 @@ export default function NewThreadPage() {
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
                 placeholder="announcement, discussion, feature"
-                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm placeholder:text-[#93a1bd]/50 focus:border-[#008CE7] focus:outline-none"
+                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7]"
               />
               <p className="mt-1 text-xs text-[#93a1bd]">Comma, space or # separated — up to {LIMITS.maxTags}.</p>
             </div>
@@ -216,35 +247,25 @@ export default function NewThreadPage() {
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="What would you like to discuss?"
-                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] p-3 text-sm placeholder:text-[#93a1bd]/50 focus:border-[#008CE7] focus:outline-none resize-y"
+                className="mt-1.5 w-full rounded-lg border border-[#22304e] bg-[#111a2e] p-3 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7] resize-y"
               />
               <p className="mt-1 text-xs text-[#93a1bd] text-right">{body.length}/{LIMITS.body}</p>
             </div>
 
             {error && (
-              <div className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
                 <span className="flex-1">{error}</span>
-                {createdThreadId.current && (
-                  <button
-                    type="button"
-                    onClick={handleFinishOpeningPost}
-                    disabled={submitting}
-                    className="ml-2 shrink-0 rounded-lg border border-red-500/40 px-2 py-1 text-xs hover:bg-red-500/10 transition"
-                  >
-                    Finish opening post
-                  </button>
-                )}
               </div>
             )}
 
             <button
               type="submit"
               disabled={submitting || !forumId || !title.trim()}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#0070c0] hover:bg-[#005fa0] transition px-5 py-3 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full btn-primary justify-center px-5 py-3 font-semibold"
             >
-              {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-              {submitting ? 'Creating…' : 'Start thread'}
+              {submitting ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Send className="w-5 h-5" aria-hidden="true" />}
+              {createdThreadId.current ? 'Finish opening post' : submitting ? 'Creating…' : 'Start thread'}
             </button>
           </form>
         </div>

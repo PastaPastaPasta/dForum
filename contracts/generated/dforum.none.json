@@ -372,7 +372,7 @@
         "threadId": {
           "type": "identifier",
           "refersTo": {
-            "type": "moderatedDocument",
+            "type": "permanentDocument",
             "documentType": "thread",
             "where": {
               "forumId": "forumId"

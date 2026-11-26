@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import Link from 'next/link'
 import { MessageSquare, KeyRound, ShieldCheck, Sparkles } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
@@ -12,6 +12,8 @@ import { Loader2 } from 'lucide-react'
 export default function LoginPage() {
   const { session, ready, authError } = useSession()
   const [showModal, setShowModal] = useState(false)
+
+  const closeModal = useCallback(() => setShowModal(false), [])
 
   const alreadySignedIn = Boolean(session)
 
@@ -36,7 +38,7 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — no central server" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum keeps a scoped auth key in this tab only" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum keeps a HIGH-level auth key for this tab only" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="All posts, profiles and reactions live on-chain" />
               </div>
 
@@ -53,14 +55,16 @@ export default function LoginPage() {
                   <button
                     onClick={() => setShowModal(true)}
                     disabled={!ready}
-                    className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[#0070c0] hover:bg-[#005fa0] transition px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="mt-8 btn-primary px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20 disabled:opacity-60"
                   >
                     {!ready ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
                     Login with Dash
                   </button>
-                  {authError && (
-                    <p className="mt-3 text-sm text-red-400">{authError}</p>
-                  )}
+                  <div aria-live="polite">
+                    {authError && (
+                      <p role="alert" className="mt-3 text-sm text-red-400">{authError}</p>
+                    )}
+                  </div>
                 </>
               )}
             </div>
@@ -70,7 +74,7 @@ export default function LoginPage() {
                 <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dash-key: code shown in the login modal." />
                 <Step number={2} title="Approve the request" body="Confirm the key-exchange request in your wallet." />
                 <Step number={3} title="Keys registered (first login)" body="On first login you'll register auth keys with dForum — scan a second code." />
-                <Step number={4} title="You're in" body="Your session lives in this tab only. The app never holds your wallet key." />
+                <Step number={4} title="You're in" body="Your session lives in this tab only — the app never holds your wallet key." />
               </ol>
             </div>
           </div>
@@ -78,7 +82,7 @@ export default function LoginPage() {
       </main>
       <Footer />
 
-      {showModal && <KeyExchangeModal onClose={() => setShowModal(false)} />}
+      {showModal && <KeyExchangeModal onClose={closeModal} />}
     </>
   )
 }

@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { MessageSquare, Send, Lock } from 'lucide-react'
+import { MessageSquare, Send, Lock, AlertTriangle, Loader2 } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
 import { get, query, createDocument } from '@/lib/services/document-service'
 import { loadSnapshot } from '@/lib/services/snapshot-service'
 import { formatRelativeTime, formatDate, shortId, isModerated, safeHttpUrl } from '@/lib/utils'
+import { useProfileNames } from '@/lib/use-profiles'
 import { useSession } from '@/lib/session'
 import { useLive } from '@/components/LiveFeed'
 import type { SnapshotThread, SnapshotPost } from '@/lib/services/snapshot-service'
@@ -21,6 +22,7 @@ interface LiveThread {
   tags: string[]
   sticky: boolean
   lockedAt: number | null
+  ownerId: string | null
 }
 
 interface LivePost {
@@ -31,6 +33,25 @@ interface LivePost {
   updatedAt: number
   modState: number | null
   replyToId: string | null
+}
+
+type LoadResult =
+  | { status: 'ok'; thread: LiveThread; posts: LivePost[] }
+  | { status: 'missing' }
+  | { status: 'error' }
+
+/** Settled orphan rule (data-model.md): a post is the opening post of its
+ * thread when it is the earliest post whose author equals the thread owner,
+ * ordered by ($createdAt, $id). Posts of other authors created before it are
+ * dropped from the listing. */
+function openingPost(posts: LivePost[], ownerId: string | null): LivePost | null {
+  const ownerPosts = posts.filter((p) => p.authorId === ownerId)
+  if (ownerPosts.length === 0) return null
+  return ownerPosts.reduce((a, b) => (isBefore(b, a) ? b : a))
+}
+
+function isBefore(a: LivePost, b: LivePost): boolean {
+  return a.createdAt < b.createdAt || (a.createdAt === b.createdAt && a.id < b.id)
 }
 
 export default function ThreadClient({ threadId }: { threadId: string }) {
@@ -46,27 +67,37 @@ function ThreadInner({ threadId }: { threadId: string }) {
   const [createdPosts, setCreatedPosts] = useState<LivePost[]>([])
 
   const snapThread = snap.threads.find((t) => t.id === threadId)
-  const { live, loading: liveLoading } = useLive(() => (threadId ? loadThread(threadId) : Promise.resolve(null)), threadId)
+  const { live, loading: liveLoading } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
   const snapPosts = snap.posts.filter((p) => p.threadId === threadId)
 
-  const liveThread = live?.thread ?? null
-  const thread: LiveThread | null = liveThread
-    ? { ...liveThread, forumSlug: liveThread.forumSlug ?? snapThread?.forumSlug ?? null }
+  const isLiveOk = live?.status === 'ok'
+  const thread: LiveThread | null = isLiveOk
+    ? { ...live!.thread, forumSlug: live!.thread.forumSlug ?? snapThread?.forumSlug ?? null }
     : snapThread
       ? snapshotThread(snapThread)
       : null
 
-  const livePosts = live?.posts ?? [...snapPosts.map(snapshotPost)]
+  const livePosts = isLiveOk ? live!.posts : snapPosts.map(snapshotPost)
   const seen = new Set(livePosts.map((p) => p.id))
   const created = createdPosts.filter((p) => !seen.has(p.id))
   const posts: LivePost[] = [...livePosts, ...created]
 
-  const locked = thread?.lockedAt != null
+  // Orphan rule: drop posts created before the opening post (non-owner
+  // posts created in the gap between thread creation and the owner's first
+  // reply). The thread is still rendered — just with an honest chronology.
+  const opening = thread?.ownerId ? openingPost(posts, thread.ownerId) : null
+  const visible = opening ? posts.filter((p) => !isBefore(p, opening)) : posts
+
   const lockedAt = thread?.lockedAt ?? null
-  const visiblePosts = lockedAt ? posts.filter((p) => p.createdAt <= lockedAt) : posts
-  // Only threads that are created AND not moderated render fully; moderated
-  // threads still render for context (bodies of moderated posts are hidden).
+  const locked = lockedAt != null
+  const visiblePosts = lockedAt ? visible.filter((p) => p.createdAt <= lockedAt) : visible
+
+  // Resolve author display names for every visible post.
+  const authorIds = visiblePosts.map((p) => p.authorId)
+  const profiles = useProfileNames(authorIds)
+
+  const profileName = (id: string): string => profiles[id] ?? shortId(id, 12)
 
   async function handlePost() {
     if (!session || !thread || !replyBody.trim()) return
@@ -103,7 +134,29 @@ function ThreadInner({ threadId }: { threadId: string }) {
     }
   }
 
-  if (!thread && !liveLoading) {
+  const status = live?.status ?? null
+  const missing = status === 'missing' && !snapThread && !liveLoading
+  const errorState = status === 'error' && !snapThread && !liveLoading
+
+  if (errorState) {
+    return (
+      <>
+        <Navbar />
+        <main className="flex-1 flex items-center justify-center px-6">
+          <div className="text-center fade-up">
+            <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" aria-hidden="true" />
+            <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">Connection error</p>
+            <h1 className="text-2xl font-bold mt-2">Couldn&apos;t reach Dash Platform</h1>
+            <p className="text-sm text-[#93a1bd] mt-2">The live read failed. The snapshot may still be stale — retry in a moment.</p>
+            <button onClick={() => window.location.reload()} className="mt-6 btn-primary px-4 py-2">Retry</button>
+          </div>
+        </main>
+        <Footer />
+      </>
+    )
+  }
+
+  if (missing || (!thread && !liveLoading)) {
     return (
       <>
         <Navbar />
@@ -111,7 +164,7 @@ function ThreadInner({ threadId }: { threadId: string }) {
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Not found</p>
             <h1 className="text-2xl font-bold mt-2">Thread not found</h1>
-            <Link href="/" className="mt-6 inline-block rounded-lg bg-[#0070c0] px-4 py-2 font-medium text-white hover:bg-[#005fa0] transition">Back to home</Link>
+            <Link href="/" className="mt-6 btn-primary px-4 py-2">Back to home</Link>
           </div>
         </main>
         <Footer />
@@ -130,7 +183,7 @@ function ThreadInner({ threadId }: { threadId: string }) {
           <h1 className="mt-3 text-2xl sm:text-3xl font-bold tracking-tight">{thread?.title ?? '…'}</h1>
           <div className="mt-3 flex items-center gap-3 text-sm text-[#93a1bd] flex-wrap">
             <span className="inline-flex items-center gap-1.5"><MessageSquare className="w-4 h-4" />{visiblePosts.length} post{visiblePosts.length === 1 ? '' : 's'}</span>
-            {locked && <span className="inline-flex items-center gap-1 text-amber-400"><Lock className="w-3.5 h-3.5" /> locked</span>}
+            {locked && <span className="inline-flex items-center gap-1 text-amber-400"><Lock className="w-3.5 h-3.5" aria-hidden="true" /> locked</span>}
             {thread?.tags.map((tag) => (
               <span key={tag} className="rounded bg-[#18233c] px-2 py-0.5">#{tag}</span>
             ))}
@@ -138,41 +191,43 @@ function ThreadInner({ threadId }: { threadId: string }) {
 
           <div className="mt-6 space-y-4">
             {visiblePosts.map((p) => (
-              <PostCard key={p.id || p.body.slice(0, 32)} post={p} mine={session?.identityId} />
+              <PostCard key={p.id || p.body.slice(0, 32)} post={p} mine={session?.identityId} nameOf={profileName} />
             ))}
             {visiblePosts.length === 0 && liveLoading && (
               <div className="rounded-xl border border-dashed border-[#22304e] p-6 text-center text-sm text-[#93a1bd]">Loading posts…</div>
             )}
           </div>
 
-          {session && !locked ? (
+          {locked ? (
+            <div className="mt-8 rounded-xl border border-amber-400/40 bg-amber-400/5 p-4 text-center text-sm text-amber-400">
+              This thread is locked by moderators. No new replies.
+            </div>
+          ) : session ? (
             <div className="mt-8 rounded-xl border border-[#22304e] bg-[#111a2e] p-4">
               <label htmlFor="reply" className="text-sm font-medium text-[#93a1bd]">Reply</label>
               <textarea
                 id="reply"
-                aria-label="Write your reply"
                 value={replyBody}
                 onChange={(e) => setReplyBody(e.target.value)}
                 rows={4}
                 maxLength={4000}
                 placeholder="Write your reply…"
-                className="mt-2 w-full rounded-lg border border-[#22304e] bg-[#0b1220] p-3 text-sm placeholder:text-[#93a1bd]/60 focus:border-[#008CE7] focus:outline-none resize-y"
+                className="mt-2 w-full rounded-lg border border-[#22304e] bg-[#0b1220] p-3 text-sm placeholder:text-[#93a1bd] resize-y"
               />
-              {postError && <p className="mt-2 text-sm text-red-400">{postError}</p>}
+              <div className="mt-1 flex items-center justify-between text-xs text-[#93a1bd]">
+                <span aria-live="polite" role="status">{postError ? <span className="text-red-400">{postError}</span> : ''}</span>
+                <span>{replyBody.length}/4000</span>
+              </div>
               <div className="mt-2 flex justify-end">
                 <button
                   onClick={handlePost}
                   disabled={posting || !replyBody.trim()}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[#0070c0] hover:bg-[#005fa0] transition px-4 py-2 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-primary inline-flex items-center gap-2 px-4 py-2 font-medium"
                 >
-                  <Send className="w-4 h-4" />
+                  {posting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
                   {posting ? 'Posting…' : 'Post reply'}
                 </button>
               </div>
-            </div>
-          ) : session && locked ? (
-            <div className="mt-8 rounded-xl border border-amber-400/40 bg-amber-400/5 p-4 text-center text-sm text-amber-400">
-              This thread is locked by moderators. No new replies.
             </div>
           ) : (
             <div className="mt-8 rounded-xl border border-dashed border-[#22304e] p-6 text-center text-sm text-[#93a1bd]">
@@ -195,6 +250,7 @@ function snapshotThread(t: SnapshotThread): LiveThread {
     tags: t.tags,
     sticky: t.sticky,
     lockedAt: t.lockedAt,
+    ownerId: t.ownerId ?? null,
   }
 }
 
@@ -210,16 +266,21 @@ function snapshotPost(p: SnapshotPost): LivePost {
   }
 }
 
-function PostCard({ post, mine }: { post: LivePost; mine?: string | null }) {
+function PostCard({ post, mine, nameOf }: { post: LivePost; mine?: string | null; nameOf: (id: string) => string }) {
   const isAuthor = mine === post.authorId && mine != null
   const hidden = isModerated(post.modState)
   const edited = post.updatedAt > post.createdAt && post.updatedAt > 0 && post.createdAt > 0
+  const authorName = nameOf(post.authorId)
   return (
     <div className="rounded-xl border border-[#22304e] bg-[#111a2e] p-4 fade-up">
       <div className="flex items-center gap-3">
-        <Avatar name={post.authorId || 'dForum'} id={post.authorId || null} />
+        <Link href={`/u/${encodeURIComponent(post.authorId)}`} className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-[#4db3ff]/60 transition" title={`Open ${authorName}'s profile`}>
+          <Avatar name={authorName} id={post.authorId || null} />
+        </Link>
         <div className="flex-1 min-w-0">
-          <p className="font-medium truncate">{post.authorId ? shortId(post.authorId, 16) : 'dForum'}</p>
+          <p className="font-medium truncate">
+            <Link href={`/u/${encodeURIComponent(post.authorId)}`} className="hover:text-[#4db3ff] hover:underline transition">{authorName}</Link>
+          </p>
           <p className="text-xs text-[#93a1bd]">
             {formatRelativeTime(post.createdAt)} · {formatDate(post.createdAt)}
             {edited && ' · edited'}
@@ -232,18 +293,19 @@ function PostCard({ post, mine }: { post: LivePost; mine?: string | null }) {
           This post was hidden by a moderator.
         </div>
       ) : (
-        <div className="prose-dash mt-3 text-[15px] leading-relaxed whitespace-pre-wrap break-words">{post.body}</div>
+        <div className="mt-3 text-[15px] leading-relaxed whitespace-pre-wrap break-words">{post.body}</div>
       )}
     </div>
   )
 }
 
-async function loadThread(id: string): Promise<{ thread: LiveThread; posts: LivePost[] } | null> {
+async function loadThread(id: string): Promise<LoadResult> {
   try {
     const thread = await get('thread', id)
-    if (!thread) return null
+    if (!thread) return { status: 'missing' }
     const posts = await query('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: 100 })
     return {
+      status: 'ok',
       thread: {
         id: thread.id,
         title: (thread.properties.title as string) ?? '',
@@ -252,6 +314,7 @@ async function loadThread(id: string): Promise<{ thread: LiveThread; posts: Live
         tags: Array.isArray(thread.properties.tags) ? (thread.properties.tags as string[]) : [],
         sticky: Boolean(thread.properties.sticky),
         lockedAt: (thread.properties.lockedAt as number | null) ?? null,
+        ownerId: thread.ownerId ?? null,
       },
       posts: posts.map((p) => ({
         id: p.id,
@@ -261,10 +324,9 @@ async function loadThread(id: string): Promise<{ thread: LiveThread; posts: Live
         updatedAt: p.updatedAt,
         modState: (p.properties.modState as number | null) ?? null,
         replyToId: (p.properties.replyToId as string | null) ?? null,
-
       })),
     }
   } catch {
-    return null
+    return { status: 'error' }
   }
 }

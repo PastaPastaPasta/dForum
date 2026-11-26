@@ -29,8 +29,8 @@ Next.js 14 static export (TypeScript + Tailwind, react 18) with the Dash Platfor
 - **Team mode** (default): `appointedModerators` in contract config — the owner + up to 16 named identities. Non-elected, owner-managed, enforced at consensus.
 - `none` mode: no moderation block at all (nothing bannable/removable/moderatable).
 - `network` mode: elected moderators (testnet-only; not recommended).
-- The moderation console (`/moderation`) signs with a CRITICAL auth key pasted by the operator — **kept in memory for the tab only, never stored** (wipes on `pagehide`/`beforeunload`). It never leaves the operator's browser except to the platform. The owner identity always moderates; the chain forbids moderating your own documents, so self-actions disable automatically with an explanatory note. The host gate refuses/warns on non-canonical hosts (localhost permitted for testing).
-- Moderation actions (hide/unhide, pin, lock, ban, suspend, warn, clear warnings, delete, restore) prompt a confirmation before anything destructive; deletion keeps the record and stores only `threadId`/`forumId`.
+- The moderation console (`/moderation`) signs with a CRITICAL auth key pasted by the operator — **dropped from app state for the tab** (never stored, never written outside the tab): the WASM signer is freed on wipe (`pagehide`, `visibilitychange` → hidden, in-app navigation, 10-minute idle, unmount) and the WIF is dropped from React state. Honest wording: “dropped from app state” — not a guarantee about memory. The owner identity always moderates and holds full contract authority (roster + moderation config); the console refuses the owner key off localhost — keep it offline for contract updates. The chain forbids moderating your own documents, so self-actions disable automatically with an explanatory note. The host gate warns on non-canonical hosts (localhost permitted for testing).
+- Moderation actions (hide/unhide, pin, lock, ban, suspend, warn, clear warnings, delete) prompt a confirmation before anything destructive; deletion keeps the record and stores only `threadId`/`forumId`.
 
 ### Identity & login
 
@@ -60,8 +60,8 @@ Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + disp
 
 ## Security notes
 
-- Secrets are never in the repo. The deployer seed lives in the shared secret store (`~/.secrets/dforum/testnet-deployer`, linked into `.env.local`, gitignored). Keyfile: `/work/tmp/opencode/dforum-asset-lock.key` (mode 600).
-- The moderation console's CRITICAL key never leaves the operator's browser — it lives in memory for the tab only and is wiped on `pagehide`/`beforeunload`.
+- Secrets are never in the repo. The deployer seed lives in the shared secret store (`~/.secrets/dforum/testnet-deployer`, linked into `.env.local`, gitignored). `.env.testing` and `.env*` are gitignored.
+- The moderation console's CRITICAL key never leaves the operator's browser — the WASM signer is freed and the WIF dropped from app state on wipe (pagehide, tab-hide, in-app navigation, 10-minute idle, unmount).
 - CSP is declared via `<meta http-equiv>` (static export is header-less): same-origin scripts/styles, WASM/blob workers, `connect-src 'self' https: wss:` (the Dash Platform is hosted on masternode IPs, so the connect-src cannot be narrowed without breaking the app).
 - Public files (sitemap, llms.txt, manifest) only carry public content, and moderated content is excluded.
 - Write fees: post 0.00134 DASH, thread 0.00164, reaction 0.00091, category 0.00038, forumSettings 0.00024 (credits ÷ 1e11) — all well under the 0.005 target (see `docs/design/spike-results.md`).

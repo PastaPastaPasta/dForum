@@ -75,9 +75,11 @@ async function main() {
     return true;
   });
 
-  // Orphan rule: a thread is listed only when its earliest visible post
-  // belongs to the thread owner (data-model.md). Without an owner-owned
-  // post the thread is hidden from listings — the URL still renders live.
+  // Orphan rule (settled 2026-11-26, data-model.md): the opening post of a
+  // thread is the earliest visible post whose $ownerId equals the thread
+  // owner, ordered by ($createdAt, $id). A thread is listed only if such a
+  // post exists; posts by other authors created before it are dropped.
+  const isBefore = (a, b) => a.$createdAt < b.$createdAt || (a.$createdAt === b.$createdAt && a.id < b.id);
   const postsByThread = new Map();
   for (const p of visiblePosts) {
     const threadId = p.properties?.threadId;
@@ -85,16 +87,13 @@ async function main() {
     if (!postsByThread.has(threadId)) postsByThread.set(threadId, []);
     postsByThread.get(threadId).push(p);
   }
-  const hiddenByOrphan = new Set(
-    visibleThreads
-      .filter((t) => {
-        const ps = postsByThread.get(t.id) ?? [];
-        if (ps.length === 0) return true;
-        const earliest = ps.reduce((a, b) => (a.$createdAt < b.$createdAt ? a : b));
-        return earliest.$ownerId !== t.$ownerId;
-      })
-      .map((t) => t.id),
-  );
+  const openingByThread = new Map();
+  for (const t of visibleThreads) {
+    const ownerPosts = (postsByThread.get(t.id) ?? []).filter((p) => p.$ownerId === t.$ownerId);
+    if (ownerPosts.length === 0) continue;
+    openingByThread.set(t.id, ownerPosts.reduce((a, b) => (isBefore(b, a) ? b : a)));
+  }
+  const hiddenByOrphan = new Set(visibleThreads.filter((t) => !openingByThread.has(t.id)).map((t) => t.id));
   const listedThreads = visibleThreads.filter((t) => !hiddenByOrphan.has(t.id));
 
   const snapshotThreads = listedThreads.map((t) => ({
@@ -111,7 +110,13 @@ async function main() {
     updatedAt: t.$updatedAt ?? 0,
   }));
 
-  const snapshotPosts = visiblePosts.map((p) => ({
+  const snapshotPosts = visiblePosts
+    .filter((p) => {
+      const opening = openingByThread.get(p.properties?.threadId);
+      if (!opening) return false; // whose thread is not listed (dropped)
+      return !isBefore(p, opening); // post created before the opening post is dropped
+    })
+    .map((p) => ({
     id: p.id,
     threadId: p.properties?.threadId ?? null,
     forumId: p.properties?.forumId ?? null,

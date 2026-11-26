@@ -11,18 +11,24 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle, ArrowRight } from 'lucide-react'
+import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle } from 'lucide-react'
 import { useYapprKeyExchangeLogin, useYapprKeyRegistration } from 'platform-auth'
 import { useSession } from '@/lib/session'
 import { formatTime } from '@/lib/utils'
+
+const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input, select, textarea, [role="button"]'
 
 export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   const { controller } = useSession()
   const login = useYapprKeyExchangeLogin(controller)
   const registration = useYapprKeyRegistration(controller)
   const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [finishError, setFinishError] = useState<string | null>(null)
   const registrationStartedRef = useRef(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const previouslyFocused = useRef<HTMLElement | null>(null)
 
   // Start the exchange once on mount
   useEffect(() => {
@@ -44,6 +50,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     if (completing) return
     if (!login.result) return
     setCompleting(true)
+    setFinishError(null)
     try {
       await controller.loginWithLoginKey(
         login.result.identityId,
@@ -55,11 +62,11 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
       onClose?.()
     } catch (err) {
       setCompleting(false)
-      console.error('login failed', err)
+      setFinishError(err instanceof Error ? err.message : 'Signing you in failed — try again')
     }
   }, [completing, controller, login, registration, onClose])
 
-  // Finish login when the exchange completes (keys already registered)
+  // Finish login when the login exchange completes (keys already registered)
   useEffect(() => {
     if (login.state === 'complete' && login.result && !completing) {
       handleComplete()
@@ -83,24 +90,47 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     try {
       await navigator.clipboard.writeText(displayUri)
       setCopied(true)
+      setCopyFailed(false)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      // clipboard unavailable — ignore
+      setCopyFailed(true)
     }
   }
 
   const closing = login.state === 'complete' || registration.state === 'complete'
-  const dialogRef = useRef<HTMLDivElement>(null)
 
-  // Escape closes; focus moves into the dialog on open.
+  // Escape closes; focus moves into the dialog on open; restore on close.
   useEffect(() => {
     if (!onClose) return
+    previouslyFocused.current = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
-    const focusable = dialogRef.current
-    focusable?.focus()
-    return () => document.removeEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      previouslyFocused.current?.focus?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose])
+
+  // Focus trap: Tab / Shift+Tab cycle inside the dialog.
+  const onKeyDownTrap = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab') return
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const focusable = Array.from(dialog.querySelectorAll(FOCUSABLE)) as HTMLElement[]
+    if (focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    const active = document.activeElement as HTMLElement | null
+    if (e.shiftKey && (active === first || !dialog.contains(active))) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && (active === last || !dialog.contains(active))) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
 
   // Trap scroll behind the modal
   useEffect(() => {
@@ -109,6 +139,42 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     return () => { document.body.style.overflow = prev }
   }, [])
 
+  const retry = () => {
+    registrationStartedRef.current = false
+    setFinishError(null)
+    setCopied(false)
+    setCopyFailed(false)
+    login.retry()
+  }
+
+  const showError =
+    finishError != null ||
+    login.state === 'error' ||
+    login.state === 'timeout' ||
+    registration.state === 'error'
+
+  const errorText =
+    finishError ??
+    (login.state === 'timeout'
+      ? 'Your wallet did not respond in time. Scan the QR again — or open dForum in a browser on the same device your wallet is installed on.'
+      : login.state === 'error'
+        ? (login.error ?? 'Something went wrong. Try again.')
+        : login.state === 'registering' && registration.state === 'error'
+          ? `Key registration failed${registration.error ? `: ${registration.error}` : '.'}`
+          : null)
+
+  const stepText =
+    login.state === 'complete' || registration.state === 'complete'
+      ? 'Signing you in…'
+      : registration.state === 'waiting'
+          ? 'Waiting for wallet to sign the registration…'
+          : registration.state === 'verifying'
+            ? 'Verifying keys…'
+            : login.state === 'waiting'
+              ? 'Waiting for wallet…'
+              : login.state === 'registering'
+                ? 'Registering keys with your wallet…'
+                : 'Preparing wallet sign-in…'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -118,7 +184,8 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
         aria-modal="true"
         aria-labelledby="login-modal-title"
         tabIndex={-1}
-        className="relative w-full max-w-sm rounded-2xl border border-[#22304e] bg-[#111a2e] shadow-2xl p-6 outline-none"
+        onKeyDown={onKeyDownTrap}
+        className="relative w-full max-w-sm max-h-[90dvh] overflow-y-auto rounded-2xl border border-[#22304e] bg-[#111a2e] shadow-2xl p-6 outline-none"
       >
         <button
           onClick={onClose}
@@ -131,10 +198,12 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
         <h2 id="login-modal-title" className="text-lg font-bold tracking-tight">Login with Dash</h2>
         <p className="text-sm text-[#93a1bd] mt-1">Sign in to dForum with your Dash identity</p>
 
+        <div aria-live="polite" className="sr-only">{stepText}</div>
+
         <div className="mt-6 flex flex-col items-center gap-4">
           {(login.state === 'idle' || login.state === 'generating') && (
             <>
-              <Loader2 className="w-8 h-8 animate-spin text-[#4db3ff]" />
+              <Loader2 className="w-8 h-8 animate-spin text-[#4db3ff]" aria-hidden="true" />
               <p className="text-sm text-[#93a1bd]">Preparing wallet sign-in…</p>
             </>
           )}
@@ -143,11 +212,11 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             <>
               <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
                 {displayUri && (
-                  <QRCodeSVG value={displayUri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" />
+                  <QRCodeSVG value={displayUri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Login URI QR code" />
                 )}
               </div>
               <div className="text-center">
-                <p className="text-sm font-medium">Scan with Dash Evo Tool</p>
+                <p className="text-sm font-medium">Scan with your Dash wallet</p>
                 <p className="text-xs text-[#93a1bd] mt-1">
                   {remaining != null ? `Expires in ${formatTime(remaining)}` : 'Waiting for wallet…'}
                 </p>
@@ -156,12 +225,17 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                 <>
                   <button
                     onClick={copy}
-                    className="inline-flex items-center gap-2 text-xs text-[#93a1bd] hover:text-white transition"
-                    aria-label="Copy login URI"
+                    className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
                   >
                     {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     {copied ? 'URI copied' : 'Copy URI'}
                   </button>
+                  {copyFailed && (
+                    <div className="w-full">
+                      <p className="text-xs text-amber-400">Copy failed — select the URI below</p>
+                      <input readOnly value={displayUri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-[10px] font-mono text-[#93a1bd]" aria-label="Login URI" />
+                    </div>
+                  )}
                   <p className="text-[11px] text-[#93a1bd] text-center">
                     Scan the QR with your wallet, or paste the URI into it.
                   </p>
@@ -174,9 +248,9 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             <>
               <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
                 {registration.uri ? (
-                  <QRCodeSVG value={registration.uri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" />
+                  <QRCodeSVG value={registration.uri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Key registration QR code" />
                 ) : (
-                  <Loader2 className="w-24 h-24 animate-spin text-[#008CE7]" />
+                  <Loader2 className="w-24 h-24 animate-spin text-[#008CE7]" aria-hidden="true" />
                 )}
               </div>
               <div className="text-center">
@@ -193,7 +267,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   </>
                 )}
                 {registration.state === 'verifying' && (
-                  <p className="text-sm font-medium flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-[#4db3ff]" /> Verifying keys…</p>
+                  <p className="text-sm font-medium flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-[#4db3ff]" aria-hidden="true" /> Verifying keys…</p>
                 )}
               </div>
             </>
@@ -202,48 +276,40 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
           {(login.state === 'complete' || registration.state === 'complete') && (
             <>
               <div className="flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/15">
-                <ShieldCheck className="w-8 h-8 text-emerald-400" />
+                <ShieldCheck className="w-8 h-8 text-emerald-400" aria-hidden="true" />
               </div>
               <p className="text-sm font-medium text-emerald-400">Signing you in…</p>
             </>
           )}
 
-          {(login.state === 'error' || login.state === 'timeout') && (
+          {showError && (
             <>
-              <div className="text-center">
+              <div role="alert" className="text-center">
                 <p className="text-sm font-medium text-red-400 inline-flex items-center gap-2 justify-center">
-                  <AlertTriangle className="w-4 h-4" /> {login.state === 'timeout' ? 'Timed out' : 'Login failed'}
+                  <AlertTriangle className="w-4 h-4" aria-hidden="true" /> {finishError ? 'Login failed' : (login.state === 'timeout' ? 'Timed out' : 'Login failed')}
                 </p>
-                <p className="text-xs text-[#93a1bd] mt-2">
-                  {login.state === 'timeout'
-                    ? 'Your wallet did not respond in time. Scan the QR again — or open dForum in a browser on the same device your wallet is installed on.'
-                    : (login.error ?? 'Something went wrong. Try again.')}
-                </p>
-                {registration.state === 'error' && (
-                  <p className="text-xs text-red-400 mt-2">Key registration failed{registration.error ? `: ${registration.error}` : '.'}</p>
-                )}
+                <p className="text-xs text-[#93a1bd] mt-2">{errorText}</p>
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={() => login.retry()}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[#0070c0] hover:bg-[#005fa0] transition px-4 py-2 text-sm font-medium"
-                >
+                <button onClick={retry} className="btn-primary px-4 py-2 text-sm font-medium">
                   Try again
                 </button>
-                <button
-                  onClick={() => onClose?.()}
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm hover:bg-[#18233c] transition"
-                >
-                  Close
-                </button>
+                {onClose && (
+                  <button
+                    onClick={onClose}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-4 py-2 text-sm hover:bg-[#18233c] transition"
+                  >
+                    Close
+                  </button>
+                )}
               </div>
             </>
           )}
         </div>
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
-          <KeyRound className="w-3.5 h-3.5" />
-          Your wallet signs — this app keeps a scoped, room-bound auth key in this tab only.
+          <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
+          Your wallet signs — dForum keeps a HIGH-level auth key for this tab only.
         </p>
       </div>
     </div>

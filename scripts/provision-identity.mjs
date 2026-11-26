@@ -70,7 +70,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args[0] === '--gen-asset-lock-key' && args[1]) {
     const assetLock = generateAssetLockKeypair();
-    writeFileSync(args[1], `${Buffer.from(assetLock.privateKeyBytes).toString('hex')}\n`, { mode: 0o600 });
+    writeFileSync(args[1], `${Buffer.from(assetLock.privateKeyBytes).toString('hex')}\n`, { mode: 0o600, flag: 'wx' });
     const address = addressForPublicKey(assetLock.publicKeyHex);
     console.log(`asset-lock private key written to ${args[1]} (mode 600)`);
     console.log(`assetLockPublicKey: ${assetLock.publicKeyHex}`);

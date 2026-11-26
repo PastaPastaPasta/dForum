@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { MessageSquare, MessagesSquare, Heart, TrendingUp } from 'lucide-react'
+import { MessageSquare, MessagesSquare, Heart, TrendingUp, FolderOpen, Loader2, Pencil } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { loadSnapshot, type Snapshot } from '@/lib/services/snapshot-service'
@@ -14,7 +14,7 @@ export default function HomePage() {
   const snap = loadSnapshot()
   const { session } = useSession()
   // Live fill — re-queries the platform after hydration
-  const { live } = useLive(() => loadLive(), 'home')
+  const { live, loading } = useLive(() => loadLive(), 'home')
   const threads = (live?.threads ?? snap.threads).filter((t) => t.modState == null)
   const forums = live?.forums ?? snap.forums
 
@@ -30,7 +30,7 @@ export default function HomePage() {
     <>
       <Navbar />
       <main className="flex-1">
-        <Hero counts={counts} />
+        <Hero counts={counts} session={session} loading={loading} />
 
         <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
           <SectionHeader title="Latest threads" subtitle="Newest conversations across all forums" />
@@ -39,7 +39,13 @@ export default function HomePage() {
               <ThreadRow key={t.id} thread={t as Parameters<typeof ThreadRow>[0]['thread']} />
             ))}
             {threads.length === 0 && (
-              <p className="text-sm text-[#93a1bd] py-8 text-center">No threads yet. Be the first to start one.</p>
+              <div className="text-sm text-[#93a1bd] py-8 text-center">
+                {session ? (
+                  <Link href="/new" className="text-[#4db3ff] hover:underline">Start the first thread</Link>
+                ) : (
+                  <>No threads yet. <Link href="/login" className="text-[#4db3ff] hover:underline">Login with Dash</Link> to be the first.</>
+                )}
+              </div>
             )}
           </div>
         </section>
@@ -75,15 +81,19 @@ export default function HomePage() {
   )
 }
 
-function Hero({ counts }: { counts: Snapshot['counts'] }) {
+function Hero({ counts, session, loading }: { counts: Snapshot['counts']; session: { identityId: string } | null; loading: boolean }) {
   return (
     <section className="border-b border-[#22304e] bg-gradient-to-b from-[#101b31] to-[#0b1220]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div className="max-w-xl">
             <p className="inline-flex items-center gap-2 rounded-full border border-[#22304e] bg-[#111a2e] px-3 py-1 text-xs text-[#4db3ff] fade-up">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-slow" />
-              Live on Dash Platform
+              {loading ? (
+                <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-slow" />
+              )}
+              {loading ? 'Loading live data…' : 'Live on Dash Platform'}
             </p>
             <h1 className="mt-4 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
               A decentralized forum<br />on Dash Platform
@@ -92,15 +102,25 @@ function Hero({ counts }: { counts: Snapshot['counts'] }) {
               Centralized ownership, team-based moderation, every message on-chain. Login with Dash — no accounts, no servers.
             </p>
           </div>
-          <Link
-            href="/search"
-            className="hidden sm:inline-flex items-center gap-2 rounded-lg bg-[#0070c0] hover:bg-[#005fa0] transition px-4 py-2.5 font-medium"
-          >
-            Explore threads
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/search"
+              className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] bg-[#111a2e] px-4 py-2.5 font-medium text-sm hover:border-[#008CE7] transition"
+            >
+              Explore threads
+            </Link>
+            {session && (
+              <Link
+                href="/new"
+                className="inline-flex items-center gap-2 btn-primary px-4 py-2.5 font-medium"
+              >
+                <Pencil className="w-4 h-4" aria-hidden="true" /> New thread
+              </Link>
+            )}
+          </div>
         </div>
-        <dl className="mt-8 grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <Stat icon={<MessagesSquare className="w-4 h-4" />} value={counts.categories} label="Categories" />
+        <dl className="mt-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <Stat icon={<FolderOpen className="w-4 h-4" />} value={counts.categories} label="Categories" />
           <Stat icon={<MessageSquare className="w-4 h-4" />} value={counts.forums} label="Forums" />
           <Stat icon={<TrendingUp className="w-4 h-4" />} value={counts.threads} label="Threads" />
           <Stat icon={<MessagesSquare className="w-4 h-4" />} value={counts.posts} label="Posts" />
@@ -118,7 +138,7 @@ function Stat({ icon, value, label }: { icon: React.ReactNode; value: number; la
         {icon}
         <span className="text-xs uppercase tracking-wider text-[#93a1bd]">{label}</span>
       </dt>
-      <dd className="mt-1 text-2xl font-bold">{value}</dd>
+      <dd className="mt-1 text-2xl font-bold tabular-nums">{value.toLocaleString()}</dd>
     </div>
   )
 }
@@ -138,7 +158,7 @@ function NewThreadCta() {
       <p className="text-[#93a1bd] text-sm">Start the next great conversation on Dash Platform.</p>
       <Link
         href="/new"
-        className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[#0070c0] hover:bg-[#005fa0] transition px-4 py-2 font-medium"
+        className="mt-3 btn-primary px-4 py-2"
       >
         Start a new thread
       </Link>

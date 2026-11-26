@@ -40,7 +40,7 @@ async function main() {
   if (args[0] === '--gen-asset-lock-key' && args[1]) {
     const privateKeyBytes = secpUtils.randomSecretKey();
     const publicKeyHex = Buffer.from(getPublicKey(privateKeyBytes, true)).toString('hex');
-    writeFileSync(args[1], `${Buffer.from(privateKeyBytes).toString('hex')}\n`, { mode: 0o600 });
+    writeFileSync(args[1], `${Buffer.from(privateKeyBytes).toString('hex')}\n`, { mode: 0o600, flag: 'wx' });
     const pub = Buffer.from(publicKeyHex, 'hex');
     const inner = createHash('sha256').update(pub).digest();
     const hash160 = createHash('ripemd160').update(inner).digest();
@@ -69,6 +69,7 @@ async function main() {
     console.log(`faucet output = ${out.value} tDASH (${value} duffs)`);
 
     const hex = readFileSync(keyFile, 'utf8').trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error(`keyfile ${keyFile} is not a 64-char hex private key`);
     const privateKeyBytes = Uint8Array.from(Buffer.from(hex, 'hex'));
     const pub = getPublicKey(privateKeyBytes, true);
     const hash160 = createHash('ripemd160').update(createHash('sha256').update(pub).digest()).digest();

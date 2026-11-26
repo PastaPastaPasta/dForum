@@ -56,18 +56,11 @@ const nextConfig = {
     }
     return config
   },
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          // CSP is set via <meta> tag in app/layout.tsx so it works in static exports.
-          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
-          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
-        ],
-      },
-    ]
-  },
+  // Note: `headers()` does not apply to `output: 'export'` (and GitHub Pages
+  // ignores response headers) — CSP lives in a <meta> tag in app/layout.tsx
+  // instead. COOP/COEP are deliberately NOT set here; a hostile same-origin
+  // page is the real exposure and is mitigated by the moderation console's
+  // host gate and the CSP, not by headers GH Pages cannot serve.
 }
 
 module.exports = nextConfig

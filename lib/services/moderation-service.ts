@@ -5,8 +5,8 @@
  *
  * Every action signs with a CRITICAL authentication key (the moderator's own
  * key — the session key is HIGH and never signs moderation). The operator
- * pastes their key in the moderation console; it lives in sessionStorage
- * only and is never sent anywhere except the platform.
+ * pastes their key in the moderation console; it lives in that tab's memory
+ * only (never persisted, never sent anywhere except the platform request).
  */
 import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
@@ -42,11 +42,13 @@ export async function validateCriticalKey(identityId: string, criticalWif: strin
     } catch {
       return { ok: false, reason: 'Not a valid WIF' }
     }
+    // WIF version byte: mainnet 0x80, testnet 0xef. Anything else is not a secp256k1 WIF.
+    if (decoded[0] !== 0x80 && decoded[0] !== 0xef) return { ok: false, reason: 'Not a secp256k1 WIF (unknown version byte)' }
     if (decoded.length !== 34 && decoded.length !== 33) return { ok: false, reason: 'Not a valid secp256k1 WIF' }
     const compressed = decoded.length === 34
     const privateKey = decoded.slice(1, 33)
     const publicKey = crypto.getPublicKey(privateKey, compressed)
-    for (const key of identity.publicKeys as Array<{ purpose: string; securityLevel: string; keyType: string; data: Uint8Array | string }>) {
+    for (const key of identity.publicKeys as Array<{ purpose: string; securityLevel: string; keyType: string; data: Uint8Array | string; disabledAt?: bigint | number | null }>) {
       const raw = key.data instanceof Uint8Array ? key.data : hexToBytes(String(key.data))
       if (raw.length !== publicKey.length) continue
       if (!bytesEqual(raw, publicKey)) continue
@@ -54,6 +56,8 @@ export async function validateCriticalKey(identityId: string, criticalWif: strin
       if (String(key.purpose).toUpperCase() !== 'AUTHENTICATION') return { ok: false, reason: 'Key is not an authentication key' }
       const level = String(key.securityLevel).toUpperCase()
       if (level !== 'CRITICAL') return { ok: false, reason: `Key is ${level} — moderation requires CRITICAL` }
+      const disabledAt = key.disabledAt === undefined || key.disabledAt === null ? null : Number(key.disabledAt)
+      if (disabledAt !== null && disabledAt > 0) return { ok: false, reason: 'Key is disabled (disabledAt set)' }
       return { ok: true }
     }
     return { ok: false, reason: 'This key is not registered on the identity' }
@@ -75,7 +79,13 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true
 }
 
-export async function getRoster(): Promise<{ ownerId: string | null; appointed: string[] } | null> {
+let rosterCache: { value: { ownerId: string | null; appointed: string[] } | null; at: number } | null = null
+const ROSTER_TTL_MS = 60 * 1000
+
+/** Cached contract roster — each page mount shares one fetch (and the link
+ * stops flickering on navigation). `force` bypasses the cache. */
+export async function getRoster(force = false): Promise<{ ownerId: string | null; appointed: string[] } | null> {
+  if (!force && rosterCache && Date.now() - rosterCache.at < ROSTER_TTL_MS) return rosterCache.value
   const sdk = await getSdk()
   const contract = await sdk.contracts.fetch(CONTRACT_ID)
   if (!contract) return null
@@ -85,7 +95,9 @@ export async function getRoster(): Promise<{ ownerId: string | null; appointed: 
   const moderators = mod?.moderators as Record<string, unknown> | undefined
   const identities = moderators?.identities
   const appointed = Array.isArray(identities) ? identities.map((x) => String(x)) : []
-  return { ownerId, appointed }
+  const value = { ownerId, appointed }
+  rosterCache = { value, at: Date.now() }
+  return value
 }
 
 /** A thread lock/unlock, sticky toggle, or modState/modNote change via changeFields. */

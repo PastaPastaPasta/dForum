@@ -27,8 +27,10 @@ export default function SettingsPage() {
   const [revision, setRevision] = useState<bigint>(1n)
   const [existingProps, setExistingProps] = useState<Record<string, unknown>>({})
   const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldError, setFieldError] = useState<{ displayName?: string; website?: string } | null>(null)
   const [saved, setSaved] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
 
@@ -61,7 +63,12 @@ export default function SettingsPage() {
         setLoaded(true)
       })
       .catch(() => {
-        if (!cancelled) setLoaded(true)
+        // Never silently treat a failed load as "no profile exists" — that
+        // would make save create a duplicate profile instead of updating one.
+        if (!cancelled) {
+          setLoadError(true)
+          setLoaded(true)
+        }
       })
     return () => {
       cancelled = true
@@ -76,7 +83,7 @@ export default function SettingsPage() {
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Login required</p>
             <h1 className="text-2xl font-bold mt-2">Sign in to manage your profile</h1>
-            <Link href="/login" className="mt-6 inline-block rounded-lg bg-[#0070c0] px-4 py-2 font-medium text-white hover:bg-[#005fa0] transition">Login with Dash</Link>
+            <Link href="/login" className="mt-6 btn-primary">Login with Dash</Link>
           </div>
         </main>
         <Footer />
@@ -90,18 +97,15 @@ export default function SettingsPage() {
       setError('Your session has no signable key. Try logging in again.')
       return
     }
-    if (!loaded) return
+    if (!loaded || loadError) return
 
     const displayName = draft.displayName.trim().slice(0, LIMITS.displayName)
     const website = draft.website.trim()
-    if (website && !safeHttpUrl(website)) {
-      setError('Website must be a full http(s) URL, e.g. https://example.com')
-      return
-    }
-    if (!displayName) {
-      setError('Display name is required.')
-      return
-    }
+    const errs: { displayName?: string; website?: string } = {}
+    if (!displayName) errs.displayName = 'Display name is required.'
+    if (website && !safeHttpUrl(website)) errs.website = 'Website must be a full http(s) URL, e.g. https://example.com'
+    if (Object.keys(errs).length) { setFieldError(errs); return }
+    setFieldError(null)
 
     setSaving(true)
     setError(null)
@@ -172,23 +176,32 @@ export default function SettingsPage() {
 
           {!loaded ? (
             <div className="mt-8 rounded-xl border border-dashed border-[#22304e] p-8 text-center">
-              <Loader2 className="w-5 h-5 animate-spin text-[#4db3ff] mx-auto" />
+              <Loader2 className="w-5 h-5 animate-spin text-[#4db3ff] mx-auto" aria-hidden="true" />
               <p className="mt-2 text-sm text-[#93a1bd]">Loading your profile…</p>
             </div>
+          ) : loadError ? (
+            <div className="mt-8 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4 text-center text-sm text-amber-400">
+              Couldn&apos;t load your current profile — saving is disabled so we don&apos;t overwrite or duplicate it. Reload and try again.
+            </div>
           ) : (
-            <form onSubmit={handleSave} className="mt-6 space-y-5">
+            <form noValidate onSubmit={handleSave} className="mt-6 space-y-5">
               <div>
                 <label htmlFor="displayName" className="text-sm font-medium text-[#93a1bd]">Display name</label>
                 <input
                   id="displayName"
                   value={draft.displayName}
                   onChange={(e) => { setDraft((d) => ({ ...d, displayName: e.target.value })); setSaved(false) }}
-                  required
                   maxLength={LIMITS.displayName}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] focus:outline-none w-full"
+                  aria-invalid={Boolean(fieldError?.displayName)}
+                  aria-describedby={fieldError?.displayName ? 'displayName-error' : undefined}
+                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
                   placeholder="Your display name"
                 />
-                <CharCount count={draft.displayName.length} max={LIMITS.displayName} />
+                {fieldError?.displayName ? (
+                  <p id="displayName-error" className="mt-1 text-xs text-red-400">{fieldError.displayName}</p>
+                ) : (
+                  <CharCount count={draft.displayName.length} max={LIMITS.displayName} />
+                )}
               </div>
               <div>
                 <label htmlFor="bio" className="text-sm font-medium text-[#93a1bd]">Bio</label>
@@ -198,13 +211,13 @@ export default function SettingsPage() {
                   onChange={(e) => { setDraft((d) => ({ ...d, bio: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.bio}
                   rows={4}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] p-3 text-sm focus:border-[#008CE7] focus:outline-none w-full resize-y"
+                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] p-3 text-sm focus:border-[#008CE7] w-full resize-y"
                   placeholder="A short bio — what you post about."
                 />
                 <CharCount count={draft.bio.length} max={LIMITS.bio} />
               </div>
               <div>
-                <label htmlFor="website" className="text-sm font-medium text-[#93a1bd]">Website</label>
+                <label htmlFor="website" className="text-sm font-medium text-[#c7d0e4]">Website <span className="text-[#93a1bd] font-normal">(optional)</span></label>
                 <input
                   id="website"
                   type="url"
@@ -212,11 +225,16 @@ export default function SettingsPage() {
                   value={draft.website}
                   onChange={(e) => { setDraft((d) => ({ ...d, website: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.website}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] focus:outline-none w-full"
+                  aria-invalid={Boolean(fieldError?.website)}
+                  aria-describedby={fieldError?.website ? 'website-error' : 'website-hint'}
+                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
                   placeholder="https://yoursite.com"
-                  aria-describedby="website-hint"
                 />
-                <p id="website-hint" className="mt-1 text-xs text-[#93a1bd]">Full https URL only — this is the only link other people will click.</p>
+                {fieldError?.website ? (
+                  <p id="website-error" className="mt-1 text-xs text-red-400">{fieldError.website}</p>
+                ) : (
+                  <p id="website-hint" className="mt-1 text-xs text-[#93a1bd]">Full http(s) URL only — this is rendered as a link on your profile.</p>
+                )}
               </div>
               <div>
                 <label htmlFor="signature" className="text-sm font-medium text-[#93a1bd]">Signature</label>
@@ -225,7 +243,7 @@ export default function SettingsPage() {
                   value={draft.signature}
                   onChange={(e) => { setDraft((d) => ({ ...d, signature: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.signature}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] focus:outline-none w-full"
+                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
                   placeholder="A sign-off for your posts"
                 />
                 <CharCount count={draft.signature.length} max={LIMITS.signature} />
@@ -242,13 +260,14 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#0070c0] hover:bg-[#005fa0] transition px-5 py-3 font-semibold disabled:opacity-50"
+                  className="btn-primary px-5 py-3 font-semibold disabled:opacity-50"
+                  aria-live="polite"
                 >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Save className="w-4 h-4" aria-hidden="true" />}
                   {saving ? 'Saving…' : saved ? 'Saved' : 'Save profile'}
                 </button>
                 {saved && !saving && (
-                  <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400"><ShieldCheck className="w-4 h-4" /> Saved to the platform</span>
+                  <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400" role="status"><ShieldCheck className="w-4 h-4" aria-hidden="true" /> Saved to the platform</span>
                 )}
               </div>
             </form>

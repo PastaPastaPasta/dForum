@@ -40,6 +40,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code', 'cause']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', parts.join(' | '));
+  console.error('ERROR:', parts.join(' | ').replace(/\b[c9][1-9A-HJ-NP-Za-km-z]{50,51}\b/g, '<redacted-wif>'));
   process.exit(1);
 });

@@ -78,4 +78,10 @@ async function main() {
   console.log('created:', String(created.id), 'cost:', cost.toString(), 'credits (', (Number(cost) / 1e11).toFixed(6), 'DASH)', 'in', elapsed, 'ms');
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  const parts = [];
+  for (const k of ['message', 'name', 'code']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
+  try { parts.push(`toString=${e.toString()}`); } catch {}
+  console.error('ERROR:', parts.join(' | ').replace(/\b[c9][1-9A-HJ-NP-Za-km-z]{50,51}\b/g, '<redacted-wif>'));
+  process.exit(1);
+});

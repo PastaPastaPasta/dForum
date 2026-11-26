@@ -23,7 +23,11 @@ interface SearchResult {
 
 export default function SearchPage() {
   const snap = loadSnapshot()
-  const [q, setQ] = useState('')
+  // ?q=… — deep links from the sitemap and navbar search set the query.
+  const [q, setQ] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return new URLSearchParams(window.location.search).get('q') ?? ''
+  })
   const [liveThreads, setLiveThreads] = useState<SearchResult[] | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -74,6 +78,14 @@ export default function SearchPage() {
     })).filter((t) => !isModerated(t.modState))
   }, [liveThreads, snap])
 
+  // Keep the URL in sync with the query (no history spam).
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (q.trim()) url.searchParams.set('q', q.trim())
+    else url.searchParams.delete('q')
+    window.history.replaceState(null, '', url)
+  }, [q])
+
   const results = useMemo(() => {
     const needle = q.trim().toLowerCase()
     if (!needle) return allThreads
@@ -95,24 +107,31 @@ export default function SearchPage() {
             <h1 className="text-2xl font-bold tracking-tight">Search dForum</h1>
             <p className="mt-1 text-sm text-[#93a1bd]">Threads and tags across all forums (latest 100)</p>
 
-            <div className="relative mt-5">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#93a1bd]" />
+            <form role="search" aria-label="Search threads" onSubmit={(e) => e.preventDefault()} className="relative mt-5">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#93a1bd]" aria-hidden="true" />
               <input
                 aria-label="Search threads"
+                autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search by title, tag, or forum…"
-                className="w-full rounded-xl border border-[#22304e] bg-[#111a2e] pl-10 pr-4 py-3 text-sm placeholder:text-[#93a1bd]/60 focus:border-[#008CE7] focus:outline-none"
+                className="w-full rounded-xl border border-[#22304e] bg-[#111a2e] pl-10 pr-4 py-3 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7]"
               />
-              {loading && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#93a1bd]">loading…</span>}
-            </div>
+              {loading && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#93a1bd]" aria-live="polite">loading…</span>}
+            </form>
           </div>
         </section>
 
         <section className="max-w-3xl mx-auto px-4 sm:px-6 mt-6">
           {results.length === 0 ? (
             <div className="rounded-xl border border-dashed border-[#22304e] p-8 text-center fade-up">
-              <p className="text-[#93a1bd]">{q.trim() ? 'No threads match your search.' : 'Type to search threads.'}</p>
+              {allThreads.length === 0 && !loading ? (
+                <p className="text-[#93a1bd]">No threads yet — be the first to start one.</p>
+              ) : q.trim() ? (
+                <p className="text-[#93a1bd]">No threads match “{q.trim()}”.</p>
+              ) : (
+                <p className="text-[#93a1bd]">Type to search threads.</p>
+              )}
             </div>
           ) : (
             <div className="grid gap-3">

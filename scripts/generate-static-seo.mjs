@@ -77,7 +77,9 @@ ${(snap.threads || [])
 }
 
 function escapeMd(s) {
-  return String(s ?? '').replace(/[[\]()#*_~`<>]/g, (c) => `\\${c}`);
+  // Strip CR/LF first — a title can otherwise inject fake sections into
+  // llms.txt (prompt-injection surface for AI crawlers).
+  return String(s ?? '').replace(/[\r\n]+/g, ' ').replace(/[[\]()#*_~`<>]/g, (c) => `\\${c}`);
 }
 
 function manifest() {

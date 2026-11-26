@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: dark;
   --background: #0b1220;
   --surface: #111a2e;
   --surface-2: #18233c;
@@ -67,7 +68,27 @@ html, body {
   *, *::before, *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
+  /* Spinners are infinite; keep them visible but static */
+  .animate-spin { animation: none !important; }
+}
+
+/* Primary action button — AA contrast (5.2:1) with explicit white text.
+   Layout/spacing (padding, height) comes from the caller's Tailwind classes. */
+.btn-primary {
+  background: #0070c0;
+  color: #ffffff;
+  transition: background-color 150ms ease;
+}
+.btn-primary:hover:not(:disabled) { background: #005fa0; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary:focus-visible { outline: 2px solid #4db3ff; outline-offset: 2px; }
+
+/* Placeholder contrast: full muted tone, not /50-/60 (2.66:1/3.24:1) */
+input::placeholder,
+textarea::placeholder {
+  color: #93a1bd;
 }
 
 /* Visible focus ring for keyboard users */
