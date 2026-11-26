@@ -22,7 +22,7 @@ export function ThreadRow({ thread, nameOf }: { thread: ThreadRowData; nameOf?: 
   return (
     <Link
       href={`/t/${encodeURIComponent(thread.id)}`}
-      className="group flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#111a2e] px-4 py-3 hover:border-[#008CE7] transition fade-up"
+      className="group flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#111a2e] px-4 py-3 hover:border-[#008CE7] transition fade-up min-w-0 w-full max-w-full"
     >
       {thread.ownerId ? (
         <Avatar name={authorName ?? thread.ownerId} id={thread.ownerId} size="sm" />
@@ -31,7 +31,7 @@ export function ThreadRow({ thread, nameOf }: { thread: ThreadRowData; nameOf?: 
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          {thread.sticky && <span className="text-[10px] uppercase tracking-wider text-[#4db3ff] border border-[#4db3ff]/40 rounded px-1.5 py-0.5 shrink-0">pinned</span>}
+          {thread.sticky && <span className="text-[11px] uppercase tracking-wider text-[#4db3ff] border border-[#4db3ff]/40 rounded px-1.5 py-0.5 shrink-0">pinned</span>}
           {thread.lockedAt != null && <Lock className="w-3 h-3 text-amber-400 shrink-0" aria-label="Locked" role="img" />}
           <p className="font-medium truncate group-hover:text-[#4db3ff] transition">{thread.title}</p>
         </div>

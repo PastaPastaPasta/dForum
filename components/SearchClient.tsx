@@ -26,6 +26,20 @@ interface SearchResult {
 
 const MAX_LIST = 25
 
+/** Orphan verdicts are cached module-wide — a successful live verdict must
+ * not be re-queried on every keystroke. */
+const orphanCache = new Map<string, boolean>()
+
+async function cachedFilter(threads: SearchResult[]): Promise<SearchResult[]> {
+  const fresh = threads.filter((t) => !orphanCache.has(t.id))
+  if (fresh.length) {
+    const listed = await filterListable(fresh, 4)
+    const listedIds = new Set(listed.map((t) => t.id))
+    for (const t of fresh) orphanCache.set(t.id, listedIds.has(t.id))
+  }
+  return threads.filter((t) => orphanCache.get(t.id) !== false)
+}
+
 export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
   const snap = snapshot
   // ?q=… — deep links from the sitemap and navbar search set the query.
@@ -131,9 +145,10 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
   const [orphanFiltered, setOrphanFiltered] = useState<SearchResult[] | null>(null)
   useEffect(() => {
     let cancelled = false
+    setOrphanFiltered(null)
     const timer = setTimeout(() => {
       if (matched.length === 0) { setOrphanFiltered([]); return }
-      filterListable(matched.slice(0, MAX_LIST), 4)
+      cachedFilter(matched.slice(0, MAX_LIST))
         .then((r) => { if (!cancelled) setOrphanFiltered(r) })
         .catch(() => { if (!cancelled) setOrphanFiltered(matched.slice(0, MAX_LIST)) })
     }, 150)
@@ -152,7 +167,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
         <section className="border-b border-[#22304e]">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
             <h1 className="text-2xl font-bold tracking-tight">Search dForum</h1>
-            <p className="mt-1 text-sm text-[#93a1bd]">Threads and tags across all forums</p>
+            <p className="mt-1 text-sm text-[#93a1bd]">Search threads by title, tag, or forum — shows the latest {MAX_LIST} threads</p>
 
             <form role="search" aria-label="Search threads" onSubmit={(e) => e.preventDefault()} className="relative mt-5">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#93a1bd]" aria-hidden="true" />

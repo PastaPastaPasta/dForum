@@ -129,6 +129,8 @@ export async function query(
     where?: [string, string, unknown][]
     orderBy?: [string, 'asc' | 'desc'][]
     limit?: number
+    /** Exclusive $id cursor — page past the document it names. */
+    startAfter?: string
   } = {},
 ): Promise<DocRef[]> {
   const sdk = await getSdk()
@@ -138,6 +140,7 @@ export async function query(
     where: options.where as never,
     orderBy: options.orderBy as never,
     limit: options.limit ?? 100,
+    ...(options.startAfter !== undefined ? { startAfter: options.startAfter } : {}),
   })
   const out: DocRef[] = []
   for (const doc of page.values()) {
@@ -195,14 +198,25 @@ export async function buildSigning(
   if (!identity) return null
 
   const signer = new IdentitySigner()
-  signer.addKeyFromWif(authKeyWif)
+  try {
+    signer.addKeyFromWif(authKeyWif)
+  } catch (e) {
+    try { signer.free() } catch { /* already freed */ }
+    throw e
+  }
 
   // Match the WIF against the identity's public keys, exactly as yappr does.
   const wifBytes = wifToPrivateKey(authKeyWif)
   if (!wifBytes) { try { signer.free() } catch { /* already freed */ } return null }
   const { privateKey, compressed } = wifBytes
-  const { getPublicKey } = await import('@noble/secp256k1')
-  const publicKey = getPublicKey(privateKey, compressed)
+  let publicKey: Uint8Array
+  try {
+    const { getPublicKey } = await import('@noble/secp256k1')
+    publicKey = getPublicKey(privateKey, compressed)
+  } catch (e) {
+    try { signer.free() } catch { /* already freed */ }
+    throw e
+  }
   const identityKeys = identity.publicKeys as Array<{
     keyId: number
     purpose: string
@@ -364,9 +378,20 @@ export async function replaceDocument(
       identityContractNonce: nonce,
     })
     await sdk.documents.replace({ document, identityKey: sign.identityKey as never, signer: sign.signer })
-    const after = await get(existing.documentTypeName, existing.id)
-    if (!after) throw new Error('Replace returned but the document could not be re-read')
-    return after
+    // The chain wrote the document — a re-read failure is not a write
+    // failure. Report honestly: return what the write produced.
+    const after = await get(existing.documentTypeName, existing.id).catch(() => null)
+    if (after) return after
+    return {
+      id: existing.id,
+      ownerId: identityId,
+      dataContractId: CONTRACT_ID,
+      documentTypeName: existing.documentTypeName,
+      revision: existing.revision + 1n,
+      createdAt: existing.createdAt,
+      updatedAt: existing.updatedAt,
+      properties: updatedProps,
+    }
   } finally {
     try { sign.signer?.free?.() } catch { /* already freed */ }
   }

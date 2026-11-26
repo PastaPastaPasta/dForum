@@ -53,7 +53,6 @@ function u64be(v) {
   return buf;
 }
 
-const ownerBytes = b58decode('1111111111111111111111111111111111111111111111'); // 32 bytes of 0
 // any 32-byte test owner; a valid encoded one from forge's self-test.
 const ownerB58 = b58encode(Buffer.alloc(32, 7));
 const ownerBuf = b58decode(ownerB58);

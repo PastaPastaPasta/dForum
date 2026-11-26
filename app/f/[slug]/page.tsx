@@ -20,6 +20,7 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   return {
     title: forum?.title ?? 'Forum',
     description: forum?.description ?? 'Forum on dForum',
+    alternates: { canonical: `/f/${params.slug}/` },
   }
 }
 

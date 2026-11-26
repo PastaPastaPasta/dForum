@@ -9,6 +9,27 @@ import { KeyExchangeModal } from '@/components/KeyExchangeModal'
 import { useSession } from '@/lib/session'
 import { hostIsCanonical, canonicalHost } from '@/lib/host'
 import { useFrameBuster } from '@/lib/use-frame-buster'
+import { redactWif } from '@/lib/redact'
+
+/** Only same-origin paths survive — never a protocol-relative or backslash
+ * href (browsers treat \\ as /, which would resolve to an external host). */
+function safeNextPath(raw: string | null, origin: string): string | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  // Same-origin absolute paths only — reject backslashes (browsers treat
+  // \\ as /) and protocol-relative URLs.
+  if (!trimmed.startsWith('/')) return null
+  if (/[\\]/.test(trimmed)) return null
+  if (trimmed.startsWith('//')) return null
+  try {
+    const url = new URL(trimmed, origin)
+    if (url.origin !== origin) return null
+    if (!url.pathname.startsWith('/')) return null
+    return url.pathname + url.search + url.hash
+  } catch {
+    return null
+  }
+}
 
 export default function LoginPage() {
   const { session, ready, authError } = useSession()
@@ -17,32 +38,54 @@ export default function LoginPage() {
   const [hostAcknowledged, setHostAcknowledged] = useState(false)
   const [nextPath, setNextPath] = useState<string | null>(null)
   const signedInRef = useRef<HTMLDivElement>(null)
+  const modalOpenedRef = useRef(false)
   const frameState = useFrameBuster()
 
   // Read the host after hydration — during prerender there is no window.
   useEffect(() => {
     setHost(typeof window !== 'undefined' ? window.location.hostname : '')
     const params = new URLSearchParams(window.location.search)
-    const next = params.get('next')
-    if (next && /^\/(?!\/)[^\s]*$/.test(next)) setNextPath(next)
+    setNextPath(safeNextPath(params.get('next'), window.location.origin))
   }, [])
 
   const canonical = hostIsCanonical(host)
   const hostGateOpen = canonical || hostAcknowledged
 
-  const openModal = useCallback(() => setShowModal(true), [])
-  const closeModal = useCallback(() => {
-    setShowModal(false)
-    // Signed-in users land wherever they came from (e.g. a thread reply).
-    if (session && nextPath) window.location.assign(nextPath)
+  const openModal = useCallback(() => {
+    modalOpenedRef.current = true
+    setShowModal(true)
+  }, [])
+
+  const closeModal = useCallback(() => setShowModal(false), [])
+
+  // Post-login: the modal reports completion through the session becoming
+  // non-null. Land wherever the user came from.
+  useEffect(() => {
+    if (session && nextPath && modalOpenedRef.current) {
+      modalOpenedRef.current = false
+      window.location.assign(nextPath)
+      return
+    }
+    // No target: announce the signed-in panel exactly once.
+    if (session && !nextPath && modalOpenedRef.current) {
+      modalOpenedRef.current = false
+      signedInRef.current?.focus?.()
+    }
   }, [session, nextPath])
 
-  // Announce the signed-in panel once the login modal closes.
-  useEffect(() => {
-    if (session) signedInRef.current?.focus?.()
-  }, [session])
-
   const alreadySignedIn = Boolean(session)
+
+  if (frameState === 'unknown') {
+    return (
+      <>
+        <Navbar />
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center">
+          <span className="sr-only" role="status">Loading…</span>
+        </main>
+        <Footer />
+      </>
+    )
+  }
 
   if (frameState === 'framed') {
     return (
@@ -87,7 +130,7 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — no central server" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum keeps a limited posting key for this tab only; your wallet key never leaves your wallet" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet signs — dForum holds a HIGH-level signing key for this tab only. It can post on your behalf but cannot move funds" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="All posts, profiles and reactions live on-chain" />
               </div>
 
@@ -125,16 +168,14 @@ export default function LoginPage() {
                   <button
                     onClick={openModal}
                     disabled={!ready || !hostGateOpen}
-                    className="mt-8 btn-primary px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20 disabled:opacity-60"
+                    className="mt-8 btn-primary px-5 py-3 font-semibold shadow-lg shadow-[#008CE7]/20"
                   >
                     {!ready ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
                     Login with Dash
                   </button>
-                  <div aria-live="polite">
-                    {authError && (
-                      <p role="alert" className="mt-3 text-sm text-red-400">{authError}</p>
-                    )}
-                  </div>
+                  {authError && (
+                    <p role="alert" className="mt-3 text-sm text-red-400">{redactWif(authError)}</p>
+                  )}
                 </>
               )}
             </div>
@@ -169,7 +210,7 @@ function Benefit({ icon, text }: { icon: React.ReactNode; text: string }) {
 function Step({ number, title, body }: { number: number; title: string; body: string }) {
   return (
     <li className="flex gap-4">
-      <span className="flex items-center justify-center w-8 h-8 rounded-full bg-[#0070c0]/15 text-[#4db3ff] text-sm font-bold shrink-0">{number}</span>
+      <span aria-hidden="true" className="flex items-center justify-center w-8 h-8 rounded-full bg-[#0070c0]/15 text-[#4db3ff] text-sm font-bold shrink-0">{number}</span>
       <div>
         <p className="font-medium text-sm">{title}</p>
         <p className="text-xs text-[#93a1bd] mt-0.5">{body}</p>

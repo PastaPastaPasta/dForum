@@ -21,6 +21,7 @@ export function generateMetadata({ params }: { params: { id: string } }): Metada
   return {
     title: thread?.title ?? 'Thread',
     description: thread ? `Thread in dForum — ${thread.title}` : 'Thread on dForum',
+    alternates: { canonical: `/t/${params.id}/` },
   }
 }
 

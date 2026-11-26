@@ -58,16 +58,27 @@ const contractId = (ownerB58, nonce) => b58encode(hashDouble(Buffer.concat([b58d
 
 async function main() {
   const args = process.argv.slice(2);
-  let mode = 'team', network = 'testnet', dryRun = false;
+  let mode = 'team', network = 'testnet', dryRun = false, force = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--mode') mode = args[++i];
   else if (args[i] === '--network') network = args[++i];
   else if (args[i] === '--dry-run') dryRun = true;
+  else if (args[i] === '--force') force = true;
 }
 if (!['none', 'team', 'network'].includes(mode)) throw new Error(`--mode must be none|team|network, got ${mode}`);
 
 const recordPath = join('contracts', 'deployments', `${network}.json`);
 const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+
+// Refuse to silently overwrite a live registration. The team contract is
+// live on testnet — re-registering it would orphan the existing one (this
+// script is how the live registration was made in the first place).
+const existing = record.contracts?.[mode];
+if (existing && !force) {
+  console.error(`refusing to overwrite the live ${mode} contract registration (${existing.contractId})`);
+  console.error(`  pass --force to register anyway (a NEW contract id will be written; the old one stays live)`);
+  process.exit(1);
+}
 const ownerId = record.identity?.id;
 if (!ownerId) throw new Error(`${recordPath} has no identity.id — register the identity first`);
 

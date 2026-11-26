@@ -77,9 +77,14 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
       return
     }
     let cancelled = false
-    Promise.resolve(secretStore.getPrivateKey(identityId)).then((wif) => {
-      if (!cancelled) setAuthKeyWif(wif)
-    })
+    Promise.resolve(secretStore.getPrivateKey(identityId))
+      .then((wif) => {
+        if (!cancelled) setAuthKeyWif(wif)
+      })
+      .catch(() => {
+        // Signing key unavailable — the profile still renders; writes refuse.
+        if (!cancelled) setAuthKeyWif(null)
+      })
     return () => {
       cancelled = true
     }

@@ -18,6 +18,7 @@ import {
   IdentitySigner,
 } from '@dashevo/evo-sdk';
 import { criticalAuthKey, deriveIdentityKeys } from '../derive-identities.mjs';
+import { redactWif } from '../lib/redact.mjs';
 
 const record = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'));
 const CONTRACT_ID = record.contracts.team.contractId;
@@ -155,7 +156,7 @@ async function main() {
     try {
       const back = await sdk.documents.get(CONTRACT_ID, 'post', docs.post.id);
       console.log('post read back: $id=', String(back?.id), 'revision=', back?.revision, 'body=', back?.properties?.body);
-    } catch (e) { console.error('post read-back failed:', e?.message ?? e); }
+    } catch (e) { console.error('post read-back failed:', redactWif(e?.message ?? e)); }
   }
 
   if (docs.forum) {
@@ -168,7 +169,7 @@ async function main() {
         limit: 20,
       });
       console.log('S5a posts in forum: count=', page.size, [...page.keys()].slice(0, 5).join(', '));
-    } catch (e) { console.error('S5a query failed:', e?.message ?? e); }
+    } catch (e) { console.error('S5a query failed:', redactWif(e?.message ?? e)); }
 
     try {
       // groupBy per In-value: posts per threadId (the S5 test — In on
@@ -181,7 +182,7 @@ async function main() {
       });
       const entries = [...countMap.entries()].map(([k, v]) => `${String(k).slice(0, 10)}=${v}`);
       console.log('S5b posts per thread (In on rangeCountable):', entries.join(', '));
-    } catch (e) { console.error('S5b count failed:', e?.message ?? e); }
+    } catch (e) { console.error('S5b count failed:', redactWif(e?.message ?? e)); }
 
     try {
       const page = await sdk.documents.query({
@@ -192,7 +193,7 @@ async function main() {
         limit: 20,
       });
       console.log('S3a threads in forum: count=', page.size, [...page.keys()].slice(0, 5).join(', '));
-    } catch (e) { console.error('S3a query failed:', e?.message ?? e); }
+    } catch (e) { console.error('S3a query failed:', redactWif(e?.message ?? e)); }
   }
 
   console.log('--- per-write fees (credits) ---');
@@ -209,6 +210,6 @@ main().catch((e) => {
   const parts = [];
   for (const k of ['message', 'name', 'code']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
   try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', parts.join(' | '));
+  console.error('ERROR:', redactWif(parts.join(' | ')));
   process.exit(1);
 });

@@ -447,6 +447,15 @@ export class PlatformAuthController {
       const identityIdBytes = this.deps.crypto.decodeIdentityId(identityId)
       const authKey = this.deps.crypto.deriveAuthKeyFromLogin(loginKey, identityIdBytes)
       const encryptionKey = this.deps.crypto.deriveEncryptionKeyFromLogin(loginKey, identityIdBytes)
+      // Verify the derived auth key against the identity before storing it —
+      // a key that doesn't match the identity's enabled HIGH/CRITICAL
+      // authentication key is never persisted.
+      if (this.deps.crypto.validateDerivedKeyMatchesIdentity) {
+        const matches = await this.deps.crypto.validateDerivedKeyMatchesIdentity(authKey, identityId)
+        if (!matches) {
+          throw new Error('Derived auth key does not match the identity — refusing to log in')
+        }
+      }
       const authKeyWif = this.deps.crypto.privateKeyToWif(authKey, this.deps.network, true)
       const encryptionKeyWif = this.deps.crypto.privateKeyToWif(encryptionKey, this.deps.network, true)
 

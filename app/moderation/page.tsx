@@ -18,6 +18,7 @@ import { earliestOwnerPost } from '@/lib/services/orphan'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { shortId, formatDate, formatRelativeTime } from '@/lib/utils'
 import { hostIsLocal, hostIsCanonical, canonicalHost } from '@/lib/host'
+import { redactWif } from '@/lib/redact'
 import { useFrameBuster } from '@/lib/use-frame-buster'
 
 // The CRITICAL key lives only in this tab's memory — never in storage, never
@@ -87,12 +88,28 @@ export default function ModerationPage() {
   const wipeGenRef = useRef(0)
   const mountedRef = useRef(true)
   const pathnameRef = useRef<string>('')
+  const inFlightRef = useRef(0)
+  const pendingWipeRef = useRef<string | null>(null)
   const frameState = useFrameBuster()
 
   // Internal wipe: bump the wipe generation, free the signer, zero all state.
   // Never shows a notice (used by unmount cleanup where no one is watching).
-  const internalWipe = useCallback(() => {
+  // If moderator calls are in flight, the WIF and admin state are dropped
+  // now but the signer is only freed once the last call settles — freeing it
+  // mid-flight would corrupt the SDK's WASM state for the whole session.
+  const internalWipe = useCallback((reason?: string) => {
     wipeGenRef.current += 1
+    if (inFlightRef.current > 0) {
+      if (reason != null) pendingWipeRef.current = reason
+      setWif('')
+      setAdmin(null)
+      setValidation(null)
+      setValidating(false)
+      setStatus(null)
+      setStatusForId(null)
+      setActionSuccess(null)
+      return
+    }
     try { signerRef.current?.free() } catch { /* already freed */ }
     signerRef.current = null
     setWif('')
@@ -104,8 +121,36 @@ export default function ModerationPage() {
     setActionSuccess(null)
   }, [])
 
+  // Decrement the in-flight counter after an action settles; when the last
+  // call returns, honour any deferred wipe.
+  const finishInFlight = useCallback(() => {
+    inFlightRef.current = Math.max(0, inFlightRef.current - 1)
+    if (inFlightRef.current === 0 && pendingWipeRef.current != null) {
+      const reason = pendingWipeRef.current
+      pendingWipeRef.current = null
+      internalWipe()
+      if (mountedRef.current) setWipedNotice(reason)
+    }
+  }, [internalWipe])
+
+  // Run a moderator action under an in-flight lease. The WIF and admin state
+  // are nulled by an external wipe immediately; the signer is freed only when
+  // the last lease ends.
+  const trackInFlight = useCallback((fn: () => Promise<void>) => {
+    inFlightRef.current += 1
+    return (async () => {
+      try { await fn() } finally { finishInFlight() }
+    })()
+  }, [finishInFlight])
+
   // User-facing wipe — also explains why the key was cleared.
   const wipe = useCallback((reason: string) => {
+    if (inFlightRef.current > 0) {
+      // Defer: the signer goes away when the last call settles (see
+      // internalWipe); the notice shows at that point.
+      internalWipe(reason)
+      return
+    }
     internalWipe()
     if (mountedRef.current) setWipedNotice(reason)
   }, [internalWipe])
@@ -153,13 +198,15 @@ export default function ModerationPage() {
     }
   }, [wipe])
 
-  // Free the signer on unmount and invalidate in-flight actions.
+  // Wipe on unmount and invalidate in-flight actions. If a call is still
+  // in flight at unmount, the signer is freed once that call settles — never
+  // mid-flight (see internalWipe).
   useEffect(() => {
     return () => {
-      wipeGenRef.current += 1
-      try { signerRef.current?.free() } catch { /* freed */ }
-      signerRef.current = null
+      pendingWipeRef.current = pendingWipeRef.current ?? 'cleared on navigation'
+      internalWipe()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const bailIfWiped = useCallback((gen: number) => gen !== wipeGenRef.current || !mountedRef.current, [])
@@ -295,7 +342,7 @@ export default function ModerationPage() {
       setValidation({ ok: true })
     } catch (e) {
       if (bailIfWiped(gen)) return
-      setValidation({ ok: false, reason: e instanceof Error ? e.message : 'Validation failed' })
+      setValidation({ ok: false, reason: redactWif(e instanceof Error ? e.message : 'Validation failed') })
       setAdmin(null)
     } finally {
       if (!bailIfWiped(gen)) setValidating(false)
@@ -323,30 +370,32 @@ export default function ModerationPage() {
     } catch (e) {
       if (bailIfWiped(gen)) return
       setStatus(null)
-      setActionError(e instanceof Error ? e.message : 'Could not fetch status')
+      setActionError(redactWif(e instanceof Error ? e.message : 'Could not fetch status'))
     } finally {
       setStatusLoading(false)
     }
   }
 
-  async function act(busyKey: string, fn: () => Promise<void>, confirm?: string, success?: string) {
+  function act(busyKey: string, fn: () => Promise<void>, confirm?: string, success?: string) {
     if (confirm && !window.confirm(confirm)) return
     const gen = wipeGenRef.current
     setActionBusy(busyKey)
     setActionError(null)
     setActionSuccess(null)
-    try {
-      await fn()
-      if (bailIfWiped(gen)) return
-      await refreshStatus()
-      if (bailIfWiped(gen)) return
-      if (success) setActionSuccess(success)
-    } catch (e) {
-      if (bailIfWiped(gen)) return
-      setActionError(e instanceof Error ? e.message : 'Action failed')
-    } finally {
-      setActionBusy(null)
-    }
+    void trackInFlight(async () => {
+      try {
+        await fn()
+        if (bailIfWiped(gen)) return
+        await refreshStatus()
+        if (bailIfWiped(gen)) return
+        if (success) setActionSuccess(success)
+      } catch (e) {
+        if (bailIfWiped(gen)) return
+        setActionError(redactWif(e instanceof Error ? e.message : 'Action failed'))
+      } finally {
+        setActionBusy(null)
+      }
+    })
   }
 
   /** Read the post so we can see whether it is its thread's opening post. */
@@ -361,47 +410,51 @@ export default function ModerationPage() {
     return { threadId, opening: opening ? { id: opening.id } : null }
   }
 
-  async function toggleSticky(doc: ModeratableDoc) {
+  function toggleSticky(doc: ModeratableDoc) {
     if (!admin) return
     const gen = wipeGenRef.current
     if (!window.confirm(`${doc.sticky ? 'Unpin' : 'Pin'} this thread?`)) return
     setDocActionBusy(`${doc.id}:sticky`)
     setActionError(null)
-    try {
-      await changeDocumentFields(admin, 'thread', doc.id, { sticky: doc.sticky ? null : true }, 'sticky toggle')
-      if (bailIfWiped(gen)) return
-      setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, sticky: doc.sticky ? null : true } : d)))
-      setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, sticky: doc.sticky ? null : true } : prev))
-    } catch (e) {
-      if (bailIfWiped(gen)) return
-      setActionError(e instanceof Error ? e.message : 'Sticky toggle failed')
-    } finally {
-      setDocActionBusy(null)
-    }
+    void trackInFlight(async () => {
+      try {
+        await changeDocumentFields(admin, 'thread', doc.id, { sticky: doc.sticky ? null : true }, 'sticky toggle')
+        if (bailIfWiped(gen)) return
+        setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, sticky: doc.sticky ? null : true } : d)))
+        setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, sticky: doc.sticky ? null : true } : prev))
+      } catch (e) {
+        if (bailIfWiped(gen)) return
+        setActionError(redactWif(e instanceof Error ? e.message : 'Sticky toggle failed'))
+      } finally {
+        setDocActionBusy(null)
+      }
+    })
   }
 
-  async function toggleLock(doc: ModeratableDoc) {
+  function toggleLock(doc: ModeratableDoc) {
     if (!admin) return
     const gen = wipeGenRef.current
     const locked = doc.lockedAt != null
     if (!window.confirm(locked ? 'Unlock this thread? Replies can be posted again.' : 'Lock this thread? No new posts will be shown from now on.')) return
     setDocActionBusy(`${doc.id}:lock`)
     setActionError(null)
-    try {
-      const lockedAt = locked ? null : Date.now()
-      await changeDocumentFields(admin, 'thread', doc.id, { lockedAt }, locked ? 'thread unlock' : 'thread lock')
-      if (bailIfWiped(gen)) return
-      setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, lockedAt } : d)))
-      setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, lockedAt } : prev))
-    } catch (e) {
-      if (bailIfWiped(gen)) return
-      setActionError(e instanceof Error ? e.message : 'Lock toggle failed')
-    } finally {
-      setDocActionBusy(null)
-    }
+    void trackInFlight(async () => {
+      try {
+        const lockedAt = locked ? null : Date.now()
+        await changeDocumentFields(admin, 'thread', doc.id, { lockedAt }, locked ? 'thread unlock' : 'thread lock')
+        if (bailIfWiped(gen)) return
+        setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, lockedAt } : d)))
+        setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, lockedAt } : prev))
+      } catch (e) {
+        if (bailIfWiped(gen)) return
+        setActionError(redactWif(e instanceof Error ? e.message : 'Lock toggle failed'))
+      } finally {
+        setDocActionBusy(null)
+      }
+    })
   }
 
-  async function toggleHide(doc: ModeratableDoc) {
+  function toggleHide(doc: ModeratableDoc) {
     if (!admin) return
     const gen = wipeGenRef.current
     const hiding = doc.modState == null
@@ -409,62 +462,84 @@ export default function ModerationPage() {
     if (!window.confirm(hiding ? `Hide this ${label}? It will be hidden from everyone.` : `Unhide this ${label}? It will be shown again.`)) return
     setDocActionBusy(`${doc.id}:hide`)
     setActionError(null)
-    try {
-      const hidden = doc.modState != null
-      // Hide opening posts with modState AND hide the thread too — a deletable
-      // opening post would be re-hidden by the author and the thread would
-      // reappear with a different opening post.
-      if (hiding && doc.type === 'post') {
-        const info = await openingPostOf(doc.id).catch(() => null)
-        if (bailIfWiped(gen)) return
-        if (info && info.opening?.id === doc.id) {
-          await changeDocumentFields(admin, 'thread', info.threadId, { modState: 1 }, 'thread hidden (opening post hidden)')
+    void trackInFlight(async () => {
+      try {
+        const hidden = doc.modState != null
+        // Hide opening posts with modState AND hide the thread too — a deletable
+        // opening post would be re-hidden by the author and the thread would
+        // reappear with a different opening post.
+        if (hiding && doc.type === 'post') {
+          const info = await openingPostOf(doc.id).catch(() => 'unverified' as const)
           if (bailIfWiped(gen)) return
-          setDocs((prev) => prev.map((d) => (d.id === info.threadId ? { ...d, modState: 1 } : d)))
-          setLookupDoc((prev) => (prev && prev.id === info.threadId ? { ...prev, modState: 1 } : prev))
+          // Refuse rather than hide an opening post (or a plain post) the
+          // caller cannot vouch for.
+          if (info === 'unverified') {
+            setActionError('Could not verify this post — refusing the hide. Try again.')
+            setDocActionBusy(null)
+            return
+          }
+          if (info && info.opening?.id === doc.id) {
+            await changeDocumentFields(admin, 'thread', info.threadId, { modState: 1 }, 'thread hidden (opening post hidden)')
+            if (bailIfWiped(gen)) return
+            setDocs((prev) => prev.map((d) => (d.id === info.threadId ? { ...d, modState: 1 } : d)))
+            setLookupDoc((prev) => (prev && prev.id === info.threadId ? { ...prev, modState: 1 } : prev))
+          }
         }
+        await changeDocumentFields(admin, doc.type, doc.id, { modState: hidden ? null : 1 }, hidden ? `${label} unhide` : `${label} hide`)
+        if (bailIfWiped(gen)) return
+        setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, modState: hidden ? null : 1 } : d)))
+        setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, modState: hidden ? null : 1 } : prev))
+      } catch (e) {
+        if (bailIfWiped(gen)) return
+        setActionError(redactWif(e instanceof Error ? e.message : 'Hide toggle failed'))
+      } finally {
+        setDocActionBusy(null)
       }
-      await changeDocumentFields(admin, doc.type, doc.id, { modState: hidden ? null : 1 }, hidden ? `${label} unhide` : `${label} hide`)
-      if (bailIfWiped(gen)) return
-      setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, modState: hidden ? null : 1 } : d)))
-      setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, modState: hidden ? null : 1 } : prev))
-    } catch (e) {
-      if (bailIfWiped(gen)) return
-      setActionError(e instanceof Error ? e.message : 'Hide toggle failed')
-    } finally {
-      setDocActionBusy(null)
-    }
+    })
   }
 
-  async function deleteDoc(doc: ModeratableDoc) {
+  function deleteDoc(doc: ModeratableDoc) {
     if (!admin) return
     const gen = wipeGenRef.current
-    // A moderator can keep hiding an opening post; deleting it would let the
-    // author's next reply become the opening post and the thread would
-    // re-list. Refuse, and say how to hide instead.
-    if (doc.type === 'post') {
-      const info = await openingPostOf(doc.id).catch(() => null)
-      if (bailIfWiped(gen)) return
-      if (info && info.opening?.id === doc.id) {
-        setActionError('This is the thread\'s opening post — hide it instead of deleting it (a deleted opening post would let the thread reappear with a new opening post).')
-        return
-      }
-    }
-    if (!window.confirm(`Delete this ${doc.type}? This removes it from view — the record is kept on-chain. This cannot be undone in the UI.`)) return
+    // Set the busy flag before the lookup — a double-click must not run the
+    // guard and the delete twice.
     setDocActionBusy(`${doc.id}:delete`)
     setActionError(null)
-    try {
-      await deleteDocument(admin, doc.type, doc.id, 'moderator delete')
-      if (bailIfWiped(gen)) return
-      setDocs((prev) => prev.filter((d) => d.id !== doc.id))
-      setLookupDoc((prev) => (prev && prev.id === doc.id ? null : prev))
-      setActionSuccess('Document deleted.')
-    } catch (e) {
-      if (bailIfWiped(gen)) return
-      setActionError(e instanceof Error ? e.message : 'Delete failed')
-    } finally {
-      setDocActionBusy(null)
-    }
+    void trackInFlight(async () => {
+      try {
+        // A moderator can keep hiding an opening post; deleting it would let the
+        // author's next reply become the opening post and the thread would
+        // re-list. Refuse, and say how to hide instead.
+        if (doc.type === 'post') {
+          const info = await openingPostOf(doc.id).catch(() => 'unverified' as const)
+          if (bailIfWiped(gen)) return
+          if (info === 'unverified') {
+            setActionError('Could not verify this post — refusing the delete. Try again.')
+            setDocActionBusy(null)
+            return
+          }
+          if (info && info.opening?.id === doc.id) {
+            setActionError('This is the thread\'s opening post — hide it instead of deleting it (a deleted opening post would let the thread reappear with a new opening post).')
+            setDocActionBusy(null)
+            return
+          }
+        }
+        if (!window.confirm(`Delete this ${doc.type}? It is removed from view — the chain keeps no copy of its contents. This cannot be undone in the UI.`)) {
+          setDocActionBusy(null)
+          return
+        }
+        await deleteDocument(admin, doc.type, doc.id, 'moderator delete')
+        if (bailIfWiped(gen)) return
+        setDocs((prev) => prev.filter((d) => d.id !== doc.id))
+        setLookupDoc((prev) => (prev && prev.id === doc.id ? null : prev))
+        setActionSuccess('Document deleted.')
+      } catch (e) {
+        if (bailIfWiped(gen)) return
+        setActionError(redactWif(e instanceof Error ? e.message : 'Delete failed'))
+      } finally {
+        setDocActionBusy(null)
+      }
+    })
   }
 
   async function lookupDocument() {
@@ -505,7 +580,7 @@ export default function ModerationPage() {
       setLookupError('No thread or post with that ID on the contract.')
     } catch (e) {
       if (bailIfWiped(gen)) return
-      setLookupError(e instanceof Error ? e.message : 'Could not fetch the document')
+      setLookupError(redactWif(e instanceof Error ? e.message : 'Could not fetch the document'))
     } finally {
       setLookupBusy(false)
     }
@@ -527,6 +602,20 @@ export default function ModerationPage() {
 
   const allDocs = [...docs, ...(lookupDoc ? [lookupDoc] : [])]
   const ownerMismatchBanner = !canOperate && hostIsCanon
+
+  // Nothing renders until the frame check has run — a framed first paint
+  // must not leak the console.
+  if (frameState === 'unknown') {
+    return (
+      <>
+        <Navbar />
+        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center">
+          <span className="sr-only" role="status">Loading…</span>
+        </main>
+        <Footer />
+      </>
+    )
+  }
 
   return (
     <>
@@ -586,7 +675,7 @@ export default function ModerationPage() {
                       setAdmin(null)
                     }}
                     placeholder="6Dft…"
-                    className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
                   />
                 </label>
                 <label className="block">
@@ -603,7 +692,7 @@ export default function ModerationPage() {
                       setAdmin(null)
                     }}
                     placeholder="L…"
-                    className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
                     autoComplete="one-time-code"
                     data-lpignore="true"
                     data-1p-ignore="true"
@@ -696,7 +785,7 @@ export default function ModerationPage() {
                       value={targetId}
                       onChange={(e) => { setTargetId(e.target.value); setStatus(null); setStatusForId(null); setActionSuccess(null) }}
                       placeholder="identity ID to look up"
-                      className="flex-1 rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                      className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
                       onKeyDown={(e) => e.key === 'Enter' && refreshStatus()}
                     />
                     <button
@@ -720,10 +809,10 @@ export default function ModerationPage() {
                     {status.banReason?.text && <p className="mt-2 text-xs text-[#93a1bd]">Ban reason: {status.banReason.text}</p>}
 
                     <div className="mt-4 grid sm:grid-cols-2 gap-2">
-                      <TextInput label="Ban reason (required)" value={banReason} onChange={setBanReason} />
-                      <TextInput label="Suspend hours" value={suspendHours} onChange={setSuspendHours} type="number" />
-                      <TextInput label="Warning reason (required)" value={warnReason} onChange={setWarnReason} />
-                      <TextInput label="Suspend reason (required)" value={suspendReason} onChange={setSuspendReason} />
+                      <TextInput id="ban-reason" label="Ban reason (required)" value={banReason} onChange={setBanReason} />
+                      <TextInput id="suspend-hours" label="Suspend hours" value={suspendHours} onChange={setSuspendHours} type="number" />
+                      <TextInput id="warn-reason" label="Warning reason (required)" value={warnReason} onChange={setWarnReason} />
+                      <TextInput id="suspend-reason" label="Suspend reason (required)" value={suspendReason} onChange={setSuspendReason} />
                     </div>
 
                     {!canOperate && (
@@ -816,7 +905,8 @@ export default function ModerationPage() {
                   value={lookupId}
                   onChange={(e) => setLookupId(e.target.value)}
                   placeholder="Look up a thread or post ID (e.g. an older report)…"
-                  className="flex-1 rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                  aria-label="Look up a thread or post ID"
+                  className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
                   onKeyDown={(e) => e.key === 'Enter' && lookupDocument()}
                 />
                 <button
@@ -978,7 +1068,7 @@ function TextInput({ label, value, onChange, type = 'text', id }: { label: strin
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-3 py-2 text-xs focus:border-[#008CE7]"
+        className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-xs focus:border-[#008CE7]"
       />
     </label>
   )

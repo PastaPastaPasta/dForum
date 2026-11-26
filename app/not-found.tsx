@@ -69,6 +69,7 @@ export default function NotFound() {
         <Navbar />
         <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
           <div className="w-full max-w-3xl space-y-3">
+            <span className="sr-only" role="status">Loading…</span>
             <div aria-hidden="true" className="h-4 w-24 rounded bg-[#18233c] animate-pulse" />
             <div aria-hidden="true" className="h-8 w-3/4 rounded bg-[#18233c] animate-pulse" />
             <div aria-hidden="true" className="h-4 w-1/2 rounded bg-[#18233c] animate-pulse" />

@@ -2,6 +2,8 @@
 
 import Link from 'next/link'
 import { useEffect } from 'react'
+import { Navbar } from '@/components/Navbar'
+import { Footer } from '@/components/Footer'
 
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
@@ -10,7 +12,9 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
     console.error(error)
   }, [error])
   return (
-    <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
+    <>
+      <Navbar />
+      <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
       <div className="text-center fade-up">
         <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Something went wrong</p>
         <h1 className="text-2xl font-bold mt-2">This page hit an error</h1>
@@ -22,6 +26,8 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
           </Link>
         </div>
       </div>
-    </main>
+      </main>
+      <Footer />
+    </>
   )
 }

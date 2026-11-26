@@ -24,6 +24,7 @@ export function generateMetadata({ params }: { params: { id: string } }): Metada
     description: name
       ? `${name}'s threads on dForum — ${threadCount} listed thread${threadCount === 1 ? '' : 's'} on the static index.`
       : 'Member profile on dForum',
+    alternates: { canonical: `/u/${params.id}/` },
   }
 }
 

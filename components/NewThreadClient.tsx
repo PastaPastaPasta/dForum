@@ -104,7 +104,10 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
       <>
         <Navbar />
         <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
-          <Loader2 className="w-6 h-6 animate-spin text-[#4db3ff]" aria-hidden="true" />
+          <>
+            <span className="sr-only" role="status">Loading…</span>
+            <Loader2 className="w-6 h-6 animate-spin text-[#4db3ff]" aria-hidden="true" />
+          </>
         </main>
         <Footer />
       </>
@@ -336,8 +339,8 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
 
             <button
               type="submit"
-              disabled={submitting}
-              className="w-full btn-primary justify-center px-5 py-3 font-semibold"
+              aria-disabled={submitting}
+              className="w-full btn-primary justify-center px-5 py-3 font-semibold aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
             >
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Send className="w-5 h-5" aria-hidden="true" />}
               {threadCreated ? 'Finish opening post' : submitting ? 'Creating…' : 'Start thread'}

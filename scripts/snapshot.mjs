@@ -133,18 +133,30 @@ async function openingPost(sdk, thread) {
   const lockedAt = thread.properties?.lockedAt ?? null;
   const where = [['$ownerId', '==', ownerId]];
   if (thread.$createdAt != null) where.push(['$createdAt', '>=', thread.$createdAt]);
-  const all = await queryList(sdk, 'post', {
-    where,
-    orderBy: [['$createdAt', 'asc']],
-    limit: 25,
-  });
-  const mine = all.filter((p) => p.properties?.threadId === thread.id);
-  mine.sort((a, b) => (isBefore(a, b) ? -1 : isBefore(b, a) ? 1 : 0));
-  const earliestOwner = mine[0];
-  if (!earliestOwner) return null; // no owner-owned post at all
-  if (earliestOwner.properties?.modState != null) return null; // opening post hidden → not listed
-  if (lockedAt != null && earliestOwner.$createdAt > lockedAt) return null;
-  return earliestOwner;
+  // Page through the author's owner-posts until the thread's opening post
+  // appears (or the page budget is hit) — a bounded failure that still
+  // marks the thread orphaned rather than listing it falsely.
+  let after = null;
+  for (let page = 0; page < 12; page++) {
+    const posts = await queryList(sdk, 'post', {
+      where,
+      orderBy: [['$createdAt', 'asc']],
+      limit: 25,
+      ...(after ? { startAfter: after } : {}),
+    });
+    if (posts.length === 0) break;
+    const mine = posts.filter((p) => p.properties?.threadId === thread.id);
+    mine.sort((a, b) => (isBefore(a, b) ? -1 : isBefore(b, a) ? 1 : 0));
+    const earliestOwner = mine[0];
+    if (earliestOwner) {
+      if (earliestOwner.properties?.modState != null) return null; // opening post hidden → not listed
+      if (lockedAt != null && earliestOwner.$createdAt > lockedAt) return null;
+      return earliestOwner;
+    }
+    if (posts.length < 25) break;
+    after = posts[posts.length - 1].id;
+  }
+  return null; // no owner-owned post at all
 }
 
 async function main() {
@@ -160,11 +172,10 @@ async function main() {
     : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } });
   await sdk.connect();
 
-  const [categories, forums, threadCount, postCount, reactionCount] = await Promise.all([
+  const [categories, forums, threadCount, reactionCount] = await Promise.all([
     queryList(sdk, 'category', { limit: 50 }),
     queryList(sdk, 'forum', { limit: 50 }),
     countDocuments(sdk, 'thread'),
-    countDocuments(sdk, 'post'),
     countDocuments(sdk, 'reaction'),
   ]);
 
@@ -213,12 +224,17 @@ async function main() {
   // each listed thread, in ascending order, starting at the opening post.
   if (existsSync(POSTS_DIR)) rmSync(POSTS_DIR, { recursive: true, force: true });
   mkdirSync(POSTS_DIR, { recursive: true });
+  // Counts the static index actually ships — hidden/orphaned threads and
+  // hidden posts are deliberately excluded from public numbers.
+  let visiblePosts = 0;
   for (const { thread: t, opening } of listable) {
     const lockedAt = t.properties?.lockedAt ?? null;
+    // Start the static-posts query at the opening post — a thread whose
+    // opening post sits far down the log must not ship zero posts.
     const posts = await queryList(sdk, 'post', {
-      where: [['threadId', '==', t.id]],
+      where: [['threadId', '==', t.id], ['$createdAt', '>=', opening.$createdAt]],
       orderBy: [['$createdAt', 'asc']],
-      limit: 50,
+      limit: STATIC_POSTS,
     });
     const fromOpening = posts.filter((p) => !isBefore(p, opening));
     const visible = fromOpening
@@ -233,6 +249,7 @@ async function main() {
         modState: null,
         replyToId: typeof p.properties?.replyToId === 'string' ? p.properties.replyToId : null,
       }));
+    visiblePosts += visible.length;
     writeFileSync(`${POSTS_DIR}/${t.id}.json`, JSON.stringify(visible) + '\n');
   }
 
@@ -240,11 +257,13 @@ async function main() {
     generatedAt: new Date().toISOString(),
     network: NETWORK,
     contractId: CONTRACT_ID,
+    // counts reflect the honest, listed surface — not the total chain size
+    // (hidden/orphaned threads are deliberately not public numbers).
     counts: {
       categories: categories.length,
-      forums: forums.length,
-      threads: Number(threadCount),
-      posts: Number(postCount),
+      forums: forums.filter((f) => !f.properties?.archived).length,
+      threads: listable.length,
+      posts: visiblePosts,
       reactions: Number(reactionCount),
     },
     categories: categories.map((c) => ({

@@ -1,7 +1,8 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Users, Pencil, AlertTriangle, Loader2 } from 'lucide-react'
+import { Users, Pencil, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { query } from '@/lib/services/document-service'
@@ -27,10 +28,13 @@ interface LiveThread {
 }
 
 interface LiveForum {
+  id: string | null
   title?: string
   description?: string
   threads: LiveThread[]
   truncated: boolean
+  /** Exclusive $id cursor of the last doc in the recent-page — null when the recent window is complete. */
+  cursor: string | null
 }
 
 /** Sticky-first, newest-first ordering — mirrors the forum contract's
@@ -53,9 +57,45 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   const forum = snap?.forums.find((f) => f.slug === slug) ?? null
 
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
+  const [moreThreads, setMoreThreads] = useState<LiveThread[]>([])
+  const [moreCursor, setMoreCursor] = useState<string | null>(null)
+  const [moreLoading, setMoreLoading] = useState(false)
+  const [moreError, setMoreError] = useState(false)
+
+  // Arm load-more once the live window comes back: anything past the recent
+  // page is unreachable without a button.
+  useEffect(() => {
+    if (live?.status !== 'ok') return
+    setMoreCursor(live.forum.cursor)
+  }, [live])
+
+  async function loadMore() {
+    const forumId = live?.status === 'ok' ? live.forum.id : forum?.id ?? null
+    if (!forumId || !moreCursor || moreLoading) return
+    setMoreLoading(true)
+    setMoreError(false)
+    try {
+      const docs = await query('thread', {
+        where: [['forumId', '==', forumId]],
+        orderBy: [['$createdAt', 'desc']],
+        limit: 25,
+        startAfter: moreCursor,
+      })
+      const mapped = docs.map(docToThread).filter((t) => !moreThreads.some((x) => x.id === t.id))
+      const listed = await filterListable(mapped, 4)
+      const last = docs[docs.length - 1] ?? null
+      setMoreThreads((prev) => [...prev, ...listed])
+      setMoreCursor(docs.length === 25 && last ? last.id : null)
+    } catch {
+      setMoreError(true)
+    } finally {
+      setMoreLoading(false)
+    }
+  }
+
   const snapThreads = (snap?.threads ?? []).filter((t) => t.forumSlug === slug).map(snapshotThreadToLive)
-  const rawThreads = live?.status === 'ok' ? live.forum.threads : snapThreads
-  const listed = rawThreads.filter((t) => !isModerated(t.modState)).sort(byStickyThenRecent).slice(0, MAX_LIST)
+  const rawThreads = live?.status === 'ok' ? ([...live.forum.threads, ...moreThreads] as LiveThread[]) : [...snapThreads, ...moreThreads]
+  const listed = rawThreads.filter((t) => !isModerated(t.modState)).sort(byStickyThenRecent).slice(0, 60)
   const forumTitle = forum?.title ?? (live?.status === 'ok' ? live.forum.title : null) ?? slug
   const forumDesc = forum?.description ?? (live?.status === 'ok' ? live.forum.description : null) ?? ''
   const status = live?.status ?? null
@@ -122,19 +162,18 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
             {showStaleNote && <LiveUnavailable className="mt-4" />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
-              <span>{listed.length} thread{listed.length === 1 ? '' : 's'}</span>
+              <span>{listed.length} shown</span>
               <span>·</span>
-              <span className={session ? 'text-emerald-400' : 'text-amber-400'}>
-                {session ? 'Open' : <Link href="/login" className="hover:underline">Login to post</Link>}
-              </span>
+              {session ? (
+                <span className="text-emerald-400">Open</span>
+              ) : (
+                <Link href="/login" className="text-amber-400 hover:underline">Login to post</Link>
+              )}
             </div>
           </div>
         </section>
 
         <section className="max-w-6xl mx-auto px-4 sm:px-6 mt-6">
-          {live?.status === 'ok' && live.forum.truncated && (
-            <p className="mb-3 text-xs text-[#93a1bd]">Showing the {MAX_LIST} most recent threads.</p>
-          )}
           {listed.length === 0 && liveLoading ? (
             <>
               <span className="sr-only" role="status">Loading threads…</span>
@@ -147,6 +186,21 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
               {listed.map((t) => (
                 <ThreadRow key={t.id} thread={{ ...t, forumSlug: forum?.slug ?? slug }} nameOf={nameOf} />
               ))}
+            </div>
+          )}
+          {moreCursor != null && (
+            <div className="mt-4">
+              {moreError && <p className="text-sm text-red-400">Couldn&apos;t load older threads. {moreCursor && <button onClick={() => loadMore()} className="text-[#4db3ff] hover:underline">Retry</button>}</p>}
+              {!moreError && (
+                <button
+                  onClick={() => loadMore()}
+                  disabled={moreLoading}
+                  className="btn-secondary inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                >
+                  {moreLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
+                  {moreLoading ? 'Loading…' : 'Load older threads'}
+                </button>
+              )}
             </div>
           )}
         </section>
@@ -236,10 +290,12 @@ async function loadLiveForum(slug: string): Promise<LoadResult> {
     return {
       status: 'ok',
       forum: {
+        id: fdoc.id,
         title: (fdoc.properties.title as string) ?? undefined,
         description: (fdoc.properties.description as string) ?? undefined,
         threads,
         truncated,
+        cursor: recent.length === 25 ? recent[recent.length - 1].id : null,
       },
     }
   } catch {

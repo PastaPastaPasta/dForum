@@ -15,6 +15,9 @@ export function useLive<T>(loader: () => Promise<T>, key?: unknown): { live: T |
 
   useEffect(() => {
     let cancelled = false
+    // Drop stale content when the target changes — the snapshot fill stays
+    // honest meanwhile instead of showing the previous target's data.
+    setLive(null)
     setLoading(true)
     setError(false)
     // Defer the platform fetch until the browser is idle — every anonymous

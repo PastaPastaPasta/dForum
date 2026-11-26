@@ -7,7 +7,7 @@
 export const MODERATOR_FIELDS: Record<string, readonly string[]> = {
   thread: ['sticky', 'lockedAt', 'modState', 'modNote'],
   post: ['modState', 'modNote'],
-  profile: ['customTitle', 'modState', 'modNote'],
+  profile: ['customTitle', 'modState'],
   report: ['status', 'resolution'],
 }
 

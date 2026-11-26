@@ -127,6 +127,10 @@ Every message is a `post` including the opening post. The opening post of a thre
 
 documentsCountable: thread, post, reaction, profile.
 
+- Reactions are NOT moderated — they carry no moderation fields, no indexes beyond byPostKind/byRecipient/byThreadOwner, and no deletion of related content. A reaction to a hidden post still counts publicly.
+- `byRecipient` / `byThreadOwner` / `byUpdated` / `moderated` (thread+post) are registered but unused by this app (documented in the pending-at-next-registration list). Do not query over them in bulk.
+- `byForumSticky` is moderated-only by design: no sticky index exists in the `none` contract (there is no sticky property).
+
 ## Moderation semantics (settled 2026-11-26)
 - `modState` non-null = hidden (console writes 1; every renderer — client, snapshot, sitemap — treats any non-null modState as hidden: body suppressed, listing suppressed, snapshot-excluded). `banned` never appears on profiles; bans live in the ban list.
 - Moderator changeFields on a thread/post bumps `$revision` but NOT `$updatedAt` — display edited badges from `$updatedAt > $createdAt`.

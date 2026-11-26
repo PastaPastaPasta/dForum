@@ -70,7 +70,10 @@ export function openingPostFromPosts<T extends { createdAt: number; id: string; 
 }
 
 /** The opening post of a thread (see the orphan rule) — located via the
- * post.byAuthor index — or null when the thread has no owner-owned post. */
+ * post.byAuthor index, paginating so neither pre-opening spam nor a long
+ * thread's early pages hide it. Returns null when the thread has no
+ * owner-owned post. Fails open on any read error (the static index is the
+ * guarded path). */
 export async function earliestOwnerPost(
   threadId: string,
   ownerId: string,
@@ -79,19 +82,32 @@ export async function earliestOwnerPost(
   if (!ownerId) return null
   const where: [string, string, unknown][] = [['$ownerId', '==', ownerId]]
   if (threadCreatedAt != null) where.push(['$createdAt', '>=', threadCreatedAt])
-  const posts = await query('post', {
-    where,
-    orderBy: [['$createdAt', 'asc']],
-    limit: 25,
-  })
-  const mine = posts.filter((p) => p.properties?.threadId === threadId)
-  const opening = openingPostFromPosts(mine, ownerId)
-  if (!opening) return null
-  return {
-    id: opening.id,
-    createdAt: opening.createdAt,
-    modState: (opening.properties?.modState as number | null) ?? null,
+  let after: string | undefined
+  // Bounded: 12 pages of 25 posts = the first 300 owner posts. An author
+  // who has anything really pathological past that point is outside the
+  // practical range for a forum index; movement past 12 pages still fails
+  // closed on the snapshot side (which throws) and open on the live side.
+  for (let page = 0; page < 12; page++) {
+    const posts = await query('post', {
+      where,
+      orderBy: [['$createdAt', 'asc']],
+      limit: 25,
+      ...(after ? { startAfter: after } : {}),
+    })
+    if (posts.length === 0) break
+    const mine = posts.filter((p) => p.properties?.threadId === threadId)
+    const opening = openingPostFromPosts(mine, ownerId)
+    if (opening) {
+      return {
+        id: opening.id,
+        createdAt: opening.createdAt,
+        modState: (opening.properties?.modState as number | null) ?? null,
+      }
+    }
+    if (posts.length < 25) break
+    after = posts[posts.length - 1].id
   }
+  return null
 }
 
 export async function hasOpeningPost(thread: Listable): Promise<boolean> {

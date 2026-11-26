@@ -15,6 +15,7 @@ import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle } from 'l
 import { useYapprKeyExchangeLogin, useYapprKeyRegistration } from 'platform-auth'
 import { useSession } from '@/lib/session'
 import { formatTime } from '@/lib/utils'
+import { redactWif } from '@/lib/redact'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input, select, textarea, [role="button"]'
 
@@ -62,7 +63,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
       onClose?.()
     } catch (err) {
       setCompleting(false)
-      setCompleteError(err instanceof Error ? err.message : 'Signing you in failed — try again')
+      setCompleteError(redactWif(err instanceof Error ? err.message : 'Signing you in failed — try again'))
     }
   }, [completing, controller, login, registration, onClose])
 
@@ -171,7 +172,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     (login.state === 'timeout'
       ? 'Your wallet did not respond in time. Scan the QR again — or open dForum in a browser on the same device your wallet is installed on.'
       : login.state === 'error'
-        ? (login.error ?? 'Something went wrong. Try again.')
+        ? redactWif(login.error ?? 'Something went wrong. Try again.')
         : null)
 
   const stepText =
@@ -359,7 +360,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
-          Your wallet signs — dForum keeps a HIGH-level auth key for this tab only.
+          Your wallet signs — dForum holds a HIGH-level signing key for this tab only. It can post on your behalf but cannot move funds.
         </p>
       </div>
     </div>

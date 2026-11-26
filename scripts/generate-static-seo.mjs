@@ -41,7 +41,8 @@ function sitemap() {
   for (const t of snap.threads || []) {
     if (!t.id || t.modState) continue;
     const forum = t.forumId ? forumById.get(t.forumId) : null;
-    if (forum?.archived) continue;
+    if (!forum) continue; // no forum → nothing to index (same rule as llms.txt)
+    if (forum.archived) continue;
     urls.push(`${SITE_PREFIX}/t/${encodeURIComponent(t.id)}/`);
   }
   const body = urls
@@ -60,10 +61,10 @@ function robots() {
   const body = [
     'User-agent: *',
     'Allow: /',
-    'Disallow: /moderation',
-    'Disallow: /login',
-    'Disallow: /settings',
-    'Disallow: /new',
+    `Disallow: ${BASE_PATH}/moderation`,
+    `Disallow: ${BASE_PATH}/login`,
+    `Disallow: ${BASE_PATH}/settings`,
+    `Disallow: ${BASE_PATH}/new`,
     '',
     `Sitemap: ${SITE_PREFIX}/sitemap.xml`,
     '',

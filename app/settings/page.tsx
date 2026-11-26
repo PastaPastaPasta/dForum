@@ -141,9 +141,9 @@ export default function SettingsPage() {
         signature: draft.signature.trim().slice(0, LIMITS.signature),
       }
       if (profileId) {
-        // Moderator-owned fields (customTitle, modState, modNote) are never
-        // sent by the author — the contract rejects them, and document-service
-        // strips them regardless (41124 / field-ownership rules).
+        // Moderator-owned fields (customTitle, modState) are never sent by the
+        // author — the contract rejects them and document-service's
+        // buildAuthorUpdate passes the stored values through unchanged.
         const updated = await replaceDocument(
           {
             id: profileId,
@@ -222,7 +222,7 @@ export default function SettingsPage() {
                   maxLength={LIMITS.displayName}
                   aria-invalid={Boolean(fieldError?.displayName)}
                   aria-describedby={fieldError?.displayName ? 'displayName-error' : undefined}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
                   placeholder="Your display name"
                 />
                 {fieldError?.displayName ? (
@@ -239,7 +239,7 @@ export default function SettingsPage() {
                   onChange={(e) => { setDraft((d) => ({ ...d, bio: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.bio}
                   rows={4}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] p-3 text-sm focus:border-[#008CE7] w-full resize-y"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] p-3 text-sm focus:border-[#008CE7] w-full resize-y"
                   placeholder="A short bio — what you post about."
                 />
                 <CharCount count={draft.bio.length} max={LIMITS.bio} />
@@ -255,7 +255,7 @@ export default function SettingsPage() {
                   maxLength={LIMITS.website}
                   aria-invalid={Boolean(fieldError?.website)}
                   aria-describedby={fieldError?.website ? 'website-error' : 'website-hint'}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
                   placeholder="https://yoursite.com"
                 />
                 {fieldError?.website ? (
@@ -271,7 +271,7 @@ export default function SettingsPage() {
                   value={draft.signature}
                   onChange={(e) => { setDraft((d) => ({ ...d, signature: e.target.value })); setSaved(false) }}
                   maxLength={LIMITS.signature}
-                  className="mt-1.5 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
+                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] w-full"
                   placeholder="A sign-off for your posts"
                 />
                 <CharCount count={draft.signature.length} max={LIMITS.signature} />
@@ -288,8 +288,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="btn-primary px-5 py-3 font-semibold disabled:opacity-50"
-                  aria-live="polite"
+                  className="btn-primary px-5 py-3 font-semibold"
                 >
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Save className="w-4 h-4" aria-hidden="true" />}
                   {saving ? 'Saving…' : saved ? 'Saved' : 'Save profile'}

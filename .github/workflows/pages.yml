@@ -50,6 +50,8 @@ jobs:
       # snapshot.mjs); ensure the empty stub exists so a fresh clone type-checks.
       - name: Ensure snapshot stub
         run: node scripts/ensure-snapshot-stub.mjs
+      - name: Unit tests
+        run: npm test
       - name: Type check
         run: npx tsc --noEmit
       - name: Lint

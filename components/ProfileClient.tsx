@@ -9,14 +9,18 @@ import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
 import { useSession } from '@/lib/session'
 import { query, count } from '@/lib/services/document-service'
+import { useProfileNames } from '@/lib/use-profiles'
 import type { Snapshot } from '@/lib/services/snapshot-server'
 import { shortId, isModerated, safeHttpUrl } from '@/lib/utils'
 import { LiveUnavailable } from '@/components/LiveUnavailable'
+import { filterListable } from '@/lib/services/orphan'
+import { ThreadRow } from '@/components/ThreadRow'
 
 interface ProfileData {
   displayName: string
   bio: string
   website: string
+  signature: string | null
   customTitle: string | null
   createdAt: number
   modState: number | null
@@ -28,7 +32,9 @@ interface OwnedThread {
   tags: string[]
   forumSlug: string | null
   sticky: boolean
+  lockedAt: number | null
   modState: number | null
+  ownerId: string | null
   createdAt: number
 }
 
@@ -38,7 +44,6 @@ const THREAD_WINDOW = 20
 
 export default function ProfileClient({ identityId, snapshot }: { identityId: string; snapshot: Snapshot | null }) {
   const { session } = useSession()
-  const isSelf = session?.identityId === identityId
 
   const snap = snapshot
   const forumById = new Map((snap?.forums ?? []).map((f) => [f.id, f.slug ?? null]))
@@ -51,7 +56,9 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
       tags: t.tags,
       forumSlug: t.forumSlug,
       sticky: t.sticky,
+      lockedAt: t.lockedAt ?? null,
       modState: t.modState,
+      ownerId: t.ownerId ?? null,
       createdAt: t.createdAt,
     }))
 
@@ -76,7 +83,9 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
       tags: t.tags,
       forumSlug: t.forumSlug,
       sticky: t.sticky,
+      lockedAt: t.lockedAt ?? null,
       modState: t.modState,
+      ownerId: t.ownerId ?? null,
       createdAt: t.createdAt,
     })))
 
@@ -85,7 +94,19 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
       query('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: THREAD_WINDOW }),
       count('post', { where: [['$ownerId', '==', identityId]] }).catch(() => new Map<string, bigint>()),
     ])
-      .then(([profileDoc, ownedThreads, postCounts]) => {
+      .then(async ([profileDoc, ownedThreads, postCounts]) => {
+        if (cancelled) return
+        // Orphan rule — a hidden/orphan thread must never list.
+        const listed = await filterListable(
+          ownedThreads.map((t) => ({
+            id: t.id,
+            ownerId: t.ownerId || null,
+            lockedAt: (t.properties.lockedAt as number | null) ?? null,
+            createdAt: t.createdAt,
+          })),
+          4,
+        )
+        const listedIds = new Set(listed.map((t) => t.id))
         if (cancelled) return
         if (profileDoc) {
           const p = profileDoc.properties
@@ -93,6 +114,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
             displayName: (p.displayName as string) || shortId(identityId, 16),
             bio: (p.bio as string) || '',
             website: (p.website as string) || '',
+            signature: (p.signature as string) || null,
             customTitle: (p.customTitle as string | null) ?? null,
             createdAt: profileDoc.createdAt,
             modState: (p.modState as number | null) ?? null,
@@ -102,24 +124,31 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
           setProfile(null)
         }
         setThreads(
-          ownedThreads.map((t) => ({
-            id: t.id,
-            title: (t.properties.title as string) ?? '',
-            tags: Array.isArray(t.properties.tags) ? (t.properties.tags as string[]) : [],
-            forumSlug: forumById.get((t.properties.forumId as string) ?? '') ?? null,
-            sticky: Boolean(t.properties.sticky),
-            modState: (t.properties.modState as number | null) ?? null,
-            createdAt: t.createdAt,
-          })),
+          ownedThreads
+            .filter((t) => listedIds.has(t.id))
+            .map((t) => ({
+              id: t.id,
+              title: (t.properties.title as string) ?? '',
+              tags: Array.isArray(t.properties.tags) ? (t.properties.tags as string[]) : [],
+              forumSlug: forumById.get((t.properties.forumId as string) ?? '') ?? null,
+              sticky: Boolean(t.properties.sticky),
+              lockedAt: (t.properties.lockedAt as number | null) ?? null,
+              modState: (t.properties.modState as number | null) ?? null,
+              ownerId: t.ownerId ?? null,
+              createdAt: t.createdAt,
+            })),
         )
         setPostCount(Number(Array.from(postCounts.values()).reduce((a, b) => a + b, 0n)))
         setStatus('ok')
       })
       .catch(() => {
-        if (!cancelled) {
-          // Keep any snapshot-first-render data honest: mark the read stale
-          // but still show the snapshot (threads visible from the static
-          // index) instead of a hard error screen.
+        if (cancelled) return
+        // No snapshot data → surface the failure instead of "Profile not found".
+        if (snapThreads.length === 0 && !snap?.profiles?.[identityId]) {
+          setStatus('error')
+          setStaleNote(false)
+        } else {
+          // Snapshot first-render keeps its data honest: show it with a stale note.
           setStaleNote(true)
           setStatus('ok')
         }
@@ -131,9 +160,14 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
   }, [identityId])
 
   const isHidden = isModerated(modState)
+  const isSelf = session?.identityId === identityId
+  const isEmptySelf = isSelf && !profile && threads.length === 0 && postCount === 0
   const displayName = profile?.displayName || snapProfileName || (identityId ? shortId(identityId, 20) : 'Unknown')
   const visibleThreads = threads.filter((t) => !isModerated(t.modState))
   const threadsReady = status !== 'loading'
+  const authorIds = visibleThreads.map((t) => t.ownerId)
+  const profiles = useProfileNames(authorIds)
+  const nameOf = (id: string): string => snap?.profiles?.[id] ?? profiles[id] ?? shortId(id, 16)
 
   // Everything except the error state renders without waiting for the session —
   // the navbar shows signed-in state on its own.
@@ -155,9 +189,10 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
     )
   }
 
-  // A profile with no profile doc and no threads is a missing profile.
-  const isMissing = status === 'ok' && !profile && threads.length === 0
-  if (status === 'missing' || isMissing) {
+  // A profile with no profile doc, no threads and no posts is a missing
+  // identity — anything else renders (an empty profile is not "not found").
+  const isMissing = status === 'ok' && !profile && threads.length === 0 && postCount === 0
+  if ((status === 'missing' || isMissing) && !isSelf) {
     return (
       <>
         <Navbar />
@@ -184,7 +219,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{isHidden ? 'Hidden profile' : displayName}</h1>
-                  {isHidden && <span className="text-[10px] uppercase tracking-wider text-amber-400 border border-amber-400/40 rounded px-2 py-0.5">hidden</span>}
+                  {isHidden && <span className="text-[11px] uppercase tracking-wider text-amber-400 border border-amber-400/40 rounded px-2 py-0.5">hidden</span>}
                   {isSelf && (
                     <Link href="/settings" className="ml-1 inline-flex items-center gap-1.5 rounded-lg border border-[#22304e] px-3 py-1.5 text-xs text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition">
                       <Pencil className="w-3.5 h-3.5" /> Edit profile
@@ -206,6 +241,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                         {profile?.website}
                       </a>
                     )}
+                    {profile?.signature && <p className="mt-3 text-xs text-[#93a1bd] italic max-w-xl">{profile.signature}</p>}
                   </>
                 )}
                 <div className="mt-4 flex gap-4 text-sm text-[#93a1bd]">
@@ -216,8 +252,8 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                     </>
                   ) : (
                     <>
-                      <span>{visibleThreads.length} thread{visibleThreads.length === 1 ? '' : 's'}{threads.length >= THREAD_WINDOW ? ` (showing latest ${THREAD_WINDOW})` : ''}</span>
-                      <span>{postCount} post{postCount === 1 ? '' : 's'}</span>
+                      <span>{staleNote ? '—' : `${visibleThreads.length} thread${visibleThreads.length === 1 ? '' : 's'}`}{!staleNote && threads.length >= THREAD_WINDOW ? ` (showing latest ${THREAD_WINDOW})` : ''}</span>
+                      <span>{staleNote ? '—' : `${postCount} post${postCount === 1 ? '' : 's'}`}</span>
                     </>
                   )}
                 </div>
@@ -230,6 +266,16 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
           <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-4">
             <LiveUnavailable />
           </div>
+        )}
+
+        {isEmptySelf && (
+          <section className="max-w-3xl mx-auto px-4 sm:px-6 pt-6">
+            <div className="rounded-xl border border-dashed border-[#22304e] bg-[#111a2e] p-6 text-center">
+              <UserPlus className="w-6 h-6 text-[#93a1bd] mx-auto" aria-hidden="true" />
+              <p className="mt-2 text-[#93a1bd]">You haven&apos;t set up a profile yet.</p>
+              <Link href="/settings" className="mt-3 inline-flex items-center gap-2 btn-primary px-4 py-2 text-sm font-medium">Set up your profile</Link>
+            </div>
+          </section>
         )}
 
         {isHidden ? (
@@ -252,23 +298,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
               </div>
             ) : (
               visibleThreads.map((t) => (
-                <Link
-                  key={t.id}
-                  href={`/t/${encodeURIComponent(t.id)}`}
-                  className="flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#111a2e] px-4 py-3 hover:border-[#008CE7] transition fade-up"
-                >
-                  <MessageSquare className="w-4 h-4 text-[#4db3ff] shrink-0" aria-hidden="true" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {t.sticky && <span className="text-[10px] uppercase tracking-wider text-[#4db3ff] border border-[#4db3ff]/40 rounded px-1.5 py-0.5">pinned</span>}
-                      <p className="font-medium truncate">{t.title}</p>
-                    </div>
-                    <p className="text-xs text-[#93a1bd] mt-0.5 truncate">
-                      {t.forumSlug ?? 'dForum'} · <RelativeTime time={t.createdAt} />
-                      {t.tags.length ? ` · ${t.tags.slice(0, 3).map((s) => `#${s}`).join(' ')}` : ''}
-                    </p>
-                  </div>
-                </Link>
+                <ThreadRow key={t.id} thread={{ ...t, forumSlug: t.forumSlug ?? null }} nameOf={nameOf} />
               ))
             )}
           </div>

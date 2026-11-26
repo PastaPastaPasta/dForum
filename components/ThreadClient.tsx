@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { MessageSquare, Send, Lock, AlertTriangle, Loader2 } from 'lucide-react'
+import { MessageSquare, Send, Lock, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
@@ -22,6 +22,7 @@ interface LiveThread {
   title: string
   forumId: string
   forumSlug: string | null
+  forumTitle: string | null
   tags: string[]
   sticky: boolean
   lockedAt: number | null
@@ -60,12 +61,36 @@ export default function ThreadClient({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [createdPosts, setCreatedPosts] = useState<LivePost[]>([])
+  const [morePosts, setMorePosts] = useState<LivePost[]>([])
+  const [moreCursor, setMoreCursor] = useState<string | null>(null)
+  const [moreLoading, setMoreLoading] = useState(false)
+  const [moreError, setMoreError] = useState(false)
 
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
+  // Reset the paging state when the thread changes.
+  useEffect(() => {
+    setMorePosts([])
+    setMoreCursor(null)
+    setMoreError(false)
+    setMoreLoading(false)
+  }, [threadId])
+
+  // Arm the load-more cursor once the live window comes back.
+  useEffect(() => {
+    if (live?.status !== 'ok') { setMoreCursor(null); return }
+    if (!live.truncated) { setMoreCursor(null); return }
+    const last = live.posts[live.posts.length - 1]
+    setMoreCursor(last ? last.id : null)
+  }, [live])
+
   const isLiveOk = live?.status === 'ok'
   const thread: LiveThread | null = isLiveOk
-    ? { ...live!.thread, forumSlug: live!.thread.forumSlug ?? snapshotThread?.forumSlug ?? null }
+    ? {
+        ...live!.thread,
+        forumSlug: live!.thread.forumSlug ?? snapshotThread?.forumSlug ?? null,
+        forumTitle: live!.thread.forumTitle ?? snapshotThread?.forumSlug ?? null,
+      }
     : snapshotThread
       ? snapshotThreadToLive(snapshotThread)
       : null
@@ -79,9 +104,10 @@ export default function ThreadClient({
   // Static posts ship in the HTML and stay visible while the live fill runs —
   // the prerender and first view must show the thread.
   const staticPosts: LivePost[] = !isLiveOk ? initialPosts.map(staticToLive) : []
-  const seen = new Set([...livePosts, ...staticPosts].map((p) => p.id))
+  const basePosts = isLiveOk ? [...livePosts, ...morePosts] : staticPosts
+  const seen = new Set([...basePosts].map((p) => p.id))
   const created = createdPosts.filter((p) => !seen.has(p.id))
-  const posts: LivePost[] = [...(isLiveOk ? livePosts : staticPosts), ...created]
+  const posts: LivePost[] = [...basePosts, ...created]
 
   // The orphan rule — the opening post is the earliest owner post, regardless
   // of its moderation state. A hidden opening post means the thread is hidden;
@@ -105,8 +131,42 @@ export default function ThreadClient({
   const profiles = useProfileNames(authorIds)
   const profileName = (id: string): string => profiles[id] ?? shortId(id, 12)
 
+  async function loadMore() {
+    if (moreLoading || !moreCursor) return
+    setMoreLoading(true)
+    setMoreError(false)
+    try {
+      const docs = await query('post', {
+        where: [['threadId', '==', threadId]],
+        orderBy: [['$createdAt', 'asc']],
+        limit: POST_LIMIT,
+        startAfter: moreCursor,
+      })
+      const last = docs[docs.length - 1] ?? null
+      const mapped = docs.map((p) => ({
+        id: p.id,
+        body: (p.properties.body as string) ?? '',
+        authorId: p.ownerId || '',
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        modState: (p.properties.modState as number | null) ?? null,
+        replyToId: (p.properties.replyToId as string | null) ?? null,
+      }))
+      setMorePosts((prev) => [...prev, ...mapped.filter((m) => !prev.some((x) => x.id === m.id))])
+      setMoreCursor(docs.length === POST_LIMIT && last ? last.id : null)
+    } catch {
+      setMoreError(true)
+    } finally {
+      setMoreLoading(false)
+    }
+  }
+
   async function handlePost() {
-    if (!session || !thread || !replyBody.trim()) return
+    if (!session || !thread) return
+    if (!replyBody.trim()) {
+      setPostError('Write something first — a reply needs text.')
+      return
+    }
     if (!session.authKeyWif) {
       setPostError('Your session has no signable key. Try logging in again.')
       return
@@ -208,13 +268,23 @@ export default function ThreadClient({
       <main id="main" tabIndex={-1} className="flex-1">
         <article className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
           <Link href={thread?.forumSlug ? `/f/${encodeURIComponent(thread.forumSlug)}` : '/'} className="text-sm text-[#93a1bd] hover:text-white transition">
-            ← {thread?.forumSlug ?? 'dForum'}
+            ← {thread?.forumTitle ?? thread?.forumSlug ?? 'dForum'}
           </Link>
           {hidden ? (
             <div className="mt-6 rounded-xl border border-amber-400/40 bg-amber-400/10 p-6 text-center">
-              <p className="text-sm uppercase tracking-widest text-amber-400">Hidden by a moderator</p>
-              <h1 className="mt-2 text-2xl font-bold">This thread is hidden</h1>
-              <p className="mt-2 text-sm text-amber-400/80">This thread was hidden by a moderator. Its contents are not rendered.</p>
+              {openingKnown && opening === null ? (
+                <>
+                  <p className="text-sm uppercase tracking-widest text-amber-400">Unavailable</p>
+                  <h1 className="mt-2 text-2xl font-bold">This thread no longer exists</h1>
+                  <p className="mt-2 text-sm text-amber-400/80">Its opening post is gone — the thread is no longer listed.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm uppercase tracking-widest text-amber-400">Hidden by a moderator</p>
+                  <h1 className="mt-2 text-2xl font-bold">This thread is hidden</h1>
+                  <p className="mt-2 text-sm text-amber-400/80">This thread was hidden by a moderator. Its contents are not rendered.</p>
+                </>
+              )}
             </div>
           ) : (
             <>
@@ -237,10 +307,13 @@ export default function ThreadClient({
                   <PostCard key={p.id || p.body.slice(0, 32)} post={p} mine={session?.identityId} nameOf={profileName} />
                 ))}
                 {visiblePosts.length === 0 && liveLoading && (
-                  <div className="space-y-3" aria-hidden="true">
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className="h-20 rounded-xl border border-[#22304e] bg-[#111a2e] animate-pulse" />
-                    ))}
+                  <div className="space-y-3">
+                    <span className="sr-only" role="status">Loading posts…</span>
+                    <div aria-hidden="true" className="space-y-3">
+                      {[0, 1, 2].map((i) => (
+                        <div key={i} className="h-20 rounded-xl border border-[#22304e] bg-[#111a2e] animate-pulse" />
+                      ))}
+                    </div>
                   </div>
                 )}
                 {visiblePosts.length === 0 && !liveLoading && (
@@ -249,7 +322,24 @@ export default function ThreadClient({
                   </p>
                 )}
                 {truncated && (
-                  <p className="text-xs text-[#93a1bd]">Showing the first {POST_LIMIT} posts of this thread.</p>
+                  <p className="text-xs text-[#93a1bd]">Showing the first {POST_LIMIT + morePosts.length} posts of this thread.</p>
+                )}
+                {isLiveOk && moreCursor && (
+                  <div className="mt-2">
+                    {moreError && (
+                      <p className="text-sm text-red-400">Couldn&apos;t load more posts. <button onClick={() => loadMore()} className="text-[#4db3ff] hover:underline">Retry</button></p>
+                    )}
+                    {!moreError && (
+                      <button
+                        onClick={() => loadMore()}
+                        disabled={moreLoading}
+                        className="btn-secondary inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                      >
+                        {moreLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
+                        {moreLoading ? 'Loading…' : 'Load more posts'}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -271,14 +361,14 @@ export default function ThreadClient({
                       className="mt-2 w-full rounded-lg border border-input bg-[#0b1220] p-3 text-sm placeholder:text-[#93a1bd] resize-y"
                     />
                     <div className="mt-1 flex items-center justify-between text-xs text-[#93a1bd]">
-                      <span aria-live="polite">{postError ? <span className="text-red-400">{postError}</span> : ''}</span>
+                      <span role="status" className="min-h-[1rem]">{postError ? <span className="text-red-400">{postError}</span> : ''}</span>
                       <span>{new TextEncoder().encode(replyBody).length}/{LIMITS.bodyMaxBytes} bytes</span>
                     </div>
                     <div className="mt-2 flex justify-end">
                       <button
                         onClick={handlePost}
-                        disabled={posting || !replyBody.trim()}
-                        className="btn-primary inline-flex items-center gap-2 px-4 py-2 font-medium"
+                        aria-disabled={posting || !replyBody.trim()}
+                        className="btn-primary inline-flex items-center gap-2 px-4 py-2 font-medium aria-disabled:opacity-50 aria-disabled:cursor-not-allowed"
                       >
                         {posting ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
                         {posting ? 'Posting…' : 'Post reply'}
@@ -305,6 +395,7 @@ export default function ThreadClient({
       title: t.title,
       forumId: t.forumId ?? '',
       forumSlug: t.forumSlug,
+      forumTitle: t.forumSlug,
       tags: t.tags,
       sticky: t.sticky,
       lockedAt: t.lockedAt,
@@ -346,7 +437,7 @@ function PostCard({ post, mine, nameOf }: { post: LivePost; mine?: string | null
             {edited && ' · edited'}
           </p>
         </div>
-        {isAuthor && <span className="text-[10px] uppercase tracking-wider text-[#4db3ff] border border-[#4db3ff]/40 rounded px-2 py-0.5">you</span>}
+        {isAuthor && <span className="text-[11px] uppercase tracking-wider text-[#4db3ff] border border-[#4db3ff]/40 rounded px-2 py-0.5">you</span>}
       </div>
       {hidden ? (
         <div className="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-amber-400">
@@ -364,9 +455,11 @@ async function loadThread(id: string): Promise<LoadResult> {
     const thread = await get('thread', id)
     if (!thread) return { status: 'missing' }
     const ownerId = thread.ownerId ?? null
-    const [posts, opening] = await Promise.all([
+    const forumId = (thread.properties.forumId as string) ?? ''
+    const [posts, opening, forumDoc] = await Promise.all([
       query('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: POST_LIMIT + 1 }),
       ownerId ? earliestOwnerPost(thread.id, ownerId, thread.createdAt) : Promise.resolve(null),
+      forumId ? get('forum', forumId).catch(() => null) : Promise.resolve(null),
     ])
     const truncated = posts.length > POST_LIMIT
     const visiblePosts = posts.slice(0, POST_LIMIT)
@@ -375,8 +468,9 @@ async function loadThread(id: string): Promise<LoadResult> {
       thread: {
         id: thread.id,
         title: (thread.properties.title as string) ?? '',
-        forumId: (thread.properties.forumId as string) ?? '',
+        forumId,
         forumSlug: null,
+        forumTitle: (forumDoc?.properties.title as string) ?? null,
         tags: Array.isArray(thread.properties.tags) ? (thread.properties.tags as string[]) : [],
         sticky: Boolean(thread.properties.sticky),
         lockedAt: (thread.properties.lockedAt as number | null) ?? null,

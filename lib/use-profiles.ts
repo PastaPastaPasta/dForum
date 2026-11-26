@@ -38,12 +38,15 @@ export function useProfileNames(ids: (string | null | undefined)[]): Record<stri
         cache.set(id, resolved)
         return [id, resolved] as const
       } catch {
-        // Not cached — a transient failure must not freeze the fallback forever.
-        return [id, shortId(id, 12)] as const
+        // Not cached and not merged — the caller's own id-slice fallback
+        // renders meanwhile; a later ids-change re-runs the effect.
+        return null
       }
     })).then((entries) => {
       if (cancelled) return
-      setNames((prev) => ({ ...prev, ...Object.fromEntries(entries) }))
+      const concrete = entries.filter((e): e is [string, string] => e != null)
+      if (concrete.length === 0) return
+      setNames((prev) => ({ ...prev, ...Object.fromEntries(concrete) }))
     })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps

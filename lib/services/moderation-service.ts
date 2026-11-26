@@ -25,8 +25,13 @@ export async function prepareModerator(identityId: string, criticalWif: string):
   const identity = await sdk.identities.fetch(identityId)
   if (!identity) throw new Error('Moderator identity not found on the chain')
   const signer = new IdentitySigner()
-  signer.addKeyFromWif(criticalWif)
-  return { identityId, signer, wasmIdentity: identity }
+  try {
+    signer.addKeyFromWif(criticalWif)
+    return { identityId, signer, wasmIdentity: identity }
+  } catch (e) {
+    try { signer.free() } catch { /* already freed */ }
+    throw e
+  }
 }
 
 /** Validate a CRITICAL key against the identity: must exist, type ECDSA_SECP256K1, purpose AUTHENTICATION, level CRITICAL. */
