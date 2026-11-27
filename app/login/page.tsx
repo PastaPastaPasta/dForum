@@ -28,7 +28,11 @@ export default function LoginPage() {
     setNextPath(safeNextPath(params.get('next'), window.location.origin))
   }, [])
 
-  const canonical = hostIsCanonical(host)
+  // The login flow holds key material — it only runs where the session
+  // machinery is even available (the canonical host), not merely where the
+  // host string happens to match. On the Pages shell there is no login at
+  // all, so the canonical check folds the availability gate in.
+  const canonical = LOGIN_AVAILABLE && hostIsCanonical(host)
 
   const openModal = useCallback(() => {
     modalOpenedRef.current = true
