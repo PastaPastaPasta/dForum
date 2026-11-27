@@ -17,7 +17,7 @@ Scope is the forum product surface, not the Dash Core protocol. Honest gaps are 
 | Statuses | sticky/pinned, locked, hidden (moderation), orphan drop, pagination ("Load more") |
 | Moderation | team/none/network modes, native protocol 14 moderation, console at `/moderation` |
 | SEO/AI indexing | hourly static rebuild (sitemap/robots/llms/manifest), SPA fallback for fresh content |
-| Deployment | GH Pages with custom-domain wiring (`forum.dashhq.org` CNAME pending pasta's Cloudflare step) |
+| Deployment | GH Pages (read-only index — no sign-in/posting/moderation on the Pages deploy; those live on the canonical host) with custom-domain wiring (`forum.dashhq.org` CNAME pending pasta's Cloudflare step) |
 
 ## Deliberately out of scope (v1)
 
@@ -34,6 +34,7 @@ Scope is the forum product surface, not the Dash Core protocol. Honest gaps are 
 ## Honest caveats
 
 - Deployment to `forum.dashhq.org` is blocked on pasta's Cloudflare CNAME (NXDOMAIN today); the GH Pages subdomain serves the testnet build (footer honestly labels "Testnet build").
+- The GH Pages deploy is a read-only SEO/AI indexing surface: sign-in, posting and moderation live on the canonical host (`forum.dashhq.org`, DNS pending); the Pages subdomain serves the read-only index (live-fills from the platform after first paint). The login/post/moderate coverage above is the product surface on the canonical host, not the Pages deploy.
 - The contract is a testnet deployment (`contracts/deployments/testnet.json`, `ozZN…ADM16`). A mainnet contract is unregistered by design at this stage — first production deploy needs the deployer CRITICAL key + credits, and the DNS + workflow cutover (BASE_PATH removal, SITE_URL switch) is pasta-side.
 - App Connect keys are identity-level, not contract-bound — documented in the README security notes; the mitigations (host gate, sessionStorage, offline CRITICAL key) are the answer until the protocol grows contract-bound keys.
 

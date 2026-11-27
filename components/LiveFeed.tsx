@@ -28,23 +28,34 @@ export function useLive<T>(loader: () => Promise<T>, key?: unknown): { live: T |
     const ric = typeof window !== 'undefined' && 'requestIdleCallback' in window
       ? (cb: () => void) => window.requestIdleCallback(cb, { timeout: 4000 })
       : (cb: () => void) => setTimeout(cb, 200)
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     const handle = ric(() => {
-      loader()
-        .then((value) => {
-          if (!cancelled) {
+      // One bounded silent retry: the live fill races public DAPI nodes, and a
+      // single failed attempt is usually a transient hiccup, not an outage.
+      // Only a second consecutive failure surfaces the banner.
+      const attempt = (n: number) => {
+        loader().then(
+          (value) => {
+            if (cancelled) return
             setLive(value)
             setLoading(false)
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
+          },
+          () => {
+            if (cancelled) return
+            if (n < 2) {
+              retryTimer = setTimeout(() => attempt(n + 1), 1500)
+              return
+            }
             setError(true)
             setLoading(false)
-          }
-        })
+          },
+        )
+      }
+      attempt(1)
     })
     return () => {
       cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
       if (typeof handle === 'number') {
         if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) window.cancelIdleCallback(handle)
         else clearTimeout(handle)

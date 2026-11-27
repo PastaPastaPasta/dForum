@@ -17,10 +17,10 @@ Native Dash Platform contract moderation (protocol 14), per contract. Deployer p
 
 ## What moderation can do (team mode)
 
-- ban/unban (banlist) — content from banned identities stops being written to the contract.
+- ban/unban (banlist) — content from banned identities stops being written to the contract (the banlist stops new writes; it is NOT enforced in the render path — `hideBannedContent` is declared in the contract but is INERT in this build: the app never reads it, and the SDK cannot read the banlist (`sdk.contracts.moderationEntries` throws a WASM binding error in the pinned 5.1.0-rc.1 build), so neither the client nor the snapshot can honor it today — pending an SDK fix. Do not expect banned content to be hidden from the site).
 - suspend/unsuspend (suspensions) — until a block time.
 - warn/clearWarnings (warnings).
-- delete a document (thread/post/profile) — removal record kept, optionally restorable; `deleteKeepsFields` [forumId] (thread), [threadId, forumId] (post).
+- delete a document (thread/post/profile) — the removal record is kept on-chain (no contents; restore is possible via the SDK/chain within a week, but the app offers no restore action yet — the console honestly warns that deletions cannot be undone); `deleteKeepsFields` [forumId] (thread), [threadId, forumId] (post).
 - change fields (changeFields): `sticky`, `lockedAt`, `modState`, `modNote` (thread); `modState`, `modNote` (post); `status`, `resolution` (report); `customTitle`, `modState` (profile).
 - Moderator-only fields are never set by the author (create refuses: 41124) and never listed in a unique index, nor referenced by another property.
 
@@ -32,7 +32,7 @@ Moderation transitions need a CRITICAL authentication key. The App Connect sessi
 
 - Hidden content (modState non-null = 1=hidden): snapshot drops the document entirely (not listed, not prerendered); the client suppresses bodies and listings and badges it "hidden". Console writes 1 for hide; any non-null value is treated as hidden everywhere. Note: an owner can hide nothing about a post except by deleting it — hidden posts render as a placeholder in threads.
 - `banned` is never written on profiles — bans live in the ban list (moderation config), not in profile modState.
-- Deleted docs: removal record kept (restore within a week); stores just threadId/forumId.
+- Deleted docs: the removal record is kept on-chain (restore is possible via the SDK/chain within a week, but the app offers no restore action yet); stores just threadId/forumId.
 - Locked threads (lockedAt set): clients ignore posts with $createdAt > lockedAt; the snapshot drops those posts from the static index and the thread is listed too (URL still renders live). The network never enforces the lock (S3).
 - Reports are public on-chain, reporter included (UI says so).
 - Moderation semantics (settled 2026-11-26): every render path (client, snapshot, sitemap) treats a non-null modState as hidden. Snapshot exclusion happens at both thread and post level; orphan-filtered threads are also excluded from the static index.

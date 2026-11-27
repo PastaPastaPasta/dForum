@@ -11,6 +11,7 @@ import { filterListable } from '@/lib/services/orphan'
 import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
 import { useSession } from '@/lib/session'
 import { useLive } from '@/components/LiveFeed'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 import { useProfileNames } from '@/lib/use-profiles'
 import { isModerated } from '@/lib/utils'
 import { ThreadRow } from '@/components/ThreadRow'
@@ -53,7 +54,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   const { session } = useSession()
   const forum = snap?.forums.find((f) => f.slug === slug) ?? null
 
-  const { live, loading: liveLoading } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
+  const { live, loading: liveLoading, retry } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
   const [moreThreads, setMoreThreads] = useState<LiveThread[]>([])
   const [moreCursor, setMoreCursor] = useState<string | null>(null)
   const [moreLoading, setMoreLoading] = useState(false)
@@ -111,7 +112,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   const authorIds = listed.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
   const snapProfiles = snapshot?.profiles ?? {}
-  const nameOf = (id: string): string => snapProfiles[id] ?? profiles[id] ?? id.slice(0, 12)
+  const nameOf = (id: string): string => profiles[id] ?? snapProfiles[id] ?? id.slice(0, 12)
 
   // Live results are already orphan-filtered (see loadLiveForum); the
   // snapshot fallback is orphan-filtered by the snapshot itself.
@@ -166,10 +167,16 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             </div>
             <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">{forumTitle}</h1>
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
-            {showStaleNote && <LiveUnavailable className="mt-4" />}
+            {showStaleNote && <LiveUnavailable className="mt-4" onRetry={retry} />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
               <span>{listed.length}{moreCursor != null ? '+' : ''} thread{listed.length === 1 ? '' : 's'}</span>
-              {!session && <Link href="/login" className="text-[#4db3ff] hover:underline">Login to post</Link>}
+              {!session && (
+                LOGIN_AVAILABLE ? (
+                  <Link href="/login" className="text-[#4db3ff] hover:underline">Login to post</Link>
+                ) : (
+                  <span className="text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</span>
+                )
+              )}
             </div>
           </div>
         </section>
@@ -185,7 +192,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
           ) : (
             <div className="space-y-3">
               {listed.map((t) => (
-                <ThreadRow key={t.id} thread={{ ...t, forumSlug: forum?.slug ?? slug }} nameOf={nameOf} />
+                <ThreadRow key={t.id} thread={{ ...t, forumSlug: forum?.slug ?? slug }} nameOf={nameOf} forumTitle={forum?.title ?? (live?.status === 'ok' ? live.forum.title : null) ?? null} />
               ))}
             </div>
           )}
@@ -196,7 +203,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
                 <button
                   onClick={() => loadMore()}
                   disabled={moreLoading}
-                  className="btn-secondary inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                  className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-50"
                 >
                   {moreLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
                   {moreLoading ? 'Loading…' : 'Load older threads'}
@@ -220,8 +227,10 @@ function EmptyForum({ forum, slug, session }: { forum: { id: string } | null; sl
         <Link href={`/new?forum=${encodeURIComponent(forum?.id ?? slug)}`} className="mt-3 btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-medium">
           <Pencil className="w-4 h-4" aria-hidden="true" /> Start the first one
         </Link>
-      ) : (
+      ) : LOGIN_AVAILABLE ? (
         <Link href="/login" className="mt-3 inline-flex items-center gap-2 text-sm text-[#4db3ff] hover:underline">Login to start the first one</Link>
+      ) : (
+        <span className="mt-3 block text-sm text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</span>
       )}
     </div>
   )
@@ -265,8 +274,8 @@ async function loadLiveForum(slug: string): Promise<LoadResult> {
     } catch {
       stickyQueryable = false
     }
-    const [recent, pinned] = await Promise.all([
-      query('thread', {
+    const [{ docs: recent, rawCount, lastId }, pinned] = await Promise.all([
+      queryRaw('thread', {
         where: [['forumId', '==', fdoc.id]],
         orderBy: [['$createdAt', 'desc']],
         limit: 25,
@@ -294,7 +303,7 @@ async function loadLiveForum(slug: string): Promise<LoadResult> {
         title: (fdoc.properties.title as string) ?? undefined,
         description: (fdoc.properties.description as string) ?? undefined,
         threads,
-        cursor: recent.length === 25 ? recent[recent.length - 1].id : null,
+        cursor: rawCount === 25 && lastId ? lastId : null,
       },
     }
   } catch {

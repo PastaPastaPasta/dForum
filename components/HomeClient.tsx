@@ -7,7 +7,7 @@ import { Footer } from '@/components/Footer'
 import { LOGIN_AVAILABLE } from '@/lib/host'
 import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
 import { useSession } from '@/lib/session'
-import { query, queryRaw, get } from '@/lib/services/document-service'
+import { queryRaw, get, type DocRef } from '@/lib/services/document-service'
 import { earliestOwnerPost } from '@/lib/services/orphan'
 import { useLive } from '@/components/LiveFeed'
 import { useProfileNames } from '@/lib/use-profiles'
@@ -210,11 +210,32 @@ const HOME_TARGET = 12
 const HOME_HARD_CAP = 60
 const HOME_LIMIT = 25
 
+/** Page a whole index until it runs dry — a hard page cap with a warn, not a
+ * silent drop, so a >2000-item index shows what it can and says so. */
+async function fetchAll(type: 'forum' | 'category', orderBy?: [string, 'asc' | 'desc'][]) {
+  const out: Array<DocRef> = []
+  let after: string | null = null
+  for (let page = 0; page < 20; page++) {
+    const { docs, rawCount, lastId } = await queryRaw(type, {
+      orderBy: orderBy as never,
+      limit: 50,
+      ...(after ? { startAfter: after } : {}),
+    })
+    out.push(...docs)
+    if (rawCount < 50 || lastId == null) return out
+    after = lastId
+  }
+  console.warn(`loadLive: ${type} pagination hit the safety cap — the tile list is a partial view`)
+  return out
+}
+
 async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
   const snap = snapshot
   const forumById = new Map(snap.forums.map((f) => [f.id, f.slug ?? null]))
-  const forumDocs = await query('forum', { limit: 50 })
-  const categoryDocs = await query('category', { limit: 50 })
+  const [forumDocs, categoryDocs] = await Promise.all([
+    fetchAll('forum'),
+    fetchAll('category', [['sort', 'asc']]),
+  ])
   // Paginate through the thread index until HOME_TARGET listable threads are
   // found or the page budget is exhausted — so orphan spam cannot push real
   // threads out of the window.

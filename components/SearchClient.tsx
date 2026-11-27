@@ -159,11 +159,11 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
     }, 150)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [matched])
-  const results = orphanFiltered ?? matched.slice(0, MAX_LIST)
+  const results = orphanFiltered ?? matched.filter((t) => orphanCache.get(t.id) !== false).slice(0, MAX_LIST)
 
   const authorIds = results.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
-  const nameOf = (id: string): string => snap.profiles[id] ?? profiles[id] ?? shortId(id, 12)
+  const nameOf = (id: string): string => profiles[id] ?? snap.profiles[id] ?? shortId(id, 12)
 
   return (
     <>
@@ -181,7 +181,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search by title, tag, or forum…"
-                className="w-full rounded-xl border border-input bg-[#111a2e] pl-10 pr-20 py-3 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7]"
+                className="w-full rounded-xl border border-input bg-[#111a2e] pl-10 pr-20 py-3 text-base sm:text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7]"
               />
               {loading && (
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 text-xs text-[#93a1bd]" aria-hidden="true">
@@ -197,7 +197,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
           {results.length === 0 ? (
             <div className="rounded-xl border border-dashed border-[#22304e] p-8 text-center fade-up">
               {failed ? (
-                <p className="text-[#93a1bd]">Couldn&apos;t load threads — the snapshot above is still shown.</p>
+                <p className="text-[#93a1bd]">No threads to show right now.</p>
               ) : allThreads.length === 0 ? (
                 <p className="text-[#93a1bd]">No threads yet — be the first to start one.</p>
               ) : q.trim() ? (
@@ -214,7 +214,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
             </div>
           )}
           <p className="mt-3 text-xs text-[#93a1bd]" role="status">
-            {failed ? "Couldn't load threads — the snapshot above is still shown." : loading ? `${results.length} ${results.length === 1 ? 'thread' : 'threads'} · refreshing…` : `${results.length} ${results.length === 1 ? 'thread' : 'threads'}`}
+            {failed ? 'Live read failed — showing the snapshot.' : loading ? `${results.length} ${results.length === 1 ? 'thread' : 'threads'} · refreshing…` : `${results.length} ${results.length === 1 ? 'thread' : 'threads'}`}
           </p>
         </section>
       </main>

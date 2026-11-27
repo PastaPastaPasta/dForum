@@ -6,6 +6,8 @@ Baseline / parity target: dash.org/forum (XenForo-style: categories → forums �
 
 **Live site**: https://pastapastapasta.github.io/dForum/ (subdomain — the `forum.dashhq.org` custom domain is wired into the build but its DNS is not added yet; deploy remains blocked until the CNAME exists).
 
+> **Live-index posture (read-only).** The GitHub Pages build (`BASE_PATH=/dForum`) is a read-only SEO/AI indexing surface of the live forum — no sign-in, no posting, no moderation. It live-fills from the platform after first paint (the evo-sdk lazy-loads on the first live query; the live fill never depends on the snapshot beyond first paint). Login, posting and moderation live on the canonical host, `forum.dashhq.org` (DNS pending).
+
 ## Architecture
 
 Next.js 14 static export (TypeScript + Tailwind, react 18) with the Dash Platform as the single source of truth.
@@ -55,7 +57,7 @@ Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + disp
 ## Local dev
 
 - GitHub Pages subdomain: `https://pastapastapasta.github.io/dForum/`
-- The site is fully readable signed-out (home, forums, threads, profiles, search) — the snapshot is public-readable and live content renders from it plus the platform. Login is only needed to create threads, post replies, and moderate.
+- The site is fully readable signed-out (home, forums, threads, profiles, search) — the snapshot is public-readable and live content renders from it plus the platform. Sign-in, posting and moderation are NOT available on the Pages deploy — they live on the canonical host (`forum.dashhq.org`, DNS pending).
 - The moderation console requires a CRITICAL key for a contract moderator identity; without it the console renders but actions disable.
 
 ## Security notes

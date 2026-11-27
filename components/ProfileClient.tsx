@@ -237,11 +237,11 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
   const isSelf = session?.identityId === identityId
   const isEmptySelf = isSelf && status === 'ok' && !staleNote && !profile && threads.length === 0 && postCount === 0
   const displayName = profile?.displayName || snapProfileName || null
-  const headingName = isHidden ? 'Hidden profile' : displayName ?? 'Unnamed identity'
+  const headingName = isHidden ? 'Hidden profile' : displayName ?? shortId(identityId, 12)
   const visibleThreads = [...threads, ...moreThreads].filter((t) => !isModerated(t.modState))
   const authorIds = visibleThreads.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
-  const nameOf = (id: string): string => snap?.profiles?.[id] ?? profiles[id] ?? shortId(id, 16)
+  const nameOf = (id: string): string => profiles[id] ?? snap?.profiles?.[id] ?? shortId(id, 16)
 
   // Everything except the error state renders without waiting for the session —
   // the navbar shows signed-in state on its own.

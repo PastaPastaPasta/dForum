@@ -11,6 +11,7 @@ import { query, createDocument } from '@/lib/services/document-service'
 import type { Snapshot } from '@/lib/services/snapshot-server'
 import { LIMITS } from '@/lib/constants'
 import { redactWif } from '@/lib/redact'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 
 interface ForumOption {
   id: string
@@ -123,7 +124,11 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Login required</p>
             <h1 className="text-2xl font-bold mt-2">Sign in to start a thread</h1>
-            <Link href={`/login?next=${encodeURIComponent(`/new${forumParam ? `?forum=${encodeURIComponent(forumParam)}` : ''}`)}`} className="mt-6 btn-primary">Login with Dash</Link>
+            {LOGIN_AVAILABLE ? (
+              <Link href={`/login?next=${encodeURIComponent(`/new${forumParam ? `?forum=${encodeURIComponent(forumParam)}` : ''}`)}`} className="mt-6 btn-primary">Login with Dash</Link>
+            ) : (
+              <p className="mt-6 text-sm text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</p>
+            )}
           </div>
         </main>
         <Footer />
@@ -174,6 +179,28 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
     setError(null)
     try {
       const tagList = parseTags(tags).valid
+
+      // A create can fail or time out even though it landed on the chain —
+      // before creating, re-query for a thread by this owner with a similar
+      // title from the last ~2 minutes and adopt it instead of creating a
+      // duplicate. Fails open: on any query error, proceed as before.
+      try {
+        const recent = await query('thread', {
+          where: [['$ownerId', '==', session.identityId], ['$createdAt', '>=', Date.now() - 120_000]],
+          orderBy: [['$createdAt', 'desc']],
+          limit: 3,
+        })
+        const found = recent.find((d) => ((d.properties.title as string) ?? '').trim().toLowerCase() === titleTrim.toLowerCase())
+        if (found) {
+          setCreatedThreadId(found.id)
+          setCreatedForumId(selected.id)
+          setSubmitting(false)
+          setError('Looks like your thread was already created — finish the opening post.')
+          return
+        }
+      } catch {
+        // Fail open — the re-query is best-effort; proceed with creation.
+      }
 
       const thread = await createDocument('thread', session.identityId, session.authKeyWif, {
         forumId: selected.id,
@@ -260,7 +287,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
                 disabled={threadCreated}
                 aria-invalid={Boolean(fieldError?.forum)}
                 aria-describedby={fieldError?.forum ? 'forum-error' : undefined}
-                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] disabled:opacity-60"
+                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] disabled:opacity-60"
               >
                 <option value="">Choose a forum…</option>
                 {forumOptions.map((f) => (
@@ -285,7 +312,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
                 placeholder="Give your thread a clear, specific title"
                 aria-invalid={Boolean(fieldError?.title)}
                 aria-describedby={fieldError?.title ? 'title-error' : undefined}
-                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm focus:border-[#008CE7] disabled:opacity-60"
+                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] disabled:opacity-60"
               />
               {fieldError?.title ? (
                 <p id="title-error" className="mt-1 text-xs text-red-400">{fieldError.title}</p>
@@ -304,7 +331,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
                 placeholder="announcement, discussion, feature"
                 aria-invalid={Boolean(fieldError?.tags)}
                 aria-describedby={fieldError?.tags ? 'tags-error' : undefined}
-                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7] disabled:opacity-60"
+                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7] disabled:opacity-60"
               />
               {fieldError?.tags ? (
                 <p id="tags-error" className="mt-1 text-xs text-red-400">{fieldError.tags}</p>
@@ -324,12 +351,12 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
                 placeholder="What would you like to discuss?"
                 aria-invalid={Boolean(fieldError?.body)}
                 aria-describedby={fieldError?.body ? 'body-error' : undefined}
-                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] p-3 text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7] resize-y"
+                className="mt-1.5 w-full rounded-lg border border-input bg-[#111a2e] p-3 text-base sm:text-sm placeholder:text-[#93a1bd] focus:border-[#008CE7] resize-y"
               />
               {fieldError?.body ? (
                 <p id="body-error" className="mt-1 text-xs text-red-400">{fieldError.body}</p>
               ) : (
-                <p className="mt-1 text-xs text-[#93a1bd] text-right">{body.length}/{LIMITS.body} chars</p>
+                <p className="mt-1 text-xs text-[#93a1bd] text-right">{body.length}/{LIMITS.body} chars · {new TextEncoder().encode(body).length}/{LIMITS.bodyMaxBytes} bytes</p>
               )}
             </div>
 

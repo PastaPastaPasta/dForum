@@ -19,8 +19,8 @@ async function init(): Promise<EvoSDK> {
   if (sdk) return sdk
   const { EvoSDK } = await import('@dashevo/evo-sdk')
   const candidate = NETWORK === 'mainnet'
-    ? EvoSDK.mainnetTrusted({ settings: { timeoutMs: 60000 } })
-    : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } })
+    ? EvoSDK.mainnetTrusted({ settings: { timeoutMs: 60000, retries: 2 } })
+    : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000, retries: 2 } })
   await candidate.connect()
   sdk = candidate
   return sdk

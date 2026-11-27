@@ -21,7 +21,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
         <p className="text-[#93a1bd] mt-2">Try again, or head back to the home page.</p>
         <div className="mt-6 flex items-center justify-center gap-3">
           <button onClick={reset} className="btn-primary px-4 py-2">Try again</button>
-          <Link href="/" className="rounded-lg border border-[#22304e] bg-[#111a2e] px-4 py-2 text-sm text-[#93a1bd] hover:border-[#008CE7] hover:text-white transition">
+          <Link href="/" className="btn-secondary px-4 py-2">
             Back to home
           </Link>
         </div>

@@ -135,8 +135,10 @@ async function openingPost(sdk, thread) {
   const where = [['$ownerId', '==', ownerId]];
   if (thread.$createdAt != null) where.push(['$createdAt', '>=', thread.$createdAt]);
   // Page through the author's owner-posts until the thread's opening post
-  // appears (or the page budget is hit) — a bounded failure that still
-  // marks the thread orphaned rather than listing it falsely.
+  // appears. A short/empty page is a legitimate "no opening post" (null);
+  // exhausting the 12-page budget without a break/return is a scan failure
+  // — an unknown, not "no opening post", so it must fail the build, not
+  // drop the thread from the index.
   let after = null;
   for (let page = 0; page < 12; page++) {
     const posts = await queryList(sdk, 'post', {
@@ -145,7 +147,7 @@ async function openingPost(sdk, thread) {
       limit: 25,
       ...(after ? { startAfter: after } : {}),
     });
-    if (posts.length === 0) break;
+    if (posts.length === 0) return null; // index exhausted — no opening post
     const mine = posts.filter((p) => p.properties?.threadId === thread.id);
     mine.sort((a, b) => (isBefore(a, b) ? -1 : isBefore(b, a) ? 1 : 0));
     const earliestOwner = mine[0];
@@ -154,10 +156,13 @@ async function openingPost(sdk, thread) {
       if (lockedAt != null && earliestOwner.$createdAt > lockedAt) return null;
       return earliestOwner;
     }
-    if (posts.length < 25) break;
+    if (posts.length < 25) return null; // short page — no opening post
     after = posts[posts.length - 1].id;
   }
-  return null; // no owner-owned post at all
+  // Same honest failure as lib/services/orphan.ts's OrphanScanExhaustedError
+  // ("orphan scan exhausted its page budget") — the loop completed without a
+  // break/return, so the opening post may exist past the page budget.
+  throw new Error('orphan scan exhausted its page budget');
 }
 
 async function main() {

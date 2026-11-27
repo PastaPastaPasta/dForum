@@ -13,7 +13,7 @@ One contract per deployment (bans/suspensions apply to a single contract; one de
 | description | string ≤1000 | optional |
 | rules | string ≤1000 (maxBytes 8192) | optional, markdown |
 | announcement | string ≤500 | optional |
-| hideBannedContent | boolean | optional, default false |
+| hideBannedContent | boolean | optional, default false — declared in the contract; NOT honored by the client or snapshot today (see moderation.md) |
 
 ### category — creationRestrictionMode 1, canBeDeleted false
 | field | type | notes |

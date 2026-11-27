@@ -7,15 +7,21 @@ import { useEffect, useRef, useState } from 'react'
 import { useSession } from '@/lib/session'
 import { Avatar } from '@/components/Avatar'
 import { getRoster } from '@/lib/services/moderation-service'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ''
 
 export function Navbar() {
   const { session, ready, signOut } = useSession()
-  const pathname = usePathname()
-  // Hidden on the login page — the navbar login CTA dishonestly doubles the
-  // page's own sign-in affordance.
-  const showLogin = !pathname.startsWith('/login')
+  const fullPath = usePathname()
+  // usePathname includes the base path on the Pages build — strip it so the
+  // route checks below match the bare paths. Collapse repeated slashes so an
+  // irregular URL (e.g. /search// or double-slash paths) renders identically
+  // to the prerendered route instead of mismatching the hydration tree.
+  const bare = BASE_PATH && fullPath.startsWith(BASE_PATH) ? fullPath.slice(BASE_PATH.length) : fullPath
+  const pathname = bare.replace(/\/{2,}/g, '/') || '/'
+  // On the login page the navbar hides its login CTA — the page's own
+  // sign-in affordance is the authoritative one.
   const [searchQuery, setSearchQuery] = useState('')
   const [isModerator, setIsModerator] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -48,8 +54,8 @@ export function Navbar() {
   // disclosure (no arrow-key nav exists), so no menu/menuitem roles.
   useEffect(() => {
     setMenuOpen(false)
-    // Show the current search query in the nav box — the page's search input
-    // is the authoritative control while on /search.
+    // Keep the nav search box in sync with the URL query — the nav box is
+    // hidden on /search, where the page's own search input is authoritative.
     const params = new URLSearchParams(window.location.search)
     setSearchQuery(params.get('q') ?? '')
   }, [pathname])
@@ -81,23 +87,25 @@ export function Navbar() {
         </Link>
 
         <div className="flex-1 flex justify-center min-w-0">
-          <form
-            action={`${BASE_PATH}/search/`}
-            method="get"
-            aria-label="Search dForum"
-            className="group flex items-center gap-2 rounded-lg border border-[#22304e] bg-[#111a2e] px-3 h-9 w-full max-w-md text-sm text-[#93a1bd] hover:border-[#008CE7] transition"
-          >
-            <Search className="w-4 h-4 shrink-0" aria-hidden="true" />
-            <input
-              type="search"
-              name="q"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+          {!pathname.startsWith('/search') && (
+            <form
+              action={`${BASE_PATH}/search/`}
+              method="get"
               aria-label="Search dForum"
-              placeholder="Search dForum…"
-              className="bg-transparent flex-1 min-w-0 outline-none placeholder:text-[#93a1bd] text-left"
-            />
-          </form>
+              className="group flex items-center gap-2 rounded-lg border border-input bg-[#111a2e] px-3 h-9 w-full max-w-md text-sm text-[#93a1bd] hover:border-[#008CE7] focus-within:border-[#008CE7] focus-within:ring-2 focus-within:ring-[#008CE7]/40 transition"
+            >
+              <Search className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <input
+                type="search"
+                name="q"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Search dForum"
+                placeholder="Search dForum…"
+                className="bg-transparent flex-1 min-w-0 focus-visible:outline-none placeholder:text-[#93a1bd] text-left text-base sm:text-sm"
+              />
+            </form>
+          )}
         </div>
 
         <nav aria-label="Account" className="flex items-center gap-1 text-sm">
@@ -135,7 +143,7 @@ export function Navbar() {
                   </span>
                 </button>
                 {menuOpen && (
-                  <div id="account-menu" aria-label="Account" className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-[#22304e] bg-[#111a2e] shadow-xl overflow-hidden z-50">
+                  <div id="account-menu" className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-[#22304e] bg-[#111a2e] shadow-xl overflow-hidden z-50">
                     <Link href={`/u/${encodeURIComponent(session.identityId)}`} className="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-[#18233c] transition">
                       <User className="w-4 h-4 text-[#93a1bd]" aria-hidden="true" /> Profile
                     </Link>
@@ -158,7 +166,11 @@ export function Navbar() {
                 )}
               </div>
             </>
-          ) : showLogin ? (
+          ) : pathname.startsWith('/login') ? (
+            null
+          ) : !LOGIN_AVAILABLE ? (
+            <span className="inline-flex items-center h-9 rounded-lg border border-[#22304e] px-3 text-sm text-[#93a1bd]">Read-only</span>
+          ) : (
             <Link
               href="/login"
               className="btn-primary px-3 sm:px-4 h-9 flex items-center font-medium"
@@ -166,8 +178,6 @@ export function Navbar() {
               <span className="hidden sm:inline">Login with Dash</span>
               <span className="sm:hidden">Sign in</span>
             </Link>
-          ) : (
-            <span className="inline-block w-24 h-9 rounded-lg bg-[#18233c] animate-pulse" aria-hidden="true" />
           )}
         </nav>
       </div>
