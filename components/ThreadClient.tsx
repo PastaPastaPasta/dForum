@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { MessageSquare, Send, Lock, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
-import { get, query, queryRaw, createDocument } from '@/lib/services/document-service'
+import { get, queryRaw, createDocument } from '@/lib/services/document-service'
 import { shortId, isModerated } from '@/lib/utils'
 import { useProfileNames } from '@/lib/use-profiles'
 import { useSession } from '@/lib/session'
@@ -70,7 +70,6 @@ export default function ThreadClient({
   const [moreError, setMoreError] = useState(false)
   const [posted, setPosted] = useState<string | null>(null)
 
-  const loadMoreTokenRef = useRef(0)
   const { live, loading: liveLoading } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
   // Arm the load-more cursor once the live window comes back.
@@ -140,8 +139,6 @@ export default function ThreadClient({
 
   async function loadMore() {
     if (moreLoading || !moreCursor) return
-    const token = loadMoreTokenRef.current
-    const expected = threadId
     setMoreLoading(true)
     setMoreError(false)
     try {
@@ -160,15 +157,12 @@ export default function ThreadClient({
         modState: (p.properties.modState as number | null) ?? null,
         replyToId: (p.properties.replyToId as string | null) ?? null,
       }))
-      // A thread change or newer loadMore supersedes this response — drop it.
-      if (token !== loadMoreTokenRef.current || expected !== threadId) return
       setMorePosts((prev) => [...prev, ...mapped.filter((m) => !prev.some((x) => x.id === m.id))])
       setMoreCursor(rawCount === POST_LIMIT && lastId ? lastId : null)
     } catch {
-      if (token !== loadMoreTokenRef.current || expected !== threadId) return
       setMoreError(true)
     } finally {
-      if (token === loadMoreTokenRef.current && expected === threadId) setMoreLoading(false)
+      setMoreLoading(false)
     }
   }
 
@@ -343,7 +337,7 @@ export default function ThreadClient({
                   </p>
                 )}
                 {moreCursor != null && (
-                  <p className="text-xs text-[#93a1bd]">Showing {shownPosts.length} of the visible posts — load more below. Older posts are not loaded yet.</p>
+                  <p className="text-xs text-[#93a1bd]">Showing {shownPosts.length} of the visible posts — load more below. Later replies aren&apos;t loaded yet.</p>
                 )}
                 {isLiveOk && moreCursor && (
                   <div className="mt-2">
@@ -354,7 +348,7 @@ export default function ThreadClient({
                       <button
                         onClick={() => loadMore()}
                         disabled={moreLoading}
-                        className="btn-secondary inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-sm text-[#93a1bd] hover:text-white hover:border-[#008CE7] transition disabled:opacity-50"
+                        className="btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-50"
                       >
                         {moreLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />}
                         {moreLoading ? 'Loading…' : 'Load more posts'}
@@ -379,13 +373,17 @@ export default function ThreadClient({
                       rows={4}
                       maxLength={LIMITS.body}
                       placeholder="Write your reply…"
-                      className="mt-2 w-full rounded-lg border border-input bg-[#0b1220] p-3 text-sm placeholder:text-[#93a1bd] resize-y"
+                      className="mt-2 w-full rounded-lg border border-input bg-[#0b1220] p-3 text-base sm:text-sm placeholder:text-[#93a1bd] resize-y"
                     />
                     <div className="mt-1 flex items-center justify-between text-xs text-[#93a1bd] gap-2">
-                      <span role="alert" className="min-h-[1rem]">
-                        {postError ? <span className="text-red-400">{postError}</span> : posted ? <span className="text-emerald-400">{posted}</span> : ''}
-                      </span>
-                      <span>{replyBody.length}/{LIMITS.body} chars</span>
+                      {postError ? (
+                        <span role="alert" className="min-h-[1rem] text-red-400">{postError}</span>
+                      ) : posted ? (
+                        <span role="status" className="min-h-[1rem] text-emerald-400">{posted}</span>
+                      ) : (
+                        <span className="min-h-[1rem]" />
+                      )}
+                      <span>{replyBody.length}/{LIMITS.body} chars · {new TextEncoder().encode(replyBody).length}/{LIMITS.bodyMaxBytes} bytes</span>
                     </div>
                     <div className="mt-2 flex justify-end">
                       <button
@@ -493,15 +491,17 @@ async function loadThread(id: string): Promise<LoadResult> {
     } else {
       opening = null
     }
-    const [posts, forumDoc] = await Promise.all([
-      query('post', {
+    const [{ docs: posts, rawCount }, forumDoc] = await Promise.all([
+      queryRaw('post', {
         where: [['threadId', '==', thread.id], ...(opening ? [['$createdAt', '>=', opening.createdAt]] as [string, string, unknown][] : [])],
         orderBy: [['$createdAt', 'asc']],
         limit: POST_LIMIT + 1,
       }),
       forumId ? get('forum', forumId).catch(() => null) : Promise.resolve(null),
     ])
-    const truncated = posts.length > POST_LIMIT
+    // The page holds at most POST_LIMIT+1 raw docs; if the raw page filled it,
+    // the index ran ahead of what we keep.
+    const truncated = rawCount > POST_LIMIT
     const visiblePosts = posts.slice(0, POST_LIMIT)
     return {
       status: 'ok',

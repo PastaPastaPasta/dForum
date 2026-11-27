@@ -24,8 +24,9 @@ export const CONTRACT_ID =
 
 export const KEY_EXCHANGE_CONTRACT_ID = process.env.NEXT_PUBLIC_KEY_EXCHANGE_CONTRACT_ID || '7UaqHGBJBbRLJ4fUWS45cnud8PPUugJWoGTt1SKwHJ2P'
 
-/** localStorage/sessionStorage scope — keeps this app's keys separate from
- * other pages on the shared GitHub Pages origin. */
+/** localStorage/sessionStorage scope — namespaces this app's keys by name.
+ * Every same-origin page can read sessionStorage, so the host gate (lib/host.ts)
+ * is what protects the key material, not this prefix. */
 export const STORAGE_KEY_PREFIX = process.env.NEXT_PUBLIC_STORAGE_SCOPE || 'dforum'
 
 /** App chrome + content limits mirrored from contracts/build.mjs. */

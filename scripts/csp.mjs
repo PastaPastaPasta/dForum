@@ -33,7 +33,11 @@ function walk(dir) {
 
 const JS_RE = /<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/gi
 const META_RE = /<meta\s+http-equiv="Content-Security-Policy"[^>]*\/?>/i
-const HEAD_CLOSE_RE = /<\/head>/i
+// Insert right after the charset meta (or right after <head>) so the policy
+// governs every external script and all content below — a meta placed late in
+// <head> would arrive after the scripts it is meant to allow.
+const CHARSET_RE = /<meta\s+charset=[^>]*>/i
+const HEAD_OPEN_RE = /<head>/i
 
 const files = walk(OUT)
 let inlineScripts = 0
@@ -52,16 +56,17 @@ for (const file of files) {
     (hashes.length ? ' ' + hashes.join(' ') : '') +
     " 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; base-uri 'self'; form-action 'self'"
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`
-  if (META_RE.test(html)) {
-    html = html.replace(META_RE, () => meta)
+  // Drop any existing meta (the layout used to emit one) — we re-insert it in
+  // the right position so the policy governs every external script below it.
+  html = html.replace(META_RE, '')
+  if (CHARSET_RE.test(html)) {
+    html = html.replace(CHARSET_RE, (m) => `${m}\n${meta}`)
+  } else if (HEAD_OPEN_RE.test(html)) {
+    html = html.replace(HEAD_OPEN_RE, (m) => `${m}\n${meta}`)
   } else {
-    // No CSP meta anywhere — inject one before </head>. A static export hosts
-    // no headers, so the only enforcement point is the meta.
-    if (!HEAD_CLOSE_RE.test(html)) {
-      console.warn(`WARN: no </head> in ${file} — leaving it unchanged`)
-      continue
-    }
-    html = html.replace(HEAD_CLOSE_RE, (m) => `${meta}${m}`)
+    // No insertion point — leaving it unchanged would ship an unprotected page.
+    console.warn(`WARN: no <head> in ${file} — leaving it unchanged`)
+    continue
   }
   writeFileSync(file, html)
 }

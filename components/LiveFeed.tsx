@@ -8,10 +8,11 @@
  */
 import { useEffect, useState } from 'react'
 
-export function useLive<T>(loader: () => Promise<T>, key?: unknown): { live: T | null; loading: boolean; error: boolean } {
+export function useLive<T>(loader: () => Promise<T>, key?: unknown): { live: T | null; loading: boolean; error: boolean; retry: () => void } {
   const [live, setLive] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [generation, setGeneration] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -50,7 +51,8 @@ export function useLive<T>(loader: () => Promise<T>, key?: unknown): { live: T |
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  }, [key, generation])
 
-  return { live, loading, error }
+  const retry = () => setGeneration((g) => g + 1)
+  return { live, loading, error, retry }
 }

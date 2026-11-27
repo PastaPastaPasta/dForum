@@ -1,16 +1,18 @@
 /**
  * Shared WIF redaction for operator scripts. Anything that prints an error
- * from the chain or WASM layer must scrub base58 WIF-looking strings first —
- * a cause message could carry key material.
+ * from the chain or WASM layer must scrub key material first — a cause
+ * message could carry key bytes.
  *
  * Mirrors lib/redact.ts (the browser-side copy); keep the two in sync.
- * Covers testnet/mainnet Bitcoin-style prefixes (5/K/L), Dash mainnet keys
- * (X/7), and raw 64-char hex private keys.
+ * Covers Bitcoin-style prefixes (5/K/L), Dash mainnet keys (X/7), other
+ * registries (c/9), raw 64–68-char hex private keys with an optional 0x
+ * prefix, and JSON byte arrays of at least 32 numbers. Not covered: base64.
  */
-// Base58-aware boundaries (same reasoning as lib/redact.ts): \b misses a WIF
-// glued to a word character.
-const WIF_RE = /(?<![1-9A-HJ-NP-Za-km-z])[c9][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|(?<![1-9A-HJ-NP-Za-km-z])[5KL][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|(?<![1-9A-HJ-NP-Za-km-z])[X7][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|(?<![1-9A-HJ-NP-Za-km-z])[0-9a-fA-F]{64}(?![1-9A-HJ-NP-Za-km-z])/g;
+const HEX_RE = /(?<![0-9a-fA-F])(?:0x)?[0-9a-fA-F]{64}(?:[0-9a-fA-F]{2}){0,2}(?![0-9a-fA-F])/g
+const WIF_RE = /[c9][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|[5KL][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])|[X7][1-9A-HJ-NP-Za-km-z]{50,51}(?![1-9A-HJ-NP-Za-km-z])/g
+const ARRAY_RE = /\[\s*(?:\d{1,3}\s*,\s*){31,}\d{1,3}\s*\]/g
+const ALL_RE = new RegExp([HEX_RE.source, WIF_RE.source, ARRAY_RE.source].join('|'), 'g')
 
 export function redactWif(text) {
-  return String(text ?? '').replace(WIF_RE, '<redacted-wif>');
+  return String(text ?? '').replace(ALL_RE, '<redacted-wif>');
 }

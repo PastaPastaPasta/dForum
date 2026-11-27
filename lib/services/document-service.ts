@@ -166,19 +166,13 @@ export async function queryRaw(
     const normalized = normalizeDoc(doc)
     if (normalized) out.push(normalized)
   }
-  // Raw last-doc id for the startAfter cursor — the normalized last doc's id
-  // is not necessarily the raw last doc, since docs that fail normalization
-  // are dropped from `out`.
-  const lastRaw = rawDocs[rawDocs.length - 1]
-  let lastId: string | null = null
-  if (lastRaw) {
-    const obj = (lastRaw as { toObject?: () => unknown }).toObject?.() as Record<string, unknown> | undefined
-    const rid = obj?.$id ?? obj?.id
-    if (rid != null) {
-      try { lastId = bs58.encode(bs58.decode(String(rid))) } catch { lastId = String(rid) }
-    }
-  }
-  return { docs: out, rawCount: rawDocs.length, lastId }
+  // The startAfter cursor must be the raw last doc's id (a base58 string).
+  // The page keys are already base58 — the doc objects do not carry the id as
+  // a string (toObject().$id is a Uint8Array), so reading the id from the
+  // values would produce garbage ("23,247,84,…") and the next page would fail.
+  const keys = [...page.keys()]
+  const lastId = keys.length > 0 ? String(keys[keys.length - 1]) : null
+  return { docs: out, rawCount: page.size, lastId }
 }
 
 export async function count(

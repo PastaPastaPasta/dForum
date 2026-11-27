@@ -51,5 +51,13 @@ export function useProfileNames(ids: (string | null | undefined)[]): Record<stri
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unique])
-  return names
+  // Merge the module cache at render time — an id another component already
+  // resolved must not render as a truncated id just because this hook's first
+  // render pre-dated the cache entry.
+  const merged: Record<string, string> = {}
+  for (const id of unique) {
+    const v = names[id] ?? cache.get(id)
+    if (v != null) merged[id] = v
+  }
+  return merged
 }

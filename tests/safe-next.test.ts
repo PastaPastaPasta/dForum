@@ -66,6 +66,30 @@ describe('safeNextPath', () => {
     expect(safeNextPath('../../other', ORIGIN)).toBeNull()
   })
 
+  it('normalizes %2e%2e dot segments without escaping the origin', () => {
+    // Percent-encoded dots are dot segments to the WHATWG parser.
+    expect(safeNextPath('/%2e%2e/evil.com', ORIGIN)).toBe('/evil.com')
+    expect(safeNextPath('/dForum/%2e%2e/%2e%2e/other', ORIGIN)).toBe('/other')
+    process.env.NEXT_PUBLIC_BASE_PATH = '/dForum'
+    expect(safeNextPath('/%2e%2e/evil.com', ORIGIN)).toBe('/dForum/evil.com')
+    expect(safeNextPath('/dForum/%2e%2e/%2e%2e/other', ORIGIN)).toBe('/dForum/other')
+  })
+
+  it('re-roots a /dForum path that escapes the base under the base', () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = '/dForum'
+    // /dForum/../x normalizes to /x — an attempt to escape the base is
+    // re-rooted under it, never allowed as a sibling-repo path.
+    expect(safeNextPath('/dForum/../x', ORIGIN)).toBe('/dForum/x')
+  })
+
+  it('strips control characters rather than threading them through', () => {
+    // The WHATWG URL parser normalizes \u0000 away — assert the result stays a
+    // plain same-origin path, never a protocol-relative or backslash path.
+    expect(safeNextPath('/settings\u0000', ORIGIN)).toBe('/settings')
+    process.env.NEXT_PUBLIC_BASE_PATH = '/dForum'
+    expect(safeNextPath('/settings\u0000', ORIGIN)).toBe('/dForum/settings')
+  })
+
   it('keeps query string and hash', () => {
     expect(safeNextPath('/search?q=forum#top', ORIGIN)).toBe('/search?q=forum#top')
     process.env.NEXT_PUBLIC_BASE_PATH = '/dForum'

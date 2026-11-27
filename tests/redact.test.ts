@@ -48,6 +48,33 @@ describe('redactWif — any key-looking string is scrubbed', () => {
     expect(redactWif(`${w}-end`)).toContain('<redacted-wif>')
   })
 
+  it('redacts a hex key with a 0x prefix', () => {
+    const hex = 'ab'.repeat(32)
+    expect(redactWif(`leaked 0x${hex}`)).toContain('<redacted-wif>')
+  })
+
+  it('redacts a 68-char hex WIF-payload hex', () => {
+    const hex = 'ef' + 'ab'.repeat(32) + '01'
+    expect(hex.length).toBe(68)
+    expect(redactWif(`leaked ${hex}`)).toContain('<redacted-wif>')
+  })
+
+  it('redacts a WIF glued to a letter', () => {
+    const key = new Uint8Array(32).fill(0xab)
+    const w = wif(key, 0xef, true)
+    const out = redactWif(`wifc${w.slice(1)}`)
+    expect(out).toContain('<redacted-wif>')
+  })
+
+  it('redacts a JSON byte array of at least 32 numbers', () => {
+    const arr = `[${Array.from({ length: 32 }, (_, i) => (i * 7) % 256).join(',')}]`
+    expect(redactWif(`key ${arr}`)).toContain('<redacted-wif>')
+  })
+
+  it('does NOT redact a short JSON array', () => {
+    expect(redactWif('status [1,2,3,4]')).toBe('status [1,2,3,4]')
+  })
+
   it('does NOT redact a longer base58 string that merely starts with a WIF prefix', () => {
     // A 60-char base58 token starting with 'c' is not a WIF — the lookahead
     // must reject it rather than scrub the whole token.

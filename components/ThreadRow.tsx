@@ -16,9 +16,16 @@ export interface ThreadRowData {
   createdAt: number
 }
 
-export function ThreadRow({ thread, nameOf }: { thread: ThreadRowData; nameOf?: (id: string) => string }) {
+export function ThreadRow({ thread, nameOf, forumTitle }: { thread: ThreadRowData; nameOf?: (id: string) => string; forumTitle?: string | null }) {
   if (isModerated(thread.modState)) return null
   const authorName = thread.ownerId && nameOf ? nameOf(thread.ownerId) : null
+  const forumName = forumTitle ?? thread.forumSlug
+  const metaParts: (string | JSX.Element)[] = []
+  if (authorName) metaParts.push(authorName)
+  if (forumName) metaParts.push(forumName)
+  metaParts.push(<RelativeTime key="time" time={thread.createdAt} />)
+  // Tags are appended after the meta — never before the separator.
+  const tags = thread.tags.slice(0, 3)
   return (
     <Link
       href={`/t/${encodeURIComponent(thread.id)}`}
@@ -27,7 +34,7 @@ export function ThreadRow({ thread, nameOf }: { thread: ThreadRowData; nameOf?: 
       {thread.ownerId ? (
         <Avatar name={authorName ?? thread.ownerId} id={thread.ownerId} size="sm" />
       ) : (
-        <Avatar name="dForum" size="sm" />
+        <span className="inline-flex items-center justify-center rounded-full border border-[#22304e] text-[#93a1bd] shrink-0 w-6 h-6 text-xs" aria-hidden="true">?</span>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -36,8 +43,12 @@ export function ThreadRow({ thread, nameOf }: { thread: ThreadRowData; nameOf?: 
           <p className="font-medium truncate group-hover:text-[#4db3ff] transition">{thread.title}</p>
         </div>
         <p className="text-xs text-[#93a1bd] mt-0.5 truncate">
-          {authorName ?? 'dForum'} · {thread.forumSlug ?? 'dForum'} · <RelativeTime time={thread.createdAt} />
-          {thread.tags.slice(0, 3).map((tag) => ` · #${tag}`).join('')}
+          {metaParts.map((part, i) => (
+            <span key={i}>
+              {i > 0 && ' · '}{part}
+            </span>
+          ))}
+          {tags.map((tag) => <span key={tag}>{` · #${tag}`}</span>)}
         </p>
       </div>
     </Link>

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { MessageSquare, TrendingUp, FolderOpen, Loader2, Pencil } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
 import { useSession } from '@/lib/session'
 import { query, queryRaw, get } from '@/lib/services/document-service'
@@ -20,10 +21,10 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   // Live fill — re-queries the platform after hydration
   // Errors propagate — useLive catches and flips the badge to "unavailable";
   // the snapshot stays visible and the stale note shows.
-  const { live, loading, error } = useLive(() => loadLive(snap), 'home')
+  const { live, loading, error, retry } = useLive(() => loadLive(snap), 'home')
   // "+" means the shown window filled without running dry — a window that
   // ran dry (fewer threads exist than the window) shows no suffix.
-  const threadsWindowFilled = (live?.threadsWindowFilled) ?? snap.threads.length >= HOME_TARGET
+  const threadsWindowFilled = (live?.threadsWindowFilled) ?? snap.threadsWindowFilled ?? false
   const byStickyThenRecent = (a: SnapshotThread, b: SnapshotThread) =>
     a.sticky !== b.sticky ? (a.sticky ? -1 : 1) : b.createdAt - a.createdAt
   // First paint shows the snapshot (build-time listed surface). Once live
@@ -41,19 +42,22 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
 
   const authorIds = listedThreads.slice(0, 12).map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
-  const nameOf = (id: string): string => snap.profiles[id] ?? profiles[id] ?? id.slice(0, 12)
+  const nameOf = (id: string): string => profiles[id] ?? snap.profiles[id] ?? id.slice(0, 12)
 
   // Honest counts — every tile is derived from the same listed surface the
   // page shows. Hidden/orphaned threads are deliberately not public numbers,
-  // so raw chain totals are never displayed. The threads tile is marked "+"
-  // when the recent window filled: the honest claim is "at least this many".
-  const listed = listedThreads.length
+  // so raw chain totals are never displayed. The threads tile is the recent
+  // window only (pinned threads outside it are shown but not counted); the
+  // "+" suffix is the honest "at least N" claim when the window filled.
+  const recent = listedThreads.filter((t) => !t.sticky)
   const counts = {
     categories: categories.length,
     forums: forums.length,
-    threads: listed,
+    threads: recent.length,
     threadsWindowFull: threadsWindowFilled,
   }
+
+  const forumTitleById = new Map(forums.map((f) => [f.id, f.title]))
 
   return (
     <>
@@ -63,24 +67,36 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
 
         {error && !loading && (
           <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
-            <LiveUnavailable />
+            <LiveUnavailable onRetry={retry} />
           </div>
         )}
 
         <section id="latest-threads" className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
           <SectionHeader title="Latest threads" subtitle="Newest conversations across all forums" />
           <div className="grid grid-cols-1 gap-3">
-            {listedThreads.slice(0, 12).map((t) => (
-              <ThreadRow key={t.id} thread={t as Parameters<typeof ThreadRow>[0]['thread']} nameOf={nameOf} />
-            ))}
-            {listedThreads.length === 0 && (
+            {listedThreads.length === 0 && !loading && !error ? (
               <div className="text-sm text-[#93a1bd] py-8 text-center">
                 {session ? (
                   <Link href="/new" className="text-[#4db3ff] hover:underline">Start the first thread</Link>
-                ) : (
+                ) : LOGIN_AVAILABLE ? (
                   <>No threads yet. <Link href="/login" className="text-[#4db3ff] hover:underline">Login with Dash</Link> to be the first.</>
+                ) : (
+                  'No threads yet — this deployment is read-only.'
                 )}
               </div>
+            ) : listedThreads.length === 0 && error ? (
+              <p className="text-sm text-[#93a1bd] py-8 text-center">Couldn&rsquo;t load threads right now.</p>
+            ) : listedThreads.length === 0 ? (
+              <ThreadListSkeleton />
+            ) : (
+              listedThreads.slice(0, 12).map((t) => (
+                <ThreadRow
+                  key={t.id}
+                  thread={t as Parameters<typeof ThreadRow>[0]['thread']}
+                  nameOf={nameOf}
+                  forumTitle={forumTitleById.get(t.forumId ?? '') ?? null}
+                />
+              ))
             )}
           </div>
         </section>
@@ -99,17 +115,16 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
                 <p className="mt-3 text-xs text-[#93a1bd]">{f.categoryLabel ? `in ${f.categoryLabel}` : ''}</p>
               </Link>
             ))}
-            {forums.length === 0 && (
+            {forums.length === 0 && !loading && !error ? (
               <p className="text-sm text-[#93a1bd] py-8 text-center sm:col-span-2 lg:col-span-3">No forums yet.</p>
-            )}
+            ) : forums.length === 0 && error ? (
+              <p className="text-sm text-[#93a1bd] py-8 text-center sm:col-span-2 lg:col-span-3">Couldn&rsquo;t load forums right now.</p>
+            ) : forums.length === 0 ? (
+              <p className="text-sm text-[#93a1bd] py-8 text-center sm:col-span-2 lg:col-span-3 animate-pulse">Loading forums…</p>
+            ) : null}
           </div>
         </section>
 
-        {session && (
-          <section className="max-w-6xl mx-auto px-4 sm:px-6 mt-12">
-            <NewThreadCta />
-          </section>
-        )}
       </main>
       <Footer />
     </>
@@ -120,46 +135,40 @@ function Hero({ counts, session, loading, error }: { counts: { categories: numbe
   return (
     <section className="border-b border-[#22304e] bg-gradient-to-b from-[#101b31] to-[#0b1220]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
-        <div className="flex flex-wrap items-end justify-between gap-6">
-          <div className="max-w-xl">
-            {!error && (
-              <p className="inline-flex items-center gap-2 rounded-full border border-[#22304e] bg-[#111a2e] px-3 py-1 text-xs text-[#4db3ff] fade-up">
-                {loading ? (
-                  <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                ) : (
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-slow" />
-                )}
-                {loading ? 'Loading live data…' : 'Live on Dash Platform'}
-              </p>
-            )}
-            <h1 className="mt-4 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
-              A forum on<br />Dash Platform
-            </h1>
-            <p className="mt-4 text-[#93a1bd]">
-              Centralized ownership, team-based moderation, every message on-chain. Login with Dash.
+        <div className="max-w-2xl">
+          {!error && (
+            <p className="inline-flex items-center gap-2 rounded-full border border-[#22304e] bg-[#111a2e] px-3 py-1 text-xs text-[#4db3ff] fade-up">
+              {loading ? (
+                <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-slow" />
+              )}
+              {loading ? 'Loading live data…' : 'Live on Dash Platform'}
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/search"
-              className="btn-secondary px-4 py-2.5 font-medium"
-            >
-              Explore threads
-            </Link>
-            {session && (
-              <Link
-                href="/new"
-                className="inline-flex items-center gap-2 btn-primary px-4 py-2.5 font-medium"
-              >
+          )}
+          <h1 className="mt-4 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
+            A forum on<br />Dash Platform
+          </h1>
+          <p className="mt-4 text-[#93a1bd]">
+            Centralized ownership, team-based moderation, every message on-chain. Login with Dash.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            {session ? (
+              <Link href="/new" className="inline-flex items-center gap-2 btn-primary px-4 py-2.5 font-medium">
                 <Pencil className="w-4 h-4" aria-hidden="true" /> New thread
               </Link>
+            ) : LOGIN_AVAILABLE ? (
+              <Link href="/login" className="btn-primary px-4 py-2.5 font-medium">Login with Dash</Link>
+            ) : (
+              <span className="inline-flex items-center rounded-lg border border-[#22304e] px-4 py-2.5 text-sm text-[#93a1bd]">Read-only preview</span>
             )}
+            <Link href="/search" className="btn-secondary px-4 py-2.5 font-medium">Explore threads</Link>
           </div>
         </div>
-        <dl className="mt-8 grid grid-cols-3 gap-2 sm:gap-3">
+        <dl className="mt-8 grid max-w-2xl grid-cols-3 gap-2 sm:gap-3">
           <Stat icon={<FolderOpen className="w-4 h-4" />} value={counts.categories} label="Categories" />
           <Stat icon={<MessageSquare className="w-4 h-4" />} value={counts.forums} label="Forums" />
-          <Stat icon={<TrendingUp className="w-4 h-4" />} value={counts.threads} label="Recent threads" suffix={counts.threadsWindowFull ? '+' : ''} />
+          <Stat icon={<TrendingUp className="w-4 h-4" />} value={counts.threads} label="Threads" suffix={counts.threadsWindowFull ? '+' : ''} />
         </dl>
       </div>
     </section>
@@ -171,9 +180,9 @@ function Stat({ icon, value, label, suffix }: { icon: React.ReactNode; value: nu
     <div className="rounded-xl border border-[#22304e] bg-[#111a2e] p-2.5 sm:p-3">
       <dt className="flex items-center gap-1.5 sm:gap-2 text-[#4db3ff]">
         {icon}
-        <span className="text-[10px] sm:text-xs uppercase tracking-wider text-[#93a1bd]">{label}</span>
+        <span className="text-xs uppercase tracking-wider text-[#93a1bd]">{label}</span>
       </dt>
-      <dd className="mt-1 text-lg sm:text-2xl font-bold tabular-nums">{value.toLocaleString('en-US')}{suffix}</dd>
+      <dd className="mt-1 text-xl sm:text-2xl font-bold tabular-nums">{value.toLocaleString('en-US')}{suffix}</dd>
     </div>
   )
 }
@@ -187,16 +196,12 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }
   )
 }
 
-function NewThreadCta() {
+function ThreadListSkeleton() {
   return (
-    <div className="rounded-xl border border-dashed border-[#22304e] bg-[#111a2e]/50 p-6 text-center">
-      <p className="text-[#93a1bd] text-sm">Start the next great conversation on Dash Platform.</p>
-      <Link
-        href="/new"
-        className="mt-3 btn-primary px-4 py-2"
-      >
-        Start a new thread
-      </Link>
+    <div className="grid grid-cols-1 gap-3" aria-busy="true" aria-label="Loading threads">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="h-14 rounded-xl border border-[#22304e] bg-[#111a2e] animate-pulse" />
+      ))}
     </div>
   )
 }
@@ -228,6 +233,7 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
     })
     if (rawCount === 0) { indexExhausted = true; break }
     scanned += rawCount
+    const shortPage = rawCount < HOME_LIMIT
     const candidates = docs.filter((t) => {
       if (t.properties?.modState != null) return false
       if (seenIds.has(t.id)) return false
@@ -252,11 +258,12 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
       if (listed.length >= HOME_TARGET) break
       listed.push(t)
     }
+    if (shortPage) { indexExhausted = true; break } // the index ran dry — no more pages
     if (lastId == null) { indexExhausted = true; break } // cannot continue — stop honestly
     after = lastId
   }
   // "+" is claimed only when the window filled because we stopped at the target,
-  // not because the index was exhausted.
+  // not because the index ran dry.
   const windowFilled = !indexExhausted && listed.length >= HOME_TARGET
   // Pinned snapshot threads can sit outside the recent live window — re-verify
   // each against the chain and merge the verified ones (never resurrect a
@@ -269,6 +276,8 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
     try {
       const full = await get('thread', snapThread.id)
       if (!full || (full.properties?.modState as number | null) != null) continue
+      // A thread unpinned since the snapshot must not come back as pinned.
+      if (!full.properties?.sticky) continue
       const ownerId = full.ownerId || null
       if (!ownerId) continue
       const opening = await earliestOwnerPost(full.id, ownerId, full.createdAt)

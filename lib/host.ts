@@ -27,3 +27,9 @@ export function hostIsCanonical(host: string): boolean {
 export function canonicalHost(): string {
   return CANONICAL_HOST
 }
+
+/** The key-signing surfaces are only live on the canonical deploy. The Pages
+ * build (BASE_PATH set) is an SEO/read-only indexing shell — its CTAs would
+ * dead-end at the login refusal — so callers hide them and show the
+ * read-only chip instead. */
+export const LOGIN_AVAILABLE = !(process.env.NEXT_PUBLIC_BASE_PATH)

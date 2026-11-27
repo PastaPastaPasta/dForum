@@ -182,6 +182,9 @@ export default function ModerationPage() {
 
   useEffect(() => {
     mountedRef.current = true
+    // A pending navigation wipe belongs to the unmounted instance — never
+    // let a consuming call from THIS mount inherit it.
+    pendingWipeRef.current = null
     // Read the host after hydration — during prerender there is no window.
     setHost(typeof window !== 'undefined' ? window.location.hostname : '')
     try {
@@ -228,7 +231,10 @@ export default function ModerationPage() {
   // mid-flight (see internalWipe).
   useEffect(() => {
     return () => {
-      pendingWipeRef.current = pendingWipeRef.current ?? 'cleared on navigation'
+      // Only a navigation while a call is still in flight needs the pending
+      // wipe — a plain unmount would leave the ref armed for the next mount
+      // and the first action after hydration would wipe the key mid-flight.
+      if (inFlightRef.current > 0) pendingWipeRef.current = pendingWipeRef.current ?? 'cleared on navigation'
       internalWipe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,17 +246,23 @@ export default function ModerationPage() {
     setDocsLoading(true)
     setDocsError(false)
     try {
+      const fetchThreads = !append || threadsMore
+      const fetchPosts = !append || postsMore
       const [threads, posts] = await Promise.all([
-        query('thread', {
-          orderBy: [['$createdAt', 'desc']],
-          limit: DOC_PAGE_SIZE,
-          ...(append && threadsAfter ? { startAfter: threadsAfter } : {}),
-        } as never),
-        query('post', {
-          orderBy: [['$createdAt', 'desc']],
-          limit: DOC_PAGE_SIZE,
-          ...(append && postsAfter ? { startAfter: postsAfter } : {}),
-        } as never),
+        fetchThreads
+          ? query('thread', {
+              orderBy: [['$createdAt', 'desc']],
+              limit: DOC_PAGE_SIZE,
+              ...(append && threadsAfter ? { startAfter: threadsAfter } : {}),
+            } as never)
+          : Promise.resolve([] as Awaited<ReturnType<typeof query>>),
+        fetchPosts
+          ? query('post', {
+              orderBy: [['$createdAt', 'desc']],
+              limit: DOC_PAGE_SIZE,
+              ...(append && postsAfter ? { startAfter: postsAfter } : {}),
+            } as never)
+          : Promise.resolve([] as Awaited<ReturnType<typeof query>>),
       ])
       const mapped: ModeratableDoc[] = [
         ...threads.map((t) => ({
@@ -272,10 +284,14 @@ export default function ModerationPage() {
           modState: (p.properties.modState as number | null) ?? null,
         })),
       ]
-      setThreadsAfter(threads[threads.length - 1]?.id ?? null)
-      setThreadsMore(threads.length === DOC_PAGE_SIZE)
-      setPostsAfter(posts[posts.length - 1]?.id ?? null)
-      setPostsMore(posts.length === DOC_PAGE_SIZE)
+      if (fetchThreads) {
+        setThreadsAfter(threads.length ? threads[threads.length - 1].id : threadsAfter)
+        setThreadsMore(threads.length === DOC_PAGE_SIZE)
+      }
+      if (fetchPosts) {
+        setPostsAfter(posts.length ? posts[posts.length - 1].id : postsAfter)
+        setPostsMore(posts.length === DOC_PAGE_SIZE)
+      }
       setDocs((prev) => (append ? [...prev, ...mapped] : mapped))
     } catch {
       setDocsError(true)
@@ -284,7 +300,7 @@ export default function ModerationPage() {
       setDocsLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadsAfter, postsAfter])
+  }, [threadsAfter, postsAfter, threadsMore, postsMore])
 
   useEffect(() => {
     getRoster()
@@ -666,7 +682,7 @@ export default function ModerationPage() {
               <div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Moderator console</h1>
                 <p className="text-sm text-[#93a1bd]">
-                  Centralized, team-based moderation · <span className="font-mono">{NETWORK}</span> · {roster?.mode ? `${roster.mode} mode` : 'mode loading…'} · {shortId(CONTRACT_ID, 16)}
+                  Centralized, team-based moderation · <span className="font-mono">{NETWORK}</span> · {roster?.mode ? `${roster.mode} mode` : rosterError ? 'mode unavailable' : 'mode loading…'} · {shortId(CONTRACT_ID, 16)}
                 </p>
                 {roster?.mode === 'network' && (
                   <p className="mt-1 text-xs text-amber-400">Network (elected) mode is a testnet-only configuration — never a production default.</p>
@@ -711,7 +727,7 @@ export default function ModerationPage() {
                       setAdmin(null)
                     }}
                     placeholder="6Dft…"
-                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
                   />
                 </label>
                 <label className="block">
@@ -729,7 +745,7 @@ export default function ModerationPage() {
                       setAdmin(null)
                     }}
                     placeholder="L…"
-                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
                     autoComplete="one-time-code"
                     data-lpignore="true"
                     data-1p-ignore="true"
@@ -826,7 +842,7 @@ export default function ModerationPage() {
                       value={targetId}
                       onChange={(e) => { setTargetId(e.target.value); setStatus(null); setStatusForId(null); setActionSuccess(null) }}
                       placeholder="identity ID to look up"
-                      className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                      className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
                       onKeyDown={(e) => e.key === 'Enter' && refreshStatus()}
                     />
                     <button
@@ -868,7 +884,7 @@ export default function ModerationPage() {
 
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <ActionButton
-                        disabled={!canOperate || actionBusy != null || !banReason.trim() || isSelfTarget || staleBlocker}
+                        disabled={!canOperate || actionBusy != null || docActionBusy != null || !banReason.trim() || isSelfTarget || staleBlocker}
                         busy={actionBusy === 'ban'}
                         icon={<Ban className="w-3.5 h-3.5" />}
                         label="Ban"
@@ -877,7 +893,7 @@ export default function ModerationPage() {
                         onClick={() => act('ban', () => banUser(admin!, targetId.trim(), banReason.trim()), `Ban ${shortId(targetId.trim(), 12)}? They cannot create content until unbanned.`, 'Ban applied.')}
                       />
                       <ActionButton
-                        disabled={!canOperate || actionBusy != null || isSelfTarget || staleBlocker}
+                        disabled={!canOperate || actionBusy != null || docActionBusy != null || isSelfTarget || staleBlocker}
                         busy={actionBusy === 'unban'}
                         icon={<Undo2 className="w-3.5 h-3.5" />}
                         label="Unban"
@@ -885,7 +901,7 @@ export default function ModerationPage() {
                         onClick={() => act('unban', () => unbanUser(admin!, targetId.trim()), `Unban ${shortId(targetId.trim(), 12)}? They can create content again.`, 'Unban applied.')}
                       />
                       <ActionButton
-                        disabled={!canOperate || actionBusy != null || !suspendReason.trim() || !suspendHoursValid || isSelfTarget || staleBlocker}
+                        disabled={!canOperate || actionBusy != null || docActionBusy != null || !suspendReason.trim() || !suspendHoursValid || isSelfTarget || staleBlocker}
                         busy={actionBusy === 'suspend'}
                         icon={<Clock className="w-3.5 h-3.5" />}
                         label="Suspend"
@@ -894,7 +910,7 @@ export default function ModerationPage() {
                         onClick={() => act('suspend', () => suspendUser(admin!, targetId.trim(), BigInt(Date.now() + Number(suspendHours) * 3600 * 1000), suspendReason.trim()), `Suspend ${shortId(targetId.trim(), 12)} for ${suspendHours}h?`, 'Suspend applied.')}
                       />
                       <ActionButton
-                        disabled={!canOperate || actionBusy != null || isSelfTarget || staleBlocker}
+                        disabled={!canOperate || actionBusy != null || docActionBusy != null || isSelfTarget || staleBlocker}
                         busy={actionBusy === 'unsuspend'}
                         icon={<Unlock className="w-3.5 h-3.5" />}
                         label="Unsuspend"
@@ -902,7 +918,7 @@ export default function ModerationPage() {
                         onClick={() => act('unsuspend', () => unsuspendUser(admin!, targetId.trim()), `Unsuspend ${shortId(targetId.trim(), 12)}? They can create content again.`, 'Unsuspend applied.')}
                       />
                       <ActionButton
-                        disabled={!canOperate || actionBusy != null || !warnReason.trim() || isSelfTarget || staleBlocker}
+                        disabled={!canOperate || actionBusy != null || docActionBusy != null || !warnReason.trim() || isSelfTarget || staleBlocker}
                         busy={actionBusy === 'warn'}
                         icon={<Bell className="w-3.5 h-3.5" />}
                         label="Warn"
@@ -911,7 +927,7 @@ export default function ModerationPage() {
                         onClick={() => act('warn', () => warnUser(admin!, targetId.trim(), warnReason.trim()), `Warn ${shortId(targetId.trim(), 12)}?`, 'Warning issued.')}
                       />
                       <ActionButton
-                        disabled={!canOperate || actionBusy != null || isSelfTarget || staleBlocker}
+                        disabled={!canOperate || actionBusy != null || docActionBusy != null || isSelfTarget || staleBlocker}
                         busy={actionBusy === 'clearWarnings'}
                         icon={<BellOff className="w-3.5 h-3.5" />}
                         label="Clear warnings"
@@ -947,7 +963,7 @@ export default function ModerationPage() {
                   onChange={(e) => setLookupId(e.target.value)}
                   placeholder="Look up a thread or post ID (e.g. an older report)…"
                   aria-label="Look up a thread or post ID"
-                  className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-sm font-mono focus:border-[#008CE7]"
+                  className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
                   onKeyDown={(e) => e.key === 'Enter' && lookupDocument()}
                 />
                 <button
@@ -961,7 +977,7 @@ export default function ModerationPage() {
               </div>
               {lookupError && <p role="alert" className="mt-2 text-sm text-red-400">{lookupError}</p>}
               {lookupDoc && !docsError && (
-                <DocumentCard doc={lookupDoc} canOperate={canOperate} busy={docActionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} highlight />
+                <DocumentCard doc={lookupDoc} canOperate={canOperate} busy={docActionBusy ?? actionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} />
               )}
               {docsError && !docsLoading && !lookupDoc && (
                 <p role="alert" className="mt-3 text-sm text-red-400">Couldn&apos;t load recent documents. Check your connection and retry.</p>
@@ -974,7 +990,7 @@ export default function ModerationPage() {
                   <p className="text-sm text-[#93a1bd]">No documents yet.</p>
                 )}
                 {docs.map((doc) => (
-                  <DocumentCard key={`${doc.type}:${doc.id}`} doc={doc} canOperate={canOperate} busy={docActionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} />
+                  <DocumentCard key={`${doc.type}:${doc.id}`} doc={doc} canOperate={canOperate} busy={docActionBusy ?? actionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} />
                 ))}
               </div>
               {(threadsMore || postsMore) && !docsLoading && (threadsAfter || postsAfter) && (
@@ -1105,7 +1121,7 @@ function TextInput({ label, value, onChange, type = 'text', id }: { label: strin
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-xs focus:border-[#008CE7]"
+        className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-xs focus:border-[#008CE7]"
       />
     </label>
   )

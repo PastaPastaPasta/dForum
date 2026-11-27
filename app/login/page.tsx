@@ -78,9 +78,7 @@ export default function LoginPage() {
             <p className="text-sm text-[#93a1bd] mt-2">
               The login flow holds key material — it only runs on its own top-level page.
             </p>
-            <a href={`https://${canonicalHost()}/login`} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
-              Open in a new tab <ExternalLink className="w-4 h-4" />
-            </a>
+            <p className="mt-6 text-sm text-[#93a1bd]">The login flow lives on <code className="text-[#c4cfe0]">{canonicalHost()}</code>.</p>
           </div>
         </main>
         <Footer />
@@ -108,7 +106,7 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — dForum is a static site over the Dash Platform" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level signing key stored in this tab's session storage — it can post on your behalf, but it cannot move funds" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level signing key stored in this tab's session storage — it can spend credits on fees for posts, but it cannot withdraw or transfer credits" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="Posts, profiles, forums and settings all live on-chain" />
               </div>
 
@@ -134,22 +132,14 @@ export default function LoginPage() {
                   )}
                 </div>
               ) : !canonical ? (
-                <div className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-200">
-                  <p className="font-medium text-amber-300">Login is not available on this host</p>
-                  <p className="mt-2 text-amber-200/80">
-                    This page is served from <code className="text-[#c4cfe0]">{host}</code>. The login flow and its
-                    key material are designed for <code className="text-[#c4cfe0]">{canonicalHost()}</code> only —
-                    the key lives in this tab&apos;s session storage, so a shared hosting origin would expose it to
-                    every other site on it. Open {canonicalHost()} to sign in.
+                <div className="mt-6 rounded-xl border border-[#22304e] bg-[#111a2e] p-4 text-sm text-[#93a1bd]">
+                  <p className="font-medium text-[#e8edf7]">Read-only preview — no sign-in here</p>
+                  <p className="mt-2">
+                    Signing in happens on <code className="text-[#c4cfe0]">{canonicalHost()}</code>. This build is a
+                    read-only index of the live forum — you can read threads, forums and profiles, never sign in,
+                    post or moderate. The login flow holds key material in this tab&apos;s session storage, so it
+                    only runs on a dedicated host.
                   </p>
-                  <a
-                    href={`https://${canonicalHost()}/login`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-4 inline-flex items-center gap-2 btn-primary px-4 py-2"
-                  >
-                    Open {canonicalHost()} <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                  </a>
                 </div>
               ) : (
                 <>

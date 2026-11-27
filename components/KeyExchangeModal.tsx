@@ -398,7 +398,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
-          Your wallet signs the registration; dForum then holds a HIGH-level key for this tab only — it can post on your behalf but cannot move funds or moderate.
+          Your wallet signs the registration; dForum then holds a HIGH-level key for this tab only — it can spend credits on fees for posts, but it cannot withdraw or transfer credits, and it cannot moderate.
         </p>
       </div>
     </div>
