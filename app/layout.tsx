@@ -3,7 +3,7 @@ import { SessionProvider } from '@/lib/session'
 import './globals.css'
 
 // SITE_URL is the bare public origin (no base path); BASE_PATH is where the
-// build was served under (GH Pages: /dForum). metadataBase carries the full
+// build was served under. metadataBase carries the full
 // prefix so Next joins canonicals onto the deployed path instead of the bare
 // origin — posix.join('/dForum', '/') = '/dForum', so a missing prefix here
 // means canonicals point at 404s.

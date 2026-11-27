@@ -26,7 +26,7 @@ Native Dash Platform contract moderation (protocol 14), per contract. Deployer p
 
 ## Signing (S1 — decided)
 
-Moderation transitions need a CRITICAL authentication key. The App Connect session key is HIGH-level and cannot sign moderation — the moderator console (`/moderation`) pastes the operator's CRITICAL WIF and signs in-tab (freed on wipe: pagehide, tab-hide, in-app navigation, 10-minute idle, unmount). The owner keeps the owner CRITICAL key offline for contract updates; the console refuses the owner key off localhost (the roster is fetched fresh and fail-closed). Design note: contract-bound moderation keys do not exist yet — the CRITICAL key is identity-level, same as App Connect.
+Moderation transitions need a CRITICAL authentication key. The App Connect session key is HIGH-level and cannot sign moderation — the moderator console (`/moderation`) pastes the operator's CRITICAL WIF and signs in-tab (freed on wipe: pagehide, tab-hide, in-app navigation, 10-minute idle, unmount). The owner keeps the owner CRITICAL key offline for contract updates; the console refuses the owner key off localhost (the roster is fetched fresh and fail-closed). Design note: the session key (App Connect v2) is contract-bound — it only signs document writes on dForum's contract. The moderation CRITICAL key is still identity-level: the operator pastes it in-tab and the console does not request a bound key, because the roster and moderation config are owner-level authority, not a per-document action.
 
 ## Behavior rules
 

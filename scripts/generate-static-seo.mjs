@@ -15,7 +15,7 @@ import { join } from 'node:path';
 
 const OUT = 'out';
 // The public origin the deployed site is served from, plus the base path the
-// build was served under (GH Pages serves project sites at /<repo>). Set
+// build was served under (the custom domain serves from the root). Set
 // SITE_URL/BASE_PATH when the site moves — the sitemap, robots.txt and
 // llms.txt all use them, so a wrong host here means bad indexing.
 const SITE = (process.env.SITE_URL || 'https://forum.dashhq.org').replace(/\/+$/, '');
@@ -65,7 +65,7 @@ function robots() {
   // public entry point but carries no content worth indexing.
   // Note: crawlers only read robots.txt at the HOST ROOT, so the file is
   // honored only when this site serves at the root (e.g. forum.dashhq.org) —
-  // on the GH Pages project site (/dForum) it is a best-effort artifact.
+  // on the deployed site (/) it is a best-effort artifact.
   const body = [
     'User-agent: *',
     'Allow: /',

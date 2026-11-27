@@ -13,11 +13,11 @@ Scope is the forum product surface, not the Dash Core protocol. Honest gaps are 
 | Posts (flat chronology) | `post` type; reply chronology, `replyToId` quotes, body ≤4000 chars / ≤5120 bytes |
 | Search | title/tag/forum search across the latest 25 listable threads (live + static) |
 | Profiles | identity-scoped (no global username): threads + posts, custom display name/bio/signature/website |
-| Login / register | App Connect v2 "login with Dash" — QR + wallet; key-registration on first login (the "register" equivalent, no server-side accounts) |
+| Login / register | App Connect v2 "login with Dash" — QR + wallet; the wallet registers the contract-bound key as part of the approval (the "register" equivalent, no server-side accounts) |
 | Statuses | sticky/pinned, locked, hidden (moderation), orphan drop, pagination ("Load more") |
 | Moderation | team/none/network modes, native protocol 14 moderation, console at `/moderation` |
 | SEO/AI indexing | hourly static rebuild (sitemap/robots/llms/manifest), SPA fallback for fresh content |
-| Deployment | GH Pages (read-only index — no sign-in/posting/moderation on the Pages deploy; those live on the canonical host) with custom-domain wiring (`forum.dashhq.org` CNAME pending pasta's Cloudflare step) |
+| Deployment | GitHub Pages at `forum.dashhq.org` (custom domain live) — static-first `out/` with live-fill from the platform |
 
 ## Deliberately out of scope (v1)
 
@@ -25,7 +25,7 @@ Scope is the forum product surface, not the Dash Core protocol. Honest gaps are 
 |---|---|
 | Nested sub-forums | dash.org/forum has 2-level nesting; dForum is one level of forums under a category. Adding nesting changes the orphan/index rules and the contract — revisit at registration time, not in v1. |
 | Reactions (UI) | The reaction type exists in the contract (indexed, keyed one-per-post) but the v1 UI ships no reaction surface — dash.org/forum has none either. The write path is not exposed. |
-| User reports / mod queue | The `report` type exists in the contract and the moderation console can delete/resolve it, but there is no public "flag a post" flow in the UI. A proper report queue (public report → moderator triage) is the one deliberate gap — it needs the moderation queue flow, not just a button. |
+| User reports / mod queue | The `report` type exists in the contract (deletable, status/resolution changeable) but the app neither creates nor moderates reports today — there is no public "flag a post" flow and no report triage queue in the console. A proper report queue (public report → moderator triage) is the one deliberate gap — it needs a public report flow plus a triage queue, not just a button (see `docs/design/contract-next-registration.md`). |
 | Poll/vote feature | Reference site mentioned polls historically; not in the current XenForo surface. Not shipped. |
 | RSS / notifications | Not in the v1 scope. The SPA shell is the AI/SEO surface. |
 | Edit history | No history entries; the body is author-editable and "edited" is shown via `$updatedAt` (moderator `changeFields` bump `$revision`). Append-only semantics are documented in the data model. |
@@ -33,10 +33,10 @@ Scope is the forum product surface, not the Dash Core protocol. Honest gaps are 
 
 ## Honest caveats
 
-- Deployment to `forum.dashhq.org` is blocked on pasta's Cloudflare CNAME (NXDOMAIN today); the GH Pages subdomain serves the testnet build (footer honestly labels "Testnet build").
-- The GH Pages deploy is a read-only SEO/AI indexing surface: sign-in, posting and moderation live on the canonical host (`forum.dashhq.org`, DNS pending); the Pages subdomain serves the read-only index (live-fills from the platform after first paint). The login/post/moderate coverage above is the product surface on the canonical host, not the Pages deploy.
-- The contract is a testnet deployment (`contracts/deployments/testnet.json`, `ozZN…ADM16`). A mainnet contract is unregistered by design at this stage — first production deploy needs the deployer CRITICAL key + credits, and the DNS + workflow cutover (BASE_PATH removal, SITE_URL switch) is pasta-side.
-- App Connect keys are identity-level, not contract-bound — documented in the README security notes; the mitigations (host gate, sessionStorage, offline CRITICAL key) are the answer until the protocol grows contract-bound keys.
+- Deployment target is `forum.dashhq.org` (custom domain live). The footer honestly labels the build as "Testnet build" — the contract is testnet today; a mainnet cutover is a pasta-side decision.
+- The GH Pages deploy IS the canonical host (`forum.dashhq.org`, DNS is live): sign-in, posting and moderation run here; the static-first/live-fill pattern is the indexing surface. The login/post/moderate coverage above is the product surface.
+- The contract is a testnet deployment (`contracts/deployments/testnet.json`, `ozZN…ADM16`). A mainnet contract is unregistered by design at this stage — first production deploy needs the deployer CRITICAL key + credits and the testnet→mainnet cutover (network switch + contract registration), a pasta-side decision.
+- App Connect v2 keys are contract-bound (singleContract → dForum's contract, ~0.5 DASH budget, 90-day expiry) — the bounds and budgets are enforced by the chain; the mitigations (host gate, sessionStorage, offline CRITICAL key) layer on top (see the README security notes).
 
 ## Parity verdict
 

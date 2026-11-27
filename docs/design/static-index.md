@@ -47,5 +47,5 @@ deploy keeps serving.
 
 ## Incremental / freshness
 - Hourly: full snapshot (bounded window: latest 60 threads, ≤50 forums/categories) then a rebuild. No incremental delta pipeline: a bounded window plus an honest 404-fallback covers the gap, and a full rebuild is simple and reproducible.
-- New threads/forums/posts not yet in the snapshot: SPA fallback via GH Pages `404.html` (404 status; `/t/`, `/f/`, `/u/` URLs render the live client components for that path; anything else shows the plain 404) until the next build runs.
+- New threads/forums/posts not yet in the snapshot: SPA fallback via GH Pages `404.html` (404 status; `/t/`, `/f/`, `/u/` URLs render the live client components for that path; anything else shows the plain 404) until the next build runs — the hourly cron keeps the gap small.
 - Hydration: static renders first; the SDK loads after first paint; the live layer re-queries the platform and fills in everything newer (and the moderated-state of what was prerendered is re-checked against the live query).

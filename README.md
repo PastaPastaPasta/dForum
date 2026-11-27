@@ -4,9 +4,9 @@ All storage on Dash Platform. All interactions via "login with Dash" (App Connec
 
 Baseline / parity target: dash.org/forum (XenForo-style: categories → forums → threads → posts, likes, pins, locks, search, profiles, member badges, moderation).
 
-**Live site**: https://pastapastapasta.github.io/dForum/ (subdomain — the `forum.dashhq.org` custom domain is wired into the build but its DNS is not added yet; deploy remains blocked until the CNAME exists).
+**Live site**: https://forum.dashhq.org (GitHub Pages custom domain — DNS is live).
 
-> **Live-index posture (read-only).** The GitHub Pages build (`BASE_PATH=/dForum`) is a read-only SEO/AI indexing surface of the live forum — no sign-in, no posting, no moderation. It live-fills from the platform after first paint (the evo-sdk lazy-loads on the first live query; the live fill never depends on the snapshot beyond first paint). Login, posting and moderation live on the canonical host, `forum.dashhq.org` (DNS pending).
+> **Live-index posture.** The site is a static shell served from `forum.dashhq.org` — it loads the snapshot first (fast, indexable) and live-fills from the platform after first paint (the evo-sdk lazy-loads on the first live query; the live fill never depends on the snapshot beyond first paint). Login, posting and moderation run on this canonical host (they refuse to run everywhere else).
 
 ## Architecture
 
@@ -36,7 +36,7 @@ Next.js 14 static export (TypeScript + Tailwind, react 18) with the Dash Platfor
 
 ### Identity & login
 
-App Connect v2 ("login with Dash", vendored `platform-auth` under `vendor/platform-auth/`). Session = identity id + auth key in sessionStorage (`dforum:auth:*`), never persisted cross-tab/cross-device; the login key itself is never stored anywhere.
+App Connect v2 ("login with Dash", `dashpay://connect` — vendored `platform-auth` under `vendor/platform-auth/`). The wallet registers a HIGH-level, contract-bound auth key (singleContract → dForum's contract, ~0.5 DASH lifetime budget, 90-day expiry) as part of the approval; the app verifies the answer on chain and stores the resulting key in sessionStorage (`dforum:auth:*`), never persisted cross-tab/cross-device. The login key itself is never stored anywhere. Writes are batched — a bound key only signs batched transitions.
 
 ### Static index strategy
 
@@ -52,12 +52,12 @@ node scripts/generate-static-seo.mjs
 python3 -m http.server 8899 --directory out   # preview the static site
 ```
 
-Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + dispatch). The workflow has a **build job** (checkout → npm ci → tsc → snapshot → build → SEO files → upload-pages-artifact) with `BASE_PATH=/dForum`, and a separate **deploy job** (`upload-pages-artifact` → `deploy-pages`). The split gives every build a clean `contents: read` sandbox and keeps the deploy permission scoped to the deploy job. Static site served from `out/`; `data/snapshot.json` is gitignored (CI regenerates the real one) — a stub is written by `scripts/ensure-snapshot-stub.mjs` so a fresh clone still type-checks. A real snapshot never lands in git.
+Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + dispatch). The workflow has a **build job** (checkout → npm ci → tsc → snapshot → build → SEO files → upload-pages-artifact), and a separate **deploy job** (`upload-pages-artifact` → `deploy-pages`). The split gives every build a clean `contents: read` sandbox and keeps the deploy permission scoped to the deploy job. Static site served from `out/`; `data/snapshot.json` is gitignored (CI regenerates the real one) — a stub is written by `scripts/ensure-snapshot-stub.mjs` so a fresh clone still type-checks. A real snapshot never lands in git.
 
 ## Local dev
 
-- GitHub Pages subdomain: `https://pastapastapasta.github.io/dForum/`
-- The site is fully readable signed-out (home, forums, threads, profiles, search) — the snapshot is public-readable and live content renders from it plus the platform. Sign-in, posting and moderation are NOT available on the Pages deploy — they live on the canonical host (`forum.dashhq.org`, DNS pending).
+- Custom domain: `https://forum.dashhq.org`
+- The site is fully readable signed-out (home, forums, threads, profiles, search) — the snapshot is public-readable and live content renders from it plus the platform. Sign-in, posting and moderation run on the canonical host.
 - The moderation console requires a CRITICAL key for a contract moderator identity; without it the console renders but actions disable.
 
 ## Security notes
@@ -66,7 +66,7 @@ Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + disp
 - The moderation console's CRITICAL key never leaves the operator's browser — the WASM signer is freed and the WIF dropped from app state on wipe (pagehide, tab-hide, in-app navigation, 10-minute idle, unmount).
 - CSP is declared via a per-page `<meta http-equiv>` written by the post-build step (`scripts/csp.mjs`, after `next build`): the export is header-less, and inline scripts (the RSC payload) can't be allowed without `'unsafe-inline'` — so each page's inline scripts are hashed (sha256) and the meta allows exactly those hashes. External scripts load from `'self'`; workers/wasm stay allowed. `connect-src 'self' https: wss:` (the Dash Platform is hosted on masternode IPs, so the connect-src cannot be narrowed without breaking the app). Framework `frame-ancestors` is not expressible in a meta CSP — the moderation console and login page instead enforce a JavaScript frame-buster (`window.top !== window.self` → top navigates away).
 - Public files (sitemap, llms.txt, manifest) only carry public content, and moderated content is excluded.
-- **App Connect session-key bounds (design gap, documented).** The App Connect v2 flow registers an identity-level HIGH auth key. The protocol (and the vendored `platform-auth` client) does not support contract-bound keys — the key can sign documents on any contract the holder can read. Mitigations: the host gate (login and the moderation console are hard-refused on non-canonical origins — no acknowledgement flow — and simply stay put, read-only, on the public index deploy), sessionStorage scoped to the tab, never persisted cross-tab/cross-device, an expiry check on restore (a session-restored key is only trusted for 24 h), the HIGH key never leaves the browser beyond the platform request, and no storage of the login key. The owner keeps the full-contract CRITICAL key offline (full contract authority includes the roster and moderation config — the console refuses it off localhost). **Revoking the session key:** signing with a HIGH key here does not bind it to the contract; if you need it dead, disable the HIGH key from your identity (platform key UI) or rotate the identity.
+- **App Connect session-key bounds.** The App Connect v2 flow registers a HIGH-level auth key bound to dForum's contract (`singleContract`, ~0.5 DASH lifetime budget, 90-day expiry) as part of the approval; the chain enforces the bounds and budgets — the key can only sign document operations on dForum's contract, and only until the budget or expiry passes. The mitigations layer on top: the host gate (login and the moderation console are hard-refused on non-canonical origins — no acknowledgement flow — and simply stay put, read-only, on the read-only deploy), sessionStorage scoped to the tab, never persisted cross-tab/cross-device, an expiry check on restore (a session-restored key is only trusted for 24 h), the HIGH key never leaves the browser beyond the platform request, no storage of the login key, and batched writes (bound keys sign batches only). The owner keeps the full-contract CRITICAL key offline (full contract authority includes the roster and moderation config — the console refuses it off localhost). **Revoking the session key:** disconnect dForum in the wallet (or disable/rotate the HIGH key from the identity's key UI) — the wallet's grant record is keyed by (identity, app id, connection id), so a re-login supersedes the earlier grant.
 - **Host gate.** The key-signing surfaces are gated by the host: `localhost` and `forum.dashhq.org` are pre-approved. **Login** and **the moderation console** — on any other origin — refuse outright: no acknowledgement checkbox, no key-signing flow, only an open-on-the-canonical-host affordance. The dedicated canonical host is the goal.
 - Write fees: post 0.00134 DASH, thread 0.00164, reaction 0.00091, category 0.00038, forumSettings 0.00024 (credits ÷ 1e11) — all well under the 0.005 target (see `docs/design/spike-results.md`).
 
@@ -76,7 +76,7 @@ Deploy is via `.github/workflows/pages.yml` (hourly cron + push to `main` + disp
 | --- | --- |
 | `app/` | Next.js app router pages (path routes `/t/[id]`, `/f/[slug]`; shell pages only) |
 | `components/` | Navbar, Footer, Avatar, LiveFeed, RelativeTime, KeyExchangeModal, ThreadRow, ThreadClient, ForumClient, ProfileClient, HomeClient, SearchClient, NewThreadClient |
-| `lib/` | Auth (App Connect: controller, adapters, decoder, key-registration-builder), services (evo-sdk, snapshot-server, document, moderation, orphan, moderator-fields), use-profiles, session, constants |
+| `lib/` | Auth (App Connect v2: use-login, request, port, key-mapping, connection-id; controller, adapters, decoder), services (evo-sdk, batch-write, snapshot-server, document, moderation, orphan, moderator-fields), use-profiles, session, constants |
 | `contracts/` | build.mjs + generated contracts (none/team/network) + deployments record |
 | `scripts/` | snapshot.mjs, generate-static-seo.mjs, provision-identity.mjs, spikes/ |
 | `vendor/platform-auth/` | Vendored App Connect v2 client |
