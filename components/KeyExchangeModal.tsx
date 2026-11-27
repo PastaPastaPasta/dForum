@@ -4,103 +4,39 @@
  * Login with Dash (App Connect v2) modal.
  *
  * QR flow:
- *  1. App generates an ephemeral keypair + dash-key: URI (QR) — wallet scans
- *  2. Wallet responds via the key-exchange contract — app decrypts login key
- *  3. Keys are registered on the identity (first login only) — dash-st: QR
- *  4. Login completes → session persisted → modal closes
+ *  1. App makes a fresh ephemeral key + App Connect request (QR) — wallet scans
+ *  2. Wallet registers the bound keys, publishes a loginKeyResponse on chain
+ *  3. App verifies the answer on chain and stores the grant as a tab session
+ *
+ * The wallet registers the keys itself — no dash-st: registration step, no
+ * app-side key-registration flow. Nothing is signed by the app.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle, ExternalLink } from 'lucide-react'
-import { useYapprKeyExchangeLogin, useYapprKeyRegistration } from 'platform-auth'
+import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle, ExternalLink, UserRound } from 'lucide-react'
 import { useSession } from '@/lib/session'
+import { useAppConnectLogin } from '@/lib/app-connect/use-login'
 import { formatTime } from '@/lib/utils'
 import { redactWif } from '@/lib/redact'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input, select, textarea, [role="button"]'
 
+const CARRIER_LABELS: Record<string, { name: string; audience: string }> = {
+  dashpay: { name: 'dashpay://connect', audience: 'new wallets' },
+  'dash-key': { name: 'dash-key:', audience: 'current wallets' },
+}
+
 export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   const { controller } = useSession()
-  const login = useYapprKeyExchangeLogin(controller)
-  const registration = useYapprKeyRegistration(controller)
+  const login = useAppConnectLogin(controller)
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
-  const [completeError, setCompleteError] = useState<string | null>(null)
-  const registrationStartedRef = useRef(false)
-  const completingRef = useRef(false)
+  const [accepting, setAccepting] = useState(false)
+  const acceptRef = useRef(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const previouslyFocused = useRef<HTMLElement | null>(null)
 
-  // Start the exchange once on mount
-  useEffect(() => {
-    login.start()
-    return () => login.cancel()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Drive the key-registration flow when the login flow needs it
-  useEffect(() => {
-    if (login.state === 'registering' && login.result && !registrationStartedRef.current) {
-      registrationStartedRef.current = true
-      registration.start(login.result.identityId, login.result.authKey, login.result.encryptionKey)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [login.state, login.result])
-
-  const handleComplete = useCallback(async () => {
-    // Ref guard — the two completion effects fire on the same state change
-    // with stale closures; the ref is the single source.
-    if (completingRef.current) return
-    if (!login.result) return
-    completingRef.current = true
-    setCompleteError(null)
-    try {
-      await controller.loginWithLoginKey(
-        login.result.identityId,
-        login.result.loginKey,
-        login.result.keyIndex,
-      )
-      login.cancel()
-      registration.cancel()
-      onClose?.()
-    } catch (err) {
-      completingRef.current = false
-      setCompleteError(redactWif(err instanceof Error ? err.message : 'Signing you in failed — try again'))
-    }
-  }, [controller, login, registration, onClose])
-
-  // Finish login when the login exchange completes (keys already registered)
-  useEffect(() => {
-    if (login.state === 'complete' && login.result && !completingRef.current) {
-      handleComplete()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [login.state, login.result])
-
-  // Finish login after registration completes
-  useEffect(() => {
-    if (registration.state === 'complete' && login.result && !completingRef.current) {
-      handleComplete()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registration.state, login.result])
-
-  const displayUri = login.state === 'registering' ? registration.uri : login.uri
-  const remaining = login.state === 'registering' ? registration.remainingTime : login.remainingTime
-
-  const copy = async () => {
-    if (!displayUri) return
-    try {
-      await navigator.clipboard.writeText(displayUri)
-      setCopied(true)
-      setCopyFailed(false)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      setCopyFailed(true)
-    }
-  }
-
-  // Escape closes; focus moves into the dialog on open; restore on close.
+  // Focus trap + Escape
   useEffect(() => {
     if (!onClose) return
     previouslyFocused.current = document.activeElement as HTMLElement | null
@@ -114,7 +50,6 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose])
 
-  // Focus trap: Tab / Shift+Tab cycle inside the dialog.
   const onKeyDownTrap = (e: React.KeyboardEvent) => {
     if (e.key !== 'Tab') return
     const dialog = dialogRef.current
@@ -140,55 +75,48 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
     return () => { document.body.style.overflow = prev }
   }, [])
 
+  const accept = useCallback(async (identityId: string) => {
+    if (acceptRef.current) return
+    acceptRef.current = true
+    setAccepting(true)
+    try {
+      const ok = await login.accept(identityId)
+      if (ok) onClose?.()
+      // A failed accept leaves the phase in 'error' — the UI shows it.
+    } finally {
+      acceptRef.current = false
+      setAccepting(false)
+    }
+  }, [login, onClose])
+
   const retry = () => {
     setCopied(false)
     setCopyFailed(false)
-    setCompleteError(null)
-    // Sign-in itself failed after the exchange completed — retry in place,
-    // no QR rescan needed.
-    if ((login.state === 'complete' || registration.state === 'complete') && login.result && !completingRef.current) {
-      void handleComplete()
-      return
-    }
-    // Registration failed — resume just the registration step with the same
-    // identity and keys (no new QR for the login exchange).
-    if (login.state === 'registering' && registration.state === 'error') {
-      registration.retry()
-      return
-    }
-    // Login-level failure — restart the exchange. Reset the registration
-    // guard so a re-registration can be driven when the flow returns.
-    registrationStartedRef.current = false
     login.retry()
   }
 
-  // Registration failures render inside the registering block (see the JSX),
-  // so the bottom alert only covers login failures and completion failures.
-  const showError =
-    completeError != null ||
-    login.state === 'error' ||
-    login.state === 'timeout'
+  const primaryCarrierUri = login.uris?.[0] ?? null
+  const fallbackCarrier = login.uris?.[1] ?? null
+  const remaining = login.remainingSeconds != null ? formatTime(login.remainingSeconds) : null
 
+  const showError = login.phase === 'error' || login.phase === 'timeout' || login.phase === 'too-many'
   const errorText =
-    completeError ??
-    (login.state === 'timeout'
+    login.phase === 'timeout'
       ? 'Your wallet did not respond in time. Scan the QR again — or open dForum in a browser on the same device your wallet is installed on.'
-      : login.state === 'error'
-        ? redactWif(login.error ?? 'Something went wrong. Try again.')
-        : null)
+      : login.phase === 'too-many'
+        ? 'Too many responses to this request — scan the QR again to start fresh.'
+        : login.phase === 'error'
+          ? redactWif(login.error ?? 'Something went wrong. Try again.')
+          : null
 
   const stepText =
-    login.state === 'complete' || registration.state === 'complete'
-      ? 'Signing you in…'
-      : registration.state === 'waiting'
-          ? 'Waiting for wallet to sign the registration…'
-          : registration.state === 'verifying'
-            ? 'Verifying keys…'
-            : login.state === 'waiting'
-              ? 'Waiting for wallet…'
-              : login.state === 'registering'
-                ? 'Registering keys with your wallet…'
-                : 'Preparing wallet sign-in…'
+    login.phase === 'preparing' ? 'Preparing wallet sign-in…'
+      : login.phase === 'accepted' ? 'Signing you in…'
+        : login.phase === 'confirm' ? 'Wallet responded — choose which identity to sign in with'
+          : login.phase === 'waiting' ? 'Waiting for wallet…'
+            : login.phase === 'timeout' ? 'Timed out'
+              : login.phase === 'too-many' ? 'Too many responses'
+                : 'Signing you in…'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -216,154 +144,105 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
         <div aria-live="polite" className="sr-only">{copied ? 'URI copied' : ''}</div>
 
         <div className="mt-6 flex flex-col items-center gap-4">
-          {(login.state === 'idle' || login.state === 'generating') && (
+          {login.phase === 'preparing' && (
             <>
               <Loader2 className="w-8 h-8 animate-spin text-[#4db3ff]" aria-hidden="true" />
               <p className="text-sm text-[#93a1bd]">Preparing wallet sign-in…</p>
             </>
           )}
 
-          {login.state === 'waiting' && (
+          {login.phase === 'waiting' && primaryCarrierUri && (
             <>
               <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
-                {displayUri && (
-                  <QRCodeSVG value={displayUri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Login URI QR code" />
-                )}
+                <QRCodeSVG value={primaryCarrierUri.uri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Login URI QR code" />
               </div>
               <div className="text-center">
                 <p className="text-sm font-medium">Scan with your Dash wallet</p>
                 <p className="text-xs text-[#93a1bd] mt-1">
-                  {remaining != null ? `Expires in ${formatTime(remaining)}` : 'Waiting for wallet…'}
+                  {remaining != null ? `Expires in ${remaining}` : 'Waiting for wallet…'}
                 </p>
               </div>
-              {displayUri && (
-                <>
-                  <a
-                    href={displayUri}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-xs text-[#4db3ff] hover:border-[#008CE7] hover:text-white transition"
-                    aria-label="Open login URI in wallet"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> Open in wallet
-                  </a>
-                  <button
-                    onClick={copy}
-                    className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copied ? 'URI copied' : 'Copy URI'}
-                  </button>
-                  {copyFailed && (
-                    <div className="w-full">
-                      <p className="text-xs text-amber-400">Copy failed — select the URI below</p>
-                      <input readOnly value={displayUri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-xs font-mono text-[#c4cfe0] break-all" aria-label="Login URI" />
-                    </div>
-                  )}
-                  <p className="text-xs text-[#93a1bd] text-center">
-                    Scan the QR with your wallet, or paste the URI into it.
-                  </p>
-                </>
+              <a
+                href={primaryCarrierUri.uri}
+                className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-xs text-[#4db3ff] hover:border-[#008CE7] hover:text-white transition"
+                aria-label="Open login URI in wallet"
+              >
+                <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> Open in wallet
+              </a>
+              {fallbackCarrier && (
+                <a
+                  href={fallbackCarrier.uri}
+                  className="text-xs text-[#93a1bd] hover:text-white transition underline underline-offset-2"
+                >
+                  Use the {CARRIER_LABELS[fallbackCarrier.carrier]?.name ?? 'alternate'} link
+                </a>
               )}
-            </>
-          )}
-
-          {(login.state === 'decrypting' || login.state === 'checking') && (
-            <div className="flex flex-col items-center gap-3 py-2">
-              <Loader2 className="w-8 h-8 animate-spin text-[#4db3ff]" aria-hidden="true" />
-              <p className="text-sm font-medium">Wallet responded — verifying…</p>
-              <p className="text-xs text-[#93a1bd]">Checking the registration and keys…</p>
-            </div>
-          )}
-
-          {login.state === 'registering' && registration.state === 'error' ? (
-            <>
-              <div role="alert" className="text-center">
-                <p className="text-sm font-medium text-red-400 inline-flex items-center gap-2 justify-center">
-                  <AlertTriangle className="w-4 h-4" aria-hidden="true" /> Key registration failed
-                </p>
-                <p className="text-xs text-[#93a1bd] mt-2">
-                  {redactWif(registration.error ?? 'Something went wrong — your keys were not registered.')}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => registration.retry()} className="btn-primary px-4 py-2 text-sm font-medium">
-                  Retry registration
-                </button>
-                {onClose && (
-                  <button
-                    onClick={onClose}
-                    className="btn-secondary"
-                  >
-                    Close
-                  </button>
-                )}
-              </div>
-            </>
-          ) : login.state === 'registering' && (
-            <>
-              <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
-                {registration.uri ? (
-                  <QRCodeSVG value={registration.uri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Key registration QR code" />
-                ) : (
-                  <Loader2 className="w-24 h-24 animate-spin text-[#008CE7]" aria-hidden="true" />
-                )}
-              </div>
-              <div className="text-center">
-                {registration.state === 'building' && (
-                  <p className="text-sm font-medium">Building key registration…</p>
-                )}
-                {registration.state === 'waiting' && (
-                  <>
-                    <p className="text-sm font-medium">Register dForum keys</p>
-                    <p className="text-xs text-[#93a1bd] mt-1">Scan with your wallet and sign the registration</p>
-                    {registration.remainingTime != null && (
-                      <p className="text-xs text-[#93a1bd] mt-1">Expires in {formatTime(registration.remainingTime)}</p>
-                    )}
-                  </>
-                )}
-                {registration.state === 'verifying' && (
-                  <p className="text-sm font-medium flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-[#4db3ff]" aria-hidden="true" /> Verifying keys…</p>
-                )}
-              </div>
-              {registration.uri && registration.state !== 'verifying' && (
-                <div className="flex flex-col items-center gap-2">
-                  <a
-                    href={registration.uri}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-xs text-[#4db3ff] hover:border-[#008CE7] hover:text-white transition"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> Open in wallet
-                  </a>
-                  <button
-                    onClick={copy}
-                    className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copied ? 'URI copied' : 'Copy URI'}
-                  </button>
-                  {copyFailed && (
-                    <div className="w-full">
-                      <p className="text-xs text-amber-400">Copy failed — select the URI below</p>
-                      <input readOnly value={registration.uri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-xs font-mono text-[#c4cfe0] break-all" aria-label="Key registration URI" />
-                    </div>
-                  )}
-                  <p className="text-xs text-[#93a1bd] text-center">
-                    Scan the QR with your wallet, use the link above, or paste the URI.
-                  </p>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(primaryCarrierUri.uri)
+                    setCopied(true)
+                    setCopyFailed(false)
+                    setTimeout(() => setCopied(false), 1500)
+                  } catch {
+                    setCopyFailed(true)
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? 'URI copied' : 'Copy URI'}
+              </button>
+              {copyFailed && (
+                <div className="w-full">
+                  <p className="text-xs text-amber-400">Copy failed — select the URI below</p>
+                  <input readOnly value={primaryCarrierUri.uri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-xs font-mono text-[#c4cfe0] break-all" aria-label="Login URI" />
                 </div>
               )}
+              <p className="text-xs text-[#93a1bd] text-center">
+                Scan the QR with your wallet, or paste the URI into it.
+              </p>
             </>
           )}
 
-          {(login.state === 'complete' || registration.state === 'complete') && !completeError && (
+          {login.phase === 'confirm' && (
+            <>
+              <div className="flex flex-col items-center gap-3">
+                <ShieldCheck className="w-10 h-10 text-[#4db3ff]" aria-hidden="true" />
+                <p className="text-sm font-medium text-center">Wallet responded — choose which identity to sign in with</p>
+                <ul className="w-full space-y-2">
+                  {login.candidates.map((candidate) => (
+                    <li key={candidate.identityId}>
+                      <button
+                        onClick={() => accept(candidate.identityId)}
+                        disabled={accepting}
+                        className="w-full flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#18233c] px-4 py-3 text-left hover:border-[#008CE7] hover:bg-[#1d2a45] transition disabled:opacity-50"
+                      >
+                        <UserRound className="w-5 h-5 text-[#4db3ff] shrink-0" aria-hidden="true" />
+                        <span className="min-w-0">
+                          <span className="block text-xs font-mono text-white truncate">{candidate.identityId}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {accepting && <Loader2 className="w-5 h-5 animate-spin text-[#4db3ff]" aria-hidden="true" />}
+                <button
+                  onClick={retry}
+                  disabled={accepting}
+                  className="text-xs text-[#93a1bd] hover:text-white transition disabled:opacity-50"
+                >
+                  None of these — start again
+                </button>
+              </div>
+            </>
+          )}
+
+          {login.phase === 'accepted' && (
             <>
               <div className="flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/15">
                 <ShieldCheck className="w-8 h-8 text-emerald-400" aria-hidden="true" />
               </div>
-              {login.result?.identityId && (
-                <div className="text-center">
-                  <p className="text-xs text-[#93a1bd]">Signing in as</p>
-                  <p className="text-xs font-mono text-white break-all max-w-xs">{login.result.identityId}</p>
-                </div>
-              )}
               <p className="text-sm font-medium text-emerald-400">Signing you in…</p>
             </>
           )}
@@ -372,7 +251,8 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             <>
               <div role="alert" className="text-center">
                 <p className="text-sm font-medium text-red-400 inline-flex items-center gap-2 justify-center">
-                  <AlertTriangle className="w-4 h-4" aria-hidden="true" /> {completeError ? 'Sign-in failed' : (login.state === 'timeout' ? 'Timed out' : 'Login failed')}
+                  <AlertTriangle className="w-4 h-4" aria-hidden="true" />
+                  {login.phase === 'timeout' ? 'Timed out' : login.phase === 'too-many' ? 'Too many responses' : 'Login failed'}
                 </p>
                 <p className="text-xs text-[#93a1bd] mt-2">{errorText}</p>
               </div>
@@ -381,10 +261,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   Try again
                 </button>
                 {onClose && (
-                  <button
-                    onClick={onClose}
-                    className="btn-secondary"
-                  >
+                  <button onClick={onClose} className="btn-secondary">
                     Close
                   </button>
                 )}
@@ -395,7 +272,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
-          Your wallet signs the registration; dForum then holds a HIGH-level key for this tab only — App Connect keys are not contract-bound (it can sign documents on the contracts you can read), it cannot withdraw or transfer credits, and it cannot moderate.
+          Your wallet registers a HIGH-level, contract-bound key for this tab only — it can sign documents on dForum&apos;s contract, and nothing else. It cannot withdraw or transfer credits, and its use is limited to this host.
         </p>
       </div>
     </div>

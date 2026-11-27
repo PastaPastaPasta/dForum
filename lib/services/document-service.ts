@@ -9,6 +9,7 @@
  */
 import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import bs58 from 'bs58'
+import { batchedWrite } from '@/lib/services/batch-write'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { hash160 } from '@/lib/auth/protocol'
@@ -207,6 +208,9 @@ export interface SigningContext {
   identityId: string
   identityKey: unknown
   signer: InstanceType<typeof IdentitySignerCtor>
+  /** True when the matched key is contract-bound or limited — Platform only
+   * accepts batched transitions from those (20013 otherwise). */
+  bound: boolean
 }
 
 /**
@@ -282,7 +286,10 @@ export async function buildSigning(
     if (requiredAtLeast === 'high' && levelNum > 2) continue
     // find the wasm key object by id
     const wasmKey = identity.getPublicKeyById(key.keyId)
-    if (wasmKey) return { identityId, identityKey: wasmKey, signer }
+    if (wasmKey) {
+      const limited = Boolean(wasmKey.contractBounds) || wasmKey.totalBudget != null || wasmKey.expiresAt != null
+      return { identityId, identityKey: wasmKey, signer, bound: limited }
+    }
   }
   try { signer.free() } catch { /* already freed */ }
   return null
@@ -341,6 +348,28 @@ export async function createDocument(
       entropy,
       identityContractNonce: nonce,
     })
+    if (sign.bound) {
+      // Contract-bound keys sign batches only (20013 otherwise).
+      const documentId = await batchedWrite({
+        kind: 'create',
+        document,
+        ownerId: identityId,
+        nonce,
+        authKeyWif,
+        identityKey: sign.identityKey as never,
+      })
+      const after = await get(type, documentId).catch(() => null)
+      return after ?? {
+        id: documentId,
+        ownerId: identityId,
+        dataContractId: CONTRACT_ID,
+        documentTypeName: type,
+        revision: 1n,
+        createdAt: 0,
+        updatedAt: 0,
+        properties: stripModeratorFields(type, properties),
+      }
+    }
     const created = await sdk.documents.create({ document, identityKey: sign.identityKey as never, signer: sign.signer })
     const normalized = normalizeDoc(created)
     if (!normalized) throw new Error('Document create returned an unreadable document')
@@ -376,6 +405,31 @@ export async function replaceDocument(
       id: existing.id,
       identityContractNonce: nonce,
     })
+    if (sign.bound) {
+      // Contract-bound keys sign batches only (20013 otherwise).
+      await batchedWrite({
+        kind: 'replace',
+        document,
+        ownerId: identityId,
+        nonce,
+        authKeyWif,
+        identityKey: sign.identityKey as never,
+      })
+      // The chain wrote the document — a re-read failure is not a write
+      // failure. Report honestly: return what the write produced.
+      const after = await get(existing.documentTypeName, existing.id).catch(() => null)
+      if (after) return after
+      return {
+        id: existing.id,
+        ownerId: identityId,
+        dataContractId: CONTRACT_ID,
+        documentTypeName: existing.documentTypeName,
+        revision: existing.revision + 1n,
+        createdAt: existing.createdAt,
+        updatedAt: existing.updatedAt,
+        properties: updatedProps,
+      }
+    }
     await sdk.documents.replace({ document, identityKey: sign.identityKey as never, signer: sign.signer })
     // The chain wrote the document — a re-read failure is not a write
     // failure. Report honestly: return what the write produced.

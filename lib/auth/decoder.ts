@@ -40,6 +40,13 @@ export function fromBase64(base64: string): Uint8Array {
   return bytes
 }
 
+/** Encode a WIF — the caller's network. The compressed flag appends the 0x01 marker. */
+export function encodeWifForNetwork(privateKey: Uint8Array, network: 'testnet' | 'mainnet', compressed: boolean): string {
+  const prefix = network === 'mainnet' ? 0xcc : 0xef
+  const payload = compressed ? new Uint8Array([prefix, ...privateKey, 0x01]) : new Uint8Array([prefix, ...privateKey])
+  return bs58check.encode(payload)
+}
+
 /** Decode a WIF — only the network's version byte is accepted. Returns null
  * for anything else (never guesses). */
 export function decodeWif(wif: string, network: 'testnet' | 'mainnet'): { privateKey: Uint8Array; compressed: boolean } | null {

@@ -5,7 +5,6 @@
  * namespace — tab-scoped, cleared on tab close, never sent anywhere except
  * through the platform-auth controller's own handlers (all in-browser).
  */
-import bs58 from 'bs58'
 import bs58check from 'bs58check'
 import { hkdf } from '@noble/hashes/hkdf.js'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -23,12 +22,9 @@ import {
   type PlatformAuthDependencies,
   type SecretStore,
   type SessionStore,
-  type YapprKeyExchangePort,
 } from 'platform-auth'
-import { CONTRACT_ID, NETWORK, STORAGE_KEY_PREFIX } from '@/lib/constants'
+import { NETWORK, STORAGE_KEY_PREFIX } from '@/lib/constants'
 import { getSdk } from '@/lib/services/evo-sdk-service'
-import { buildUnsignedKeyRegistrationTransition, checkKeysRegistered } from '@/lib/auth/key-registration-builder'
-import { KEY_EXCHANGE_CONTRACT_ID } from '@/lib/constants'
 
 const NS = `${STORAGE_KEY_PREFIX}:auth:`
 const SESSION_KEY = `${NS}session`
@@ -330,112 +326,6 @@ export const cryptoPort = {
   deriveEncryptionKeyFromLogin: deriveYapprEncryptionKeyFromLogin,
 }
 
-// ---- key-exchange port ------------------------------------------------------
-
-/** Response doc ids already handed out — a poll must never replay the same one. */
-const seenResponseIds = new Set<string>()
-
-function toBase64OfBytes(data: unknown): Uint8Array | null {
-  if (data instanceof Uint8Array) return data
-  if (Array.isArray(data) && data.every((v) => typeof v === 'number')) return new Uint8Array(data)
-  if (typeof data === 'string') {
-    try {
-      return fromBase64(data)
-    } catch {
-      if (/^[0-9a-fA-F]+$/.test(data) && data.length % 2 === 0) {
-        const bytes = new Uint8Array(data.length / 2)
-        for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(data.slice(i * 2, i * 2 + 2), 16)
-        return bytes
-      }
-      return null
-    }
-  }
-  if (data && typeof data === 'object' && 'type' in data && 'data' in data) {
-    const like = data as { type: string; data: number[] }
-    if (like.type === 'Buffer' && Array.isArray(like.data)) return new Uint8Array(like.data)
-  }
-  if (data && typeof data === 'object') {
-    const keys = Object.keys(data as Record<string, unknown>)
-    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
-      const asObj = data as Record<string, unknown>
-      const max = Math.max(...keys.map((k) => Number(k)))
-      if (max === keys.length - 1) {
-        const bytes = new Uint8Array(keys.length)
-        for (const k of keys) bytes[Number(k)] = Number(asObj[k]) & 0xff
-        return bytes
-      }
-    }
-  }
-  return null
-}
-
-export const keyExchangePort: YapprKeyExchangePort = {
-  async getResponse(contractIdBytes: Uint8Array, appEphemeralPubKeyHash: Uint8Array) {
-    const sdk = await getSdk()
-    const contractIdBase58 = bs58.encode(contractIdBytes)
-    const hashBase64 = toBase64(appEphemeralPubKeyHash)
-
-    // Oldest-first and several candidates, not one: a malformed or
-    // attacker-posted document must never wedge the poll — skip
-    // structurally invalid docs and only return ones that can decrypt.
-    // Docs already returned are remembered and skipped so the poll cannot
-    // hand the same response back twice.
-    const page = await sdk.documents.query({
-      dataContractId: KEY_EXCHANGE_CONTRACT_ID,
-      documentTypeName: 'loginKeyResponse',
-      where: [
-        ['contractId', '==', contractIdBase58],
-        ['appEphemeralPubKeyHash', '==', hashBase64],
-      ],
-      orderBy: [['$createdAt', 'asc']],
-      limit: 10,
-    })
-
-    for (const doc of page.values()) {
-      if (!doc) continue
-      const obj = (doc.toObject?.() ?? doc) as Record<string, unknown>
-      const idRaw = obj.$id ?? obj.id
-      const idString = typeof idRaw === 'string' ? idRaw : String(idRaw ?? '')
-      if (!idString || seenResponseIds.has(idString)) continue
-      const walletEphemeralPubKey = toBase64OfBytes(obj.walletEphemeralPubKey)
-      const encryptedPayload = toBase64OfBytes(obj.encryptedPayload)
-      const keyIndex = Number(obj.keyIndex ?? 0)
-      if (!walletEphemeralPubKey || walletEphemeralPubKey.length !== 33) continue
-      if (!encryptedPayload || encryptedPayload.length < 60) continue
-      const ownerRaw = obj.$ownerId ?? obj.ownerId
-      const ownerId = typeof ownerRaw === 'string' ? ownerRaw : String(ownerRaw ?? '')
-      if (!ownerId) continue
-      seenResponseIds.add(idString)
-      return {
-        $id: idString,
-        $ownerId: ownerId,
-        $revision: Number(obj.$revision ?? obj.revision ?? 1),
-        contractId: contractIdBytes,
-        appEphemeralPubKeyHash,
-        walletEphemeralPubKey,
-        encryptedPayload,
-        keyIndex,
-      }
-    }
-    return null
-  },
-
-  async buildUnsignedKeyRegistrationTransition(request) {
-    const { transitionBytes, authKeyId, encryptionKeyId, identityRevision } =
-      await buildUnsignedKeyRegistrationTransition(request)
-    return {
-      transitionBytes,
-      authKeyId,
-      encryptionKeyId,
-      identityRevision,
-    }
-  },
-
-  async checkKeysRegistered(identityId, authPublicKey, encryptionPublicKey) {
-    return checkKeysRegistered(identityId, authPublicKey, encryptionPublicKey)
-  },
-}
-
 // ---- assemble ---------------------------------------------------------------
 
 export function createPlatformAuthDependencies(): PlatformAuthDependencies {
@@ -445,21 +335,12 @@ export function createPlatformAuthDependencies(): PlatformAuthDependencies {
     secretStore,
     identity: identityPort,
     crypto: cryptoPort,
-    yapprKeyExchange: keyExchangePort,
-    yapprKeyExchangeConfig: {
-      appContractId: CONTRACT_ID,
-      keyExchangeContractId: KEY_EXCHANGE_CONTRACT_ID,
-      network: (NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as NetworkName,
-      label: 'Login to dForum',
-      pollIntervalMs: 3000,
-      timeoutMs: 180000,
-    },
     features: {
       usernameGate: false,
       profileGate: false,
       passwordLogin: false,
       passkeyLogin: false,
-      keyExchangeLogin: true,
+      keyExchangeLogin: false,
       authVault: false,
       legacyPasswordLogin: false,
       autoDeriveEncryptionKey: false,

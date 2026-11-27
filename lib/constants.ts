@@ -22,8 +22,6 @@ export const CONTRACT_ID =
   record?.contracts?.network?.contractId ||
   ''
 
-export const KEY_EXCHANGE_CONTRACT_ID = process.env.NEXT_PUBLIC_KEY_EXCHANGE_CONTRACT_ID || '7UaqHGBJBbRLJ4fUWS45cnud8PPUugJWoGTt1SKwHJ2P'
-
 /** localStorage/sessionStorage scope — namespaces this app's keys by name.
  * Every same-origin page can read sessionStorage, so the host gate (lib/host.ts)
  * is what protects the key material, not this prefix. */

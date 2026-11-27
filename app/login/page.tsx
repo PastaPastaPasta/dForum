@@ -110,7 +110,7 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — dForum is a static site over the Dash Platform" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level signing key stored in this tab's session storage — App Connect keys are not contract-bound, so it can sign documents on any contract you can read; it cannot withdraw or transfer credits, and its use is limited to this host" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level, contract-bound signing key stored in this tab's session storage — it can sign documents on dForum's contract only; it cannot withdraw or transfer credits, and its use is limited to this host" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="Posts, profiles, forums and settings all live on-chain" />
               </div>
 
@@ -165,10 +165,9 @@ export default function LoginPage() {
             {LOGIN_AVAILABLE && (
               <div className="rounded-2xl border border-[#22304e] bg-[#111a2e] p-6">
                 <ol className="space-y-5">
-                  <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dash-key: code shown in the login modal." />
-                  <Step number={2} title="Approve the request" body="Confirm the key-exchange request in your wallet." />
-                  <Step number={3} title="Keys registered (first login)" body="On first login you'll register auth keys with dForum — scan a second code." />
-                  <Step number={4} title="You're in" body="Your session lives in this tab's session storage until you log out or the browser session ends — your wallet key never leaves your wallet. Logging out clears it from this browser." />
+                  <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dashpay://connect code shown in the login modal." />
+                  <Step number={2} title="Approve the request" body="Confirm the App Connect request in your wallet — your wallet registers the bound key as part of the approval, on chain." />
+                  <Step number={3} title="You're in" body="Your session lives in this tab's session storage until you log out or the browser session ends — your wallet key never leaves your wallet. Logging out clears it from this browser." />
                 </ol>
               </div>
             )}
