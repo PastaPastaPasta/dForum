@@ -64,3 +64,14 @@ export function safeHttpUrl(url: string | null | undefined): string | null {
 export function isModerated(modState: number | null | undefined): boolean {
   return modState !== null && modState !== undefined
 }
+
+/** Code-point-safe slice — .slice(0, n) can split a surrogate pair, leaving
+ * half of a character in the string (and failing the contract's maxLength). */
+export function codePointSlice(s: string, max: number): string {
+  return Array.from(s).slice(0, max).join('')
+}
+
+/** Code-point length — unlike .length, what the chain's maxLength counts. */
+export function codePointLength(s: string): number {
+  return Array.from(s).length
+}

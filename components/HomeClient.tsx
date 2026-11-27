@@ -8,10 +8,9 @@ import { LOGIN_AVAILABLE } from '@/lib/host'
 import type { Snapshot, SnapshotThread } from '@/lib/services/snapshot-server'
 import { useSession } from '@/lib/session'
 import { queryRaw, get, type DocRef } from '@/lib/services/document-service'
-import { earliestOwnerPost } from '@/lib/services/orphan'
+import { earliestOwnerPost, filterListable } from '@/lib/services/orphan'
 import { useLive } from '@/components/LiveFeed'
 import { useProfileNames } from '@/lib/use-profiles'
-import { filterListable } from '@/lib/services/orphan'
 import { ThreadRow } from '@/components/ThreadRow'
 import { LiveUnavailable } from '@/components/LiveUnavailable'
 
@@ -136,16 +135,16 @@ function Hero({ counts, session, loading, error }: { counts: { categories: numbe
     <section className="border-b border-[#22304e] bg-gradient-to-b from-[#101b31] to-[#0b1220]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
         <div className="max-w-2xl">
-          {!error && (
-            <p className="inline-flex items-center gap-2 rounded-full border border-[#22304e] bg-[#111a2e] px-3 py-1 text-xs text-[#4db3ff] fade-up">
-              {loading ? (
-                <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-              ) : (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-slow" />
-              )}
-              {loading ? 'Loading live data…' : 'Live on Dash Platform'}
-            </p>
-          )}
+          <p className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs fade-up ${error ? 'border-amber-400/40 bg-amber-400/10 text-amber-300' : 'border-[#22304e] bg-[#111a2e] text-[#4db3ff]'}`}>
+            {error ? (
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+            ) : loading ? (
+              <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-slow" />
+            )}
+            {error ? 'Live data unavailable — showing the last index' : loading ? 'Loading live data…' : 'Live on Dash Platform'}
+          </p>
           <h1 className="mt-4 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
             A forum on<br />Dash Platform
           </h1>
@@ -179,7 +178,7 @@ function Stat({ icon, value, label, suffix }: { icon: React.ReactNode; value: nu
   return (
     <div className="rounded-xl border border-[#22304e] bg-[#111a2e] p-2.5 sm:p-3">
       <dt className="flex items-center gap-1.5 sm:gap-2 text-[#4db3ff]">
-        {icon}
+        <span className="shrink-0">{icon}</span>
         <span className="text-xs uppercase tracking-wider text-[#93a1bd]">{label}</span>
       </dt>
       <dd className="mt-1 text-xl sm:text-2xl font-bold tabular-nums">{value.toLocaleString('en-US')}{suffix}</dd>

@@ -166,10 +166,10 @@ export function Navbar() {
                 )}
               </div>
             </>
-          ) : pathname.startsWith('/login') ? (
-            null
           ) : !LOGIN_AVAILABLE ? (
             <span className="inline-flex items-center h-9 rounded-lg border border-[#22304e] px-3 text-sm text-[#93a1bd]">Read-only</span>
+          ) : pathname.startsWith('/login') ? (
+            null
           ) : (
             <Link
               href="/login"

@@ -137,6 +137,24 @@ documentsCountable: thread, post, reaction, profile.
 - Locked threads: client ignores posts with `$createdAt > lockedAt`; the snapshot drops posts created after lockedAt (S3: never consensus-enforced).
 - Orphan rule: the opening post is the earliest post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`) — regardless of that post's moderation state. A thread is listed only when that opening post exists AND is itself visible (not moderated, not past the lock). A hidden opening post means the thread is hidden — shown nowhere (snapshot, sitemap, llms.txt, live listings, thread page). Snapshot and client both apply it.
 
+## Unused indexes in this deployment (documented — do not query over them)
+
+The indexes below are registered but deliberately unused by this app — the
+queries that matter are `recent` ($createdAt), `byAuthor` (thread/post,
+$ownerId+$createdAt), `byThread` (post, threadId+$createdAt), `byOwner`
+(profile), `bySlug` (forum/category), and `moderated` (audit view only).
+
+- `thread.byTag` (tags, $createdAt) — the app filters threads by tag client-side; no query uses it.
+- `post.byForum` (forumId, $createdAt) — posts are listed via `byThread`/`byAuthor`; the forum page shows threads, not posts.
+- `forum.byCategory` (categoryId, sort) — forums are listed via the snapshot/live window, not by category index.
+- `reaction.byPostKind` (postId, kind) — reaction UI is unbuilt; flagged for the next registration (see below).
+- `reaction.byRecipient` (postOwnerId) — recipient counts are not built.
+- `reaction.byThreadOwner` (threadId, $ownerId) — unused.
+- `report.recent` ($createdAt) — the moderation queue scans `recent` client-side today; an audit listing could use this.
+- `thread.byUpdated` ($updatedAt) and `post.byUpdated` ($updatedAt) — listing order uses `$createdAt` desc.
+- `thread.moderated` / `post.moderated` ($moderatedAt) — audit view only, not used in the live listing.
+- `rangeCountable` flags on `post.byThread` are intentional (post counts); `reaction.byPostKind`'s non-rangeCountable flag is a next-registration item.
+
 ## Pending at next registration (indexes are frozen in this deployment)
 - `thread`/`post`: the `moderated` index (`$moderatedAt`) is registered and available for an audit view, but the moderation console currently scans `recent`/`byForum`/`byAuthor` and filters by `modState` client-side — a server-side moderated-audit listing is a next-registration improvement (query `moderated` only for types where `$moderatedAt` is set — only changeFields writes it). Do not query `moderated` for docs where the field is absent; an empty-set read is fine but an over-broad scan is not.
 - `thread`/`post`: `byUpdated` is registered but unused by the app — listing order uses `$createdAt` desc; the profile page reads `byAuthor`. No change this deployment.

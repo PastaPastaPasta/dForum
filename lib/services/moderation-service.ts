@@ -13,6 +13,7 @@ import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { decodeWif, decodeKeyDataBytes } from '@/lib/auth/decoder'
 import { redactWif } from '@/lib/redact'
+import { LOGIN_AVAILABLE, hostIsCanonical } from '@/lib/host'
 
 export interface ModerationIdentity {
   identityId: string
@@ -21,6 +22,11 @@ export interface ModerationIdentity {
 }
 
 export async function prepareModerator(identityId: string, criticalWif: string): Promise<ModerationIdentity> {
+  // The moderation console refuses to run off the canonical host — fail closed.
+  if (typeof window === 'undefined') throw new Error('Moderation is disabled outside the browser')
+  if (!LOGIN_AVAILABLE || !hostIsCanonical(window.location.hostname)) {
+    throw new Error('Moderation is disabled on this host')
+  }
   const sdk = await getSdk()
   const { IdentitySigner } = await getSdkClasses()
   const identity = await sdk.identities.fetch(identityId)

@@ -7,7 +7,7 @@ Read the contract out of the running testnet after registration and before the a
 - **S3** Can a post reference's `where` read a thread's moderator-written `lockedAt` at the network level (else client-side lock rule only)?
 - **S4** `refersTo.where` with two keys on one reference (reaction: post $ownerId + threadId); post thread `where` forumId. Registers and enforces.
 - **S5** groupBy count with `in` on rangeCountable via evo-sdk 5.0.x (forge says yes). Used for reply counts, forum counts, user post counts.
-- **S6** platform-auth (App Connect v2) works with evo-sdk 5.0.x; which key level/bounds the session key has (session key is contract-bound; is it too, for the app?).
+- **S6** platform-auth (App Connect v2) works with evo-sdk 5.0.x; which key level/bounds the session key has (session key is identity-level, not contract-bound — it cannot sign moderation).
 - **S7** Confirm testnet node version (protocol 14, e.g. 5.0.3) is live at registration time.
 - **S8** Write-fee probe per post with the chosen indexes (target: a post create < 0.005 DASH).
 

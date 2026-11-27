@@ -152,7 +152,7 @@ describe('hasOpeningPost — visibility rules via earliestOwnerPost', () => {
     expect(await hasOpeningPost({ id: 't', ownerId: 'owner', lockedAt: null, createdAt: 50 })).toBe(false)
   })
 
-  it('drops the thread when the opening post predates... (lock) — locked past the opening post', async () => {
+  it('drops the thread when the lock is applied before the opening post', async () => {
     const { hasOpeningPost } = await import('@/lib/services/orphan')
     mocked.mockImplementation(async () => ({
       docs: [doc(idOf([0x01]), 'owner', 100, 't')],

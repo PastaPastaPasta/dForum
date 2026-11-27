@@ -18,9 +18,6 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 
 const OUT = 'out'
-const CSP_FALLBACK =
-  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; base-uri 'self'; form-action 'self'"
-
 function walk(dir) {
   const out = []
   for (const entry of readdirSync(dir)) {

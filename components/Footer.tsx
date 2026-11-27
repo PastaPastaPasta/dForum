@@ -1,4 +1,5 @@
 import { NETWORK } from '@/lib/constants'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 
 export function Footer() {
   return (
@@ -9,7 +10,7 @@ export function Footer() {
           <p className="mt-1">A forum on Dash Platform — centralized ownership, team-based moderation</p>
         </div>
         <div className="text-xs leading-relaxed">
-          All data on-chain · Login with Dash · {NETWORK === 'mainnet' ? 'Mainnet' : `${NETWORK.charAt(0).toUpperCase() + NETWORK.slice(1)} build`}
+          All data on-chain · {LOGIN_AVAILABLE ? 'Login with Dash' : 'Read-only index'} · {NETWORK === 'mainnet' ? 'Mainnet' : `${NETWORK.charAt(0).toUpperCase() + NETWORK.slice(1)} build`}
         </div>
       </div>
     </footer>

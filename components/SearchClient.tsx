@@ -25,23 +25,34 @@ interface SearchResult {
 }
 
 const MAX_LIST = 25
+// Verdicts expire — a cached "listable" must not survive a moderator hide
+// longer than this. Failed checks are never cached.
+const ORPHAN_CACHE_TTL_MS = 10 * 60 * 1000
 
+type Verdict = { ok: boolean; at: number }
 /** Orphan verdicts are cached module-wide — a successful live verdict must
  * not be re-queried on every keystroke. Only checks that succeeded are
  * cached; a failed check is an unknown, not a verdict, and is retried. */
-const orphanCache = new Map<string, boolean>()
+const orphanCache = new Map<string, Verdict>()
+
+function isFresh(v: Verdict | undefined): boolean {
+  return v !== undefined && Date.now() - v.at < ORPHAN_CACHE_TTL_MS
+}
 
 async function cachedFilter(threads: SearchResult[]): Promise<SearchResult[]> {
-  const fresh = threads.filter((t) => !orphanCache.has(t.id))
+  const fresh = threads.filter((t) => !isFresh(orphanCache.get(t.id)))
   if (fresh.length) {
     const { listed, failed } = await filterListableWithFailures(fresh, 4)
     const listedIds = new Set(listed.map((t) => t.id))
     for (const t of fresh) {
       if (failed.has(t.id)) continue // unknown verdict — do not cache
-      orphanCache.set(t.id, listedIds.has(t.id))
+      orphanCache.set(t.id, { ok: listedIds.has(t.id), at: Date.now() })
     }
   }
-  return threads.filter((t) => orphanCache.get(t.id) !== false)
+  return threads.filter((t) => {
+    const v = orphanCache.get(t.id)
+    return !isFresh(v) ? true : v!.ok
+  })
 }
 
 export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
@@ -51,8 +62,14 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
   const [q, setQ] = useState('')
   const [ready, setReady] = useState(false)
   const [liveThreads, setLiveThreads] = useState<SearchResult[] | null>(null)
+  // The oldest thread in the RAW live window — the honest boundary for
+  // "snapshot rows newer than live were hidden or deleted". Computed before
+  // the orphan filter so a filtered-out thread does not move the boundary.
+  const [oldestRawLive, setOldestRawLive] = useState<number>(Infinity)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
+  const [reload, setReload] = useState(0)
+  const retry = () => setReload((n) => n + 1)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -62,6 +79,8 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    setFailed(false)
     query('thread', { orderBy: [['$createdAt', 'desc']], limit: MAX_LIST })
       .then(async (docs) => {
         if (cancelled) return
@@ -81,6 +100,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
         // per thread, not two.
         const listed = await cachedFilter(mapped)
         if (cancelled) return
+        setOldestRawLive(mapped.length ? Math.min(...mapped.map((t) => t.createdAt)) : Infinity)
         setLiveThreads(listed)
         setLoading(false)
       })
@@ -92,7 +112,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
       })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [reload])
 
   // Merge live + snapshot (dedupe by id) — the snapshot is the first paint
   // and the live set refines it. Live rows win; a snapshot row whose id is
@@ -112,7 +132,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
     }))
     if (!liveThreads) return snapList.filter((t) => !isModerated(t.modState))
     const liveIds = new Set(liveThreads.map((t) => t.id))
-    const oldestLive = liveThreads.length ? Math.min(...liveThreads.map((t) => t.createdAt)) : Infinity
+    const oldestLive = oldestRawLive
     const merged = new Map(snapList.map((t) => [t.id, t]))
     for (const t of liveThreads) merged.set(t.id, t)
     return [...merged.values()]
@@ -123,7 +143,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
         if (!liveIds.has(t.id)) return t.createdAt < oldestLive
         return true
       })
-  }, [liveThreads, snap])
+  }, [liveThreads, oldestRawLive, snap])
 
   // Keep the URL in sync with the query (no history spam).
   useEffect(() => {
@@ -159,11 +179,16 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
     }, 150)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [matched])
-  const results = orphanFiltered ?? matched.filter((t) => orphanCache.get(t.id) !== false).slice(0, MAX_LIST)
+  const results = orphanFiltered ?? matched.filter((t) => {
+    const v = orphanCache.get(t.id)
+    return !isFresh(v) || v!.ok
+  }).slice(0, MAX_LIST)
 
   const authorIds = results.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
   const nameOf = (id: string): string => profiles[id] ?? snap.profiles[id] ?? shortId(id, 12)
+  const forumTitleBySlug = new Map(snap.forums.map((f) => [f.slug, f.title]))
+  const forumTitleOf = (t: SearchResult): string | null => (t.forumSlug ? forumTitleBySlug.get(t.forumSlug) ?? null : null)
 
   return (
     <>
@@ -189,7 +214,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
                 </span>
               )}
             </form>
-            {failed && <LiveUnavailable className="mt-2" />}
+            {failed && <LiveUnavailable className="mt-2" onRetry={retry} />}
           </div>
         </section>
 
@@ -209,7 +234,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
           ) : (
             <div className="grid gap-3">
               {results.map((t) => (
-                <ThreadRow key={t.id} thread={t} nameOf={nameOf} />
+                <ThreadRow key={t.id} thread={t} nameOf={nameOf} forumTitle={forumTitleOf(t)} />
               ))}
             </div>
           )}

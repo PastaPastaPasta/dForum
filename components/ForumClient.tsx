@@ -47,14 +47,13 @@ function byStickyThenRecent(a: LiveThread, b: LiveThread): number {
 type LoadResult =
   | { status: 'ok'; forum: LiveForum }
   | { status: 'missing' }
-  | { status: 'error' }
 
 export default function ForumClient({ slug, snapshot }: { slug: string; snapshot: Snapshot | null }) {
   const snap = snapshot
   const { session } = useSession()
   const forum = snap?.forums.find((f) => f.slug === slug) ?? null
 
-  const { live, loading: liveLoading, retry } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
+  const { live, loading: liveLoading, error: liveError, retry } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
   const [moreThreads, setMoreThreads] = useState<LiveThread[]>([])
   const [moreCursor, setMoreCursor] = useState<string | null>(null)
   const [moreLoading, setMoreLoading] = useState(false)
@@ -106,8 +105,8 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   const forumTitle = forum?.title ?? (live?.status === 'ok' ? live.forum.title : null) ?? slug
   const forumDesc = forum?.description ?? (live?.status === 'ok' ? live.forum.description : null) ?? ''
   const status = live?.status ?? null
-  const showStaleNote = status === 'error' && forum != null && !liveLoading
-  const showHardError = status === 'error' && !forum && !liveLoading
+  const showStaleNote = liveError && forum != null && !liveLoading
+  const showHardError = liveError && !forum && !liveLoading
 
   const authorIds = listed.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
@@ -127,7 +126,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">Connection error</p>
             <h1 className="text-2xl font-bold mt-2">Couldn&apos;t reach Dash Platform</h1>
             <p className="text-sm text-[#93a1bd] mt-2">The live read failed and the snapshot had no forum to show.</p>
-            <button onClick={() => window.location.reload()} className="mt-6 btn-primary px-4 py-2">Retry</button>
+            <button onClick={retry} className="mt-6 btn-primary px-4 py-2">Retry</button>
           </div>
         </main>
         <Footer />
@@ -135,7 +134,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
     )
   }
 
-  if (status === 'missing' && !liveLoading) {
+  if (status === 'missing' && !liveLoading && !liveError) {
     return (
       <>
         <Navbar />
@@ -169,7 +168,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
             {showStaleNote && <LiveUnavailable className="mt-4" onRetry={retry} />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
-              <span>{listed.length}{moreCursor != null ? '+' : ''} thread{listed.length === 1 ? '' : 's'}</span>
+              <span className="whitespace-nowrap">{listed.length}{moreCursor != null ? '+' : ''} thread{listed.length === 1 ? '' : 's'}</span>
               {!session && (
                 LOGIN_AVAILABLE ? (
                   <Link href="/login" className="text-[#4db3ff] hover:underline">Login to post</Link>
@@ -260,7 +259,9 @@ function snapshotThreadToLive(t: SnapshotThread): LiveThread {
 }
 
 async function loadLiveForum(slug: string): Promise<LoadResult> {
-  try {
+  // No blanket catch: a read failure must re-throw so useLive's bounded retry
+  // fires. Only a genuinely-missing forum resolves as 'missing'.
+  {
     const forums = await query('forum', { where: [['slug', '==', slug]], limit: 1 })
     const fdoc = forums[0]
     if (!fdoc) return { status: 'missing' }
@@ -306,8 +307,6 @@ async function loadLiveForum(slug: string): Promise<LoadResult> {
         cursor: rawCount === 25 && lastId ? lastId : null,
       },
     }
-  } catch {
-    return { status: 'error' }
   }
 }
 

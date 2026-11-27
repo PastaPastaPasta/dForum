@@ -8,6 +8,7 @@ import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
 import { get, queryRaw, createDocument } from '@/lib/services/document-service'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 import { shortId, isModerated } from '@/lib/utils'
 import { useProfileNames } from '@/lib/use-profiles'
 import { useSession } from '@/lib/session'
@@ -44,7 +45,6 @@ interface LivePost {
 type LoadResult =
   | { status: 'ok'; thread: LiveThread; posts: LivePost[]; truncated: boolean; opening: OpeningPost | null | undefined }
   | { status: 'missing' }
-  | { status: 'error' }
 
 const POST_LIMIT = 99
 
@@ -70,7 +70,7 @@ export default function ThreadClient({
   const [moreError, setMoreError] = useState(false)
   const [posted, setPosted] = useState<string | null>(null)
 
-  const { live, loading: liveLoading } = useLive<LoadResult>(() => loadThread(threadId), threadId)
+  const { live, loading: liveLoading, error: liveError, retry } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
   // Arm the load-more cursor once the live window comes back.
   useEffect(() => {
@@ -169,7 +169,8 @@ export default function ThreadClient({
   async function handlePost() {
     if (posting) return // double-click / Enter during the platform write
     if (!session || !thread) return
-    if (!replyBody.trim()) {
+    const body = replyBody.trim()
+    if (!body) {
       setPostError('Write something first — a reply needs text.')
       return
     }
@@ -177,16 +178,43 @@ export default function ThreadClient({
       setPostError('Your session has no signable key. Try logging in again.')
       return
     }
+    if (new TextEncoder().encode(body).length > LIMITS.bodyMaxBytes) {
+      setPostError(`Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes.`)
+      return
+    }
     setPosting(true)
     setPostError(null)
     setPosted(null)
-    const body = replyBody.trim()
-    if (new TextEncoder().encode(body).length > LIMITS.bodyMaxBytes) {
-      setPostError(`Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes.`)
-      setPosting(false)
-      return
-    }
     try {
+      // A reply can fail or time out even though it landed on the chain —
+      // before creating, re-query for this owner's identical recent post in
+      // this thread and adopt it instead of writing a duplicate. Fails open:
+      // on any query error, proceed with creation.
+      try {
+        const recent = await queryRaw('post', {
+          where: [['threadId', '==', thread.id], ['$ownerId', '==', session.identityId], ['$createdAt', '>=', Date.now() - 120_000]],
+          orderBy: [['$createdAt', 'desc']],
+          limit: 3,
+        })
+        const found = recent.docs.find((d) => ((d.properties.body as string) ?? '').trim().toLowerCase() === body.toLowerCase())
+        if (found) {
+          setReplyBody('')
+          setPosted('Reply posted')
+          setCreatedPosts((prev) => (prev.some((p) => p.id === found.id) ? prev : [...prev, {
+            id: found.id,
+            body: (found.properties.body as string) ?? body,
+            authorId: session.identityId,
+            createdAt: found.createdAt,
+            updatedAt: found.updatedAt,
+            modState: null,
+            replyToId: null,
+          }]))
+          setPosting(false)
+          return
+        }
+      } catch {
+        // Fail open — proceed with creation.
+      }
       const created = await createDocument('post', session.identityId, session.authKeyWif, {
         threadId: thread.id,
         forumId: thread.forumId,
@@ -215,9 +243,9 @@ export default function ThreadClient({
   }
 
   const status = live?.status ?? null
-  const missing = status === 'missing' && !liveLoading
-  const showHardError = status === 'error' && !snapshotThread && !liveLoading
-  const showStaleNote = status === 'error' && snapshotThread != null && !liveLoading
+  const missing = status === 'missing' && !liveLoading && !liveError
+  const showHardError = liveError && !snapshotThread && !liveLoading
+  const showStaleNote = liveError && snapshotThread != null && !liveLoading
 
   if (missing) {
     return (
@@ -245,7 +273,7 @@ export default function ThreadClient({
             <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">Connection error</p>
             <h1 className="text-2xl font-bold mt-2">Couldn&apos;t reach Dash Platform</h1>
             <p className="text-sm text-[#93a1bd] mt-2">The live read failed. Retry in a moment.</p>
-            <button onClick={() => window.location.reload()} className="mt-6 btn-primary px-4 py-2">Retry</button>
+            <button onClick={retry} className="mt-6 btn-primary px-4 py-2">Retry</button>
           </div>
         </main>
         <Footer />
@@ -253,7 +281,7 @@ export default function ThreadClient({
     )
   }
 
-  if (!thread && !liveLoading) {
+  if (!thread && !liveLoading && !liveError) {
     return (
       <>
         <Navbar />
@@ -269,7 +297,6 @@ export default function ThreadClient({
     )
   }
 
-  const truncated = isLiveOk && live!.truncated
 
   return (
     <>
@@ -315,7 +342,7 @@ export default function ThreadClient({
                 ))}
               </div>
 
-              {showStaleNote && <LiveUnavailable className="mt-4" />}
+              {showStaleNote && <LiveUnavailable className="mt-4" onRetry={retry} />}
 
               <div className="mt-6 space-y-4">
                 {visiblePosts.map((p) => (
@@ -398,7 +425,11 @@ export default function ThreadClient({
                   </div>
                 ) : (
                   <div className="mt-8 rounded-xl border border-dashed border-[#22304e] p-6 text-center text-sm text-[#93a1bd]">
-                    <Link href={`/login?next=${encodeURIComponent(`/t/${thread.id}`)}`} className="text-[#4db3ff] hover:underline">Login with Dash</Link> to join the conversation.
+                    {LOGIN_AVAILABLE ? (
+                      <><Link href={`/login?next=${encodeURIComponent(`/t/${thread.id}`)}`} className="text-[#4db3ff] hover:underline">Login with Dash</Link> to join the conversation.</>
+                    ) : (
+                      'Read-only deployment — sign in on forum.dashhq.org'
+                    )}
                   </div>
                 )
               ) : null}
@@ -472,7 +503,10 @@ function PostCard({ post, mine, nameOf }: { post: LivePost; mine?: string | null
 }
 
 async function loadThread(id: string): Promise<LoadResult> {
-  try {
+  // No blanket catch: a read failure must re-throw so useLive's bounded retry
+  // fires and the caller can surface the banner. Only a genuinely-missing
+  // thread resolves as 'missing' — a null doc is a verdict, not an error.
+  {
     const thread = await get('thread', id)
     if (!thread) return { status: 'missing' }
     const ownerId = thread.ownerId ?? null
@@ -529,7 +563,5 @@ async function loadThread(id: string): Promise<LoadResult> {
       opening,
       truncated,
     }
-  } catch {
-    return { status: 'error' }
   }
 }

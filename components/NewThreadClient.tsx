@@ -7,9 +7,11 @@ import { Send, Loader2, AlertCircle } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { useSession } from '@/lib/session'
-import { query, createDocument } from '@/lib/services/document-service'
+import { query, queryRaw, createDocument } from '@/lib/services/document-service'
+import { earliestOwnerPost } from '@/lib/services/orphan'
 import type { Snapshot } from '@/lib/services/snapshot-server'
 import { LIMITS } from '@/lib/constants'
+import { codePointSlice, codePointLength } from '@/lib/utils'
 import { redactWif } from '@/lib/redact'
 import { LOGIN_AVAILABLE } from '@/lib/host'
 
@@ -66,23 +68,37 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
   const [createdForumId, setCreatedForumId] = useState('')
   const threadCreated = Boolean(createdThreadId)
 
-  // Live forum list
+  // Live forum list — page through the whole index so a >50-forum contract
+  // never silently loses forums to the picker.
   useEffect(() => {
     let cancelled = false
-    query('forum', { limit: 50 })
-      .then((docs) => {
-        if (cancelled) return
-        const list = docs
-          .filter((f) => !f.properties.archived)
-          .map((f) => ({
+    ;(async () => {
+      const list: ForumOption[] = []
+      let after: string | null = null
+      for (let page = 0; page < 20; page++) {
+        const { docs, rawCount, lastId } = await queryRaw('forum', {
+          limit: 50,
+          ...(after ? { startAfter: after } : {}),
+        })
+        for (const f of docs) {
+          if (f.properties.archived) continue
+          list.push({
             id: f.id,
             slug: (f.properties.slug as string) ?? '',
             title: (f.properties.title as string) ?? '',
-            archived: Boolean(f.properties.archived),
-          }))
+            archived: false,
+          })
+        }
+        if (rawCount < 50 || lastId == null) return list
+        after = lastId
+      }
+      return list
+    })()
+      .then((list) => {
+        if (cancelled) return
         if (list.length) setForums(list)
       })
-      .catch(() => undefined)
+      .catch(() => undefined) // keep the snapshot list on failure
     return () => {
       cancelled = true
     }
@@ -192,8 +208,26 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
         })
         const found = recent.find((d) => ((d.properties.title as string) ?? '').trim().toLowerCase() === titleTrim.toLowerCase())
         if (found) {
+          // The thread was already created — adopt it. If it already has a
+          // visible opening post, it is complete: route to it. Otherwise
+          // resume the finish-opening-post flow against the thread's own
+          // forum (not the currently selected one).
+          let opening: Awaited<ReturnType<typeof earliestOwnerPost>>
+          try {
+            opening = await earliestOwnerPost(found.id, session.identityId, found.createdAt)
+          } catch {
+            // Could not verify the opening post — do not adopt blindly into a
+            // finish flow that might double-post. Send the author to the thread.
+            setError('Could not verify your thread — check /t/' + found.id + ' before finishing the opening post.')
+            router.push(`/t/${encodeURIComponent(found.id)}`)
+            return
+          }
+          if (opening && opening.modState == null) {
+            router.push(`/t/${encodeURIComponent(found.id)}`)
+            return
+          }
           setCreatedThreadId(found.id)
-          setCreatedForumId(selected.id)
+          setCreatedForumId((found.properties.forumId as string) ?? selected.id)
           setSubmitting(false)
           setError('Looks like your thread was already created — finish the opening post.')
           return
@@ -204,7 +238,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
 
       const thread = await createDocument('thread', session.identityId, session.authKeyWif, {
         forumId: selected.id,
-        title: titleTrim.slice(0, LIMITS.title),
+        title: codePointSlice(titleTrim, LIMITS.title),
         tags: tagList,
       })
       setCreatedThreadId(thread.id)
@@ -317,7 +351,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
               {fieldError?.title ? (
                 <p id="title-error" className="mt-1 text-xs text-red-400">{fieldError.title}</p>
               ) : (
-                <p className="mt-1 text-xs text-[#93a1bd] text-right">{title.length}/{LIMITS.title}</p>
+                <p className="mt-1 text-xs text-[#93a1bd] text-right">{codePointLength(title)}/{LIMITS.title}</p>
               )}
             </div>
 

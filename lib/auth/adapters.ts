@@ -37,6 +37,18 @@ const ENC_PREFIX = `${NS}enc:`
 const ENC_TYPE_PREFIX = `${NS}enc-type:`
 const DEK_PREFIX = `${NS}dek:`
 
+// A restored session is only trusted for this long — a key forgotten in a
+// sessionStorage backlog (tab reopen, crash recovery) must not sign for the
+// life of the tab. Expiry handling: the snapshot is dropped here, so the
+// controller sees an empty store and signs out cleanly.
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+function hostAllowed(): boolean {
+  if (typeof window === 'undefined') return false
+  if (!LOGIN_AVAILABLE) return false
+  return hostIsCanonical(window.location.hostname)
+}
+
 function read(key: string): string | null {
   if (typeof window === 'undefined') return null
   try {
@@ -57,6 +69,7 @@ function write(key: string, value: string | null): void {
 }
 
 import { decodeKeyDataBytes as decodeKeyDataBytesShared, decodeWif as decodeWifShared } from '@/lib/auth/decoder'
+import { hostIsCanonical, LOGIN_AVAILABLE } from '@/lib/host'
 
 /** Mirror document-service's encode side: hex if it decodes as hex, else assume base64 already. */
 function toBase64FromString(str: string): string {
@@ -86,11 +99,19 @@ function fromBase64(base64: string): Uint8Array {
 
 export const sessionStore: SessionStore = {
   async getSession(): Promise<AuthSessionSnapshot | null> {
+    if (!hostAllowed()) return null
     const raw = read(SESSION_KEY)
     if (!raw) return null
     try {
       const parsed = JSON.parse(raw) as AuthSessionSnapshot
       if (!parsed?.user?.identityId) return null
+      const ts = Number(parsed.timestamp ?? 0)
+      if (!Number.isFinite(ts) || ts <= 0) return null
+      if (Date.now() - ts > SESSION_MAX_AGE_MS) {
+        // Stale snapshot — drop it so the controller signs out cleanly.
+        write(SESSION_KEY, null)
+        return null
+      }
       return parsed
     } catch {
       return null
@@ -109,9 +130,11 @@ export const secretStore: SecretStore = {
     write(`${SK_PREFIX}${identityId}`, privateKey)
   },
   async getPrivateKey(identityId: string): Promise<string | null> {
+    if (!hostAllowed()) return null
     return read(`${SK_PREFIX}${identityId}`)
   },
   async hasPrivateKey(identityId: string): Promise<boolean> {
+    if (!hostAllowed()) return false
     return read(`${SK_PREFIX}${identityId}`) !== null
   },
   async clearPrivateKey(identityId: string): Promise<void> {

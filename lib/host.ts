@@ -16,9 +16,9 @@ export function hostIsLocal(host: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || /^127\.0\.0\./.test(host)
 }
 
-/** The host the site is canonical for, plus localhost. Hosts not in this set
- * require an explicit user acknowledgement (login) or a hard refusal
- * (moderation). */
+/** The host the site is canonical for, plus localhost. The key-signing
+ * surfaces (login, moderation, all write paths) refuse to run on any other
+ * host. */
 export function hostIsCanonical(host: string): boolean {
   if (!host) return false
   return host === CANONICAL_HOST || hostIsLocal(host)

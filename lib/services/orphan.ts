@@ -3,20 +3,28 @@
  * opening post — the earliest post whose $ownerId equals the thread owner,
  * ordered by ($createdAt, $id) — regardless of that post's moderation state.
  * The opening post must itself be visible: not moderated, and not past the
- * lock. Every live listing and the snapshot apply this single rule; nothing
- * else computes orphan status.
+ * lock. Every live listing and the snapshot apply this single rule; the pure
+ * helpers live in ./orphan-rules.ts and are shared with the snapshot script.
  *
  * The opening post is located via the post.byAuthor index ($ownerId +
- * $createdAt ≥ thread.createdAt, ascending) — a single query that works at any
- * depth of pre-opening spam. The pure tie-break compares decoded id bytes,
- * not base58 strings (those order by string, not by the chain's byte order).
- *
- * Throws on read errors and when the page budget is exhausted — the caller
- * decides (fail open, fail closed, or refuse) rather than reading a
- * legitimate thread as "no opening post".
+ * $createdAt ≥ thread.createdAt, ascending), paginating so pre-opening
+ * spam cannot hide it — this is NOT one free query: the chain cannot serve
+ * (threadId + ownerId) equality, so the scan filters on threadId in the
+ * client. It therefore carries a 12-page budget and throws
+ * OrphanScanExhaustedError when it is spent — the honest signal, not a
+ * "no opening post" verdict. Fail-closed paths (the static index) throw;
+ * live callers choose fail-open (keep the thread) and report failures.
  */
-import bs58 from 'bs58'
 import { queryRaw } from '@/lib/services/document-service'
+import {
+  compareIds,
+  beforePost,
+  openingPostFromPosts,
+  type idBytes,
+} from '@/lib/services/orphan-rules'
+
+export { compareIds, beforePost, openingPostFromPosts }
+export type { idBytes }
 
 export interface Listable {
   id: string
@@ -41,50 +49,12 @@ export class OrphanScanExhaustedError extends Error {
   }
 }
 
-function idBytes(id: string): Uint8Array | null {
-  try {
-    return bs58.decode(id)
-  } catch {
-    return null
-  }
-}
-
-/** Byte-order comparison of the $id identifiers — the chain's ordering. */
-export function compareIds(a: string, b: string): number {
-  const ba = idBytes(a)
-  const bb = idBytes(b)
-  if (ba && bb) {
-    const n = Math.min(ba.length, bb.length)
-    for (let i = 0; i < n; i++) {
-      if (ba[i] !== bb[i]) return ba[i] - bb[i]
-    }
-    return ba.length - bb.length
-  }
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-/** ($createdAt, $id) ordering, exactly as the chain defines it. */
-export function beforePost<T extends { createdAt: number; id: string }>(a: T, b: T): boolean {
-  return a.createdAt < b.createdAt || (a.createdAt === b.createdAt && compareIds(a.id, b.id) < 0)
-}
-
-/** The earliest owner-owned post in a list — pure, shared by all paths. */
-export function openingPostFromPosts<T extends { createdAt: number; id: string; ownerId: string; properties?: Record<string, unknown> }>(
-  posts: T[],
-  ownerId: string,
-): T | null {
-  const ownerPosts = posts.filter((p) => p.ownerId === ownerId)
-  if (ownerPosts.length === 0) return null
-  ownerPosts.sort((a, b) => (beforePost(a, b) ? -1 : beforePost(b, a) ? 1 : 0))
-  return ownerPosts[0]
-}
-
 /** The opening post of a thread (see the orphan rule) — located via the
- * post.byAuthor index, paginating so neither pre-opening spam nor a long
- * thread's early pages hide it. Returns null when the thread has no
- * owner-owned post. Throws OrphanScanExhaustedError when the page budget is
- * exhausted, and any read error otherwise — the static index is the guarded
- * path (scripts/snapshot.mjs); live callers decide fail-open vs fail-closed. */
+ * post.byAuthor index, paginating so pre-opening spam cannot hide it.
+ * Returns null when the thread has no owner-owned post. Throws
+ * OrphanScanExhaustedError when the page budget is exhausted, and any read
+ * error otherwise — the static index is the guarded path (scripts/snapshot.mjs);
+ * live callers decide fail-open vs fail-closed. */
 export async function earliestOwnerPost(
   threadId: string,
   ownerId: string,
@@ -94,9 +64,9 @@ export async function earliestOwnerPost(
   const where: [string, string, unknown][] = [['$ownerId', '==', ownerId]]
   if (threadCreatedAt != null) where.push(['$createdAt', '>=', threadCreatedAt])
   let after: string | undefined
-  // Bounded: 12 pages of 25 posts = the first 300 owner posts. An author
-  // with anything really pathological past that point is outside the
-  // practical range for a forum index.
+  // Bounded: 12 pages of 25 posts = the first 300 owner posts. At the
+  // next registration the orphan index (post.byThreadAuthor) makes this one
+  // query with limit 1 — see docs/design/contract-next-registration.md.
   for (let page = 0; page < 12; page++) {
     const { docs: posts, rawCount, lastId } = await queryRaw('post', {
       where,

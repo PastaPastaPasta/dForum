@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
-import { query, get } from '@/lib/services/document-service'
+import { queryRaw, get } from '@/lib/services/document-service'
 import {
   prepareModerator, validateCriticalKey, getRoster, moderationStatus,
   banUser, unbanUser, suspendUser, unsuspendUser, warnUser, clearWarnings,
@@ -16,7 +16,7 @@ import {
 } from '@/lib/services/moderation-service'
 import { earliestOwnerPost } from '@/lib/services/orphan'
 import { CONTRACT_ID, NETWORK, STORAGE_KEY_PREFIX } from '@/lib/constants'
-import { shortId, formatDate, formatRelativeTime } from '@/lib/utils'
+import { shortId, formatDate, formatRelativeTime, codePointSlice } from '@/lib/utils'
 import { hostIsLocal, hostIsCanonical, canonicalHost } from '@/lib/host'
 import { redactWif } from '@/lib/redact'
 import { useFrameBuster } from '@/lib/use-frame-buster'
@@ -91,7 +91,6 @@ export default function ModerationPage() {
   const signerRef = useRef<{ free(): void } | null>(null)
   const wipeGenRef = useRef(0)
   const mountedRef = useRef(true)
-  const pathnameRef = useRef<string>('')
   const inFlightRef = useRef(0)
   const pendingWipeRef = useRef<string | null>(null)
   const frameState = useFrameBuster()
@@ -248,22 +247,24 @@ export default function ModerationPage() {
     try {
       const fetchThreads = !append || threadsMore
       const fetchPosts = !append || postsMore
-      const [threads, posts] = await Promise.all([
+      const [threadsRaw, postsRaw] = await Promise.all([
         fetchThreads
-          ? query('thread', {
+          ? queryRaw('thread', {
               orderBy: [['$createdAt', 'desc']],
               limit: DOC_PAGE_SIZE,
               ...(append && threadsAfter ? { startAfter: threadsAfter } : {}),
-            } as never)
-          : Promise.resolve([] as Awaited<ReturnType<typeof query>>),
+            })
+          : Promise.resolve({ docs: [], rawCount: 0, lastId: null }),
         fetchPosts
-          ? query('post', {
+          ? queryRaw('post', {
               orderBy: [['$createdAt', 'desc']],
               limit: DOC_PAGE_SIZE,
               ...(append && postsAfter ? { startAfter: postsAfter } : {}),
-            } as never)
-          : Promise.resolve([] as Awaited<ReturnType<typeof query>>),
+            })
+          : Promise.resolve({ docs: [], rawCount: 0, lastId: null }),
       ])
+      const threads = threadsRaw.docs
+      const posts = postsRaw.docs
       const mapped: ModeratableDoc[] = [
         ...threads.map((t) => ({
           id: t.id,
@@ -278,19 +279,21 @@ export default function ModerationPage() {
         ...posts.map((p) => ({
           id: p.id,
           type: 'post' as const,
-          title: ((p.properties.body as string) ?? '').slice(0, 90) || '(empty)',
+          title: (codePointSlice((p.properties.body as string) ?? '', 90) || '(empty)'),
           ownerId: p.ownerId || '',
           createdAt: p.createdAt,
           modState: (p.properties.modState as number | null) ?? null,
         })),
       ]
       if (fetchThreads) {
-        setThreadsAfter(threads.length ? threads[threads.length - 1].id : threadsAfter)
-        setThreadsMore(threads.length === DOC_PAGE_SIZE)
+        setThreadsAfter(threadsRaw.lastId ?? (threads.length ? threads[threads.length - 1].id : threadsAfter))
+        // rawCount is the honest "more exists" — a normalized-doc shortfall
+        // must not look like "no more pages".
+        setThreadsMore(threadsRaw.rawCount === DOC_PAGE_SIZE && threadsRaw.lastId != null)
       }
       if (fetchPosts) {
-        setPostsAfter(posts.length ? posts[posts.length - 1].id : postsAfter)
-        setPostsMore(posts.length === DOC_PAGE_SIZE)
+        setPostsAfter(postsRaw.lastId ?? (posts.length ? posts[posts.length - 1].id : postsAfter))
+        setPostsMore(postsRaw.rawCount === DOC_PAGE_SIZE && postsRaw.lastId != null)
       }
       setDocs((prev) => (append ? [...prev, ...mapped] : mapped))
     } catch {
@@ -624,7 +627,7 @@ export default function ModerationPage() {
         setLookupDoc({
           id: post.id,
           type: 'post',
-          title: ((post.properties.body as string) ?? '').slice(0, 90) || '(empty)',
+          title: (codePointSlice((post.properties.body as string) ?? '', 90) || '(empty)'),
           ownerId: post.ownerId || '',
           createdAt: post.createdAt,
           modState: (post.properties.modState as number | null) ?? null,
@@ -653,9 +656,6 @@ export default function ModerationPage() {
   // Consensus forbids moderating documents (or identities) the moderator owns.
   const ownsDoc = (doc: ModeratableDoc) => Boolean(admin && adminIdentityId && doc.ownerId === adminIdentityId)
   const isSelfTarget = Boolean(admin && adminIdentityId && targetId.trim() === adminIdentityId)
-
-  const allDocs = [...docs, ...(lookupDoc ? [lookupDoc] : [])]
-  const ownerMismatchBanner = !canOperate && hostIsCanon
 
   // Nothing renders until the frame check has run — a framed first paint
   // must not leak the console.
@@ -842,7 +842,7 @@ export default function ModerationPage() {
                       value={targetId}
                       onChange={(e) => { setTargetId(e.target.value); setStatus(null); setStatusForId(null); setActionSuccess(null) }}
                       placeholder="identity ID to look up"
-                      className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
+                      className="min-w-0 flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
                       onKeyDown={(e) => e.key === 'Enter' && refreshStatus()}
                     />
                     <button
@@ -963,7 +963,7 @@ export default function ModerationPage() {
                   onChange={(e) => setLookupId(e.target.value)}
                   placeholder="Look up a thread or post ID (e.g. an older report)…"
                   aria-label="Look up a thread or post ID"
-                  className="flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
+                  className="min-w-0 flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
                   onKeyDown={(e) => e.key === 'Enter' && lookupDocument()}
                 />
                 <button

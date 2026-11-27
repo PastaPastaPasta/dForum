@@ -7,13 +7,14 @@
  * Writes go through an IdentitySigner built from the session's auth key
  * (or a moderator CRITICAL key for moderation transitions).
  */
-import type { Document as DocumentCtor, IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
+import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import bs58 from 'bs58'
-import bs58check from 'bs58check'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { hash160 } from '@/lib/auth/protocol'
 import { stripModeratorFields, buildAuthorUpdate } from '@/lib/services/moderator-fields'
+import { decodeWif, decodeKeyDataBytes } from '@/lib/auth/decoder'
+import { LOGIN_AVAILABLE, hostIsCanonical } from '@/lib/host'
 
 export interface DocRef {
   id: string
@@ -166,10 +167,10 @@ export async function queryRaw(
     const normalized = normalizeDoc(doc)
     if (normalized) out.push(normalized)
   }
-  // The startAfter cursor must be the raw last doc's id (a base58 string).
-  // The page keys are already base58 — the doc objects do not carry the id as
-  // a string (toObject().$id is a Uint8Array), so reading the id from the
-  // values would produce garbage ("23,247,84,…") and the next page would fail.
+  // The startAfter cursor must be the last raw page key — the key is the
+  // raw $id the chain ordered by, so paging lands exactly at the edge of what
+  // was fetched. (The normalized DocRef id is derived from the same bytes;
+  // either form is valid, but the key avoids trusting the doc-object shape.)
   const keys = [...page.keys()]
   const lastId = keys.length > 0 ? String(keys[keys.length - 1]) : null
   return { docs: out, rawCount: page.size, lastId }
@@ -217,6 +218,12 @@ export async function buildSigning(
   authKeyWif: string,
   requiredAtLeast: 'high' | 'critical' = 'high',
 ): Promise<SigningContext | null> {
+  // Signing is disabled off the canonical host — the Pages deploy carries no
+  // signing path even for a session restored by some other page. Fail closed.
+  if (typeof window === 'undefined') return null
+  if (!LOGIN_AVAILABLE || !hostIsCanonical(window.location.hostname)) {
+    throw new Error('Signing is disabled on this host')
+  }
   const sdk = await getSdk()
   const { IdentitySigner } = await getSdkClasses()
   const identity = await sdk.identities.fetch(identityId)
@@ -258,7 +265,7 @@ export async function buildSigning(
     // skipped below — purpose/level are checked before any match is trusted.
     const disabledAt = key.disabledAt === undefined || key.disabledAt === null ? null : Number(key.disabledAt)
     if (disabledAt !== null && disabledAt > 0) continue
-    const data = decodeKeyData(key.data)
+    const data = decodeKeyDataBytes(key.data)
     const keyType = key.keyType.toUpperCase()
     let match = false
     if (keyType === 'ECDSA_SECP256K1' && data.length === publicKey.length && bytesEqual(data, publicKey)) {
@@ -286,46 +293,13 @@ export async function buildSigning(
 }
 
 function wifToPrivateKey(wif: string): { privateKey: Uint8Array; compressed: boolean } | null {
-  try {
-    const decoded = bs58check.decode(wif)
-    if (decoded.length === 34 && decoded[33] === 0x01) {
-      return { privateKey: decoded.slice(1, 33), compressed: true }
-    }
-    if (decoded.length === 33) {
-      return { privateKey: decoded.slice(1, 33), compressed: false }
-    }
-    return null
-  } catch {
-    return null
-  }
+  return decodeWif(wif, NETWORK)
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
-}
-
-/** Decode a key-data field. The SDK hands bytes as Uint8Array; when a string
- * ever appears, hex is the app's canonical encoding — hex if it matches,
- * otherwise base64. Both decodes are shapes, never guessed silently. */
-function decodeKeyData(data: Uint8Array | string): Uint8Array {
-  if (data instanceof Uint8Array) return data
-  const str = String(data)
-  if (/^(?:[0-9a-fA-F]{2})+$/.test(str) && str.length % 2 === 0) {
-    return hexToBytes(str)
-  }
-  const binary = atob(str)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return bytes
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex
-  const bytes = new Uint8Array(clean.length / 2)
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16)
-  return bytes
 }
 
 function securityLevelNumber(level: string): number {

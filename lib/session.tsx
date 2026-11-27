@@ -18,7 +18,8 @@ import {
 } from 'react'
 import { PlatformAuthProvider, usePlatformAuth } from 'platform-auth'
 import { createAuthController } from '@/lib/auth/controller'
-import { secretStore, sessionStore } from '@/lib/auth/adapters'
+import { secretStore } from '@/lib/auth/adapters'
+import { hostIsCanonical, LOGIN_AVAILABLE } from '@/lib/host'
 import type { SessionData } from '@/lib/types'
 import type { PlatformAuthController } from 'platform-auth'
 
@@ -51,9 +52,19 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
   const auth = usePlatformAuth()
   const [authKeyWif, setAuthKeyWif] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
+  // The session restore + the signing-key read are both gated to the
+  // canonical host: on any other origin the snapshot must not be rehydrated
+  // and the key must never be pulled from storage — a same-origin page here
+  // has nothing to sign with. Skipping restore keeps the whole session
+  // machinery (and the ~30 MB SDK) off the public read-only deploy.
+  const hostAllowed = () => LOGIN_AVAILABLE && hostIsCanonical(window.location.hostname)
 
   // Restore the session once on mount.
   useEffect(() => {
+    if (!hostAllowed()) {
+      setReady(true)
+      return
+    }
     let cancelled = false
     auth
       .restoreSession()
@@ -72,7 +83,7 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
 
   // Pull the auth key WIF for the signed-in identity (for signing writes).
   useEffect(() => {
-    if (!identityId) {
+    if (!identityId || !hostAllowed()) {
       setAuthKeyWif(null)
       return
     }

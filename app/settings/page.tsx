@@ -10,7 +10,8 @@ import { useSession } from '@/lib/session'
 import { query, createDocument, replaceDocument } from '@/lib/services/document-service'
 import { LIMITS } from '@/lib/constants'
 import { redactWif } from '@/lib/redact'
-import { shortId, safeHttpUrl } from '@/lib/utils'
+import { shortId, safeHttpUrl, codePointSlice, codePointLength } from '@/lib/utils'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 
 interface ProfileDraft {
   displayName: string
@@ -107,7 +108,11 @@ export default function SettingsPage() {
           <div className="text-center fade-up">
             <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Login required</p>
             <h1 className="text-2xl font-bold mt-2">Sign in to manage your profile</h1>
-            <Link href="/login?next=/settings" className="mt-6 btn-primary">Login with Dash</Link>
+            {LOGIN_AVAILABLE ? (
+              <Link href="/login?next=/settings" className="mt-6 btn-primary">Login with Dash</Link>
+            ) : (
+              <p className="mt-6 text-sm text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</p>
+            )}
           </div>
         </main>
         <Footer />
@@ -124,7 +129,7 @@ export default function SettingsPage() {
     }
     if (!loaded || loadError) return
 
-    const displayName = draft.displayName.trim().slice(0, LIMITS.displayName)
+    const displayName = codePointSlice(draft.displayName.trim(), LIMITS.displayName)
     const website = draft.website.trim()
     const errs: { displayName?: string; website?: string } = {}
     if (!displayName) errs.displayName = 'Display name is required.'
@@ -138,9 +143,9 @@ export default function SettingsPage() {
     try {
       const properties = {
         displayName,
-        bio: draft.bio.trim().slice(0, LIMITS.bio),
+        bio: codePointSlice(draft.bio.trim(), LIMITS.bio),
         website: safeHttpUrl(website) ?? '',
-        signature: draft.signature.trim().slice(0, LIMITS.signature),
+        signature: codePointSlice(draft.signature.trim(), LIMITS.signature),
       }
       if (profileId) {
         // Moderator-owned fields (customTitle, modState) are never sent by the
@@ -231,7 +236,7 @@ export default function SettingsPage() {
                 {fieldError?.displayName ? (
                   <p id="displayName-error" className="mt-1 text-xs text-red-400">{fieldError.displayName}</p>
                 ) : (
-                  <CharCount count={draft.displayName.length} max={LIMITS.displayName} />
+                  <CharCount count={codePointLength(draft.displayName)} max={LIMITS.displayName} />
                 )}
               </div>
               <div>
@@ -245,7 +250,7 @@ export default function SettingsPage() {
                   className="mt-1.5 rounded-lg border border-input bg-[#111a2e] p-3 text-base sm:text-sm focus:border-[#008CE7] w-full resize-y"
                   placeholder="A short bio — what you post about."
                 />
-                <CharCount count={draft.bio.length} max={LIMITS.bio} />
+                <CharCount count={codePointLength(draft.bio)} max={LIMITS.bio} />
               </div>
               <div>
                 <label htmlFor="website" className="text-sm font-medium text-[#93a1bd]">Website <span className="text-[#93a1bd] font-normal">(optional)</span></label>
@@ -277,7 +282,7 @@ export default function SettingsPage() {
                   className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
                   placeholder="Shown on your profile"
                 />
-                <CharCount count={draft.signature.length} max={LIMITS.signature} />
+                <CharCount count={codePointLength(draft.signature)} max={LIMITS.signature} />
               </div>
 
               {error && (

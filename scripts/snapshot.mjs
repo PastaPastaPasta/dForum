@@ -31,6 +31,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, unlinkSync
 import { EvoSDK } from '@dashevo/evo-sdk';
 import bs58 from 'bs58';
 import { redactWif } from './lib/redact.mjs';
+import { beforePost, openingPostFromPosts } from '../lib/services/orphan-rules.ts';
 
 const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readContractId();
 const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
@@ -61,13 +62,16 @@ function shortStr(s, max = 400) {
 /** Page through the thread index with startAfter until LISTED_TARGET listable
  * threads are found or HARD_CAP is hit — so orphan spam cannot push every real
  * thread out of the window. The per-thread orphan checks run with bounded
- * concurrency. Throws on any fetch error (the honest failure). */
+ * concurrency. Throws on any fetch error (the honest failure). Returns the
+ * listed threads AND whether the window filled — the caller writes the
+ * honest "+" suffix on the home tile. */
 async function fetchListableThreads(sdk) {
   const listed = [];
   const seenIds = new Set();
   let after = null;
   let scanned = 0;
   let page = 0;
+  let indexExhausted = false;
   while (listed.length < LISTED_TARGET && scanned < HARD_CAP && page < 30) {
     page += 1;
     const pageDocs = await queryList(sdk, 'thread', {
@@ -75,7 +79,7 @@ async function fetchListableThreads(sdk) {
       limit: FETCH_LIMIT,
       ...(after ? { startAfter: after } : {}),
     });
-    if (pageDocs.length === 0) break;
+    if (pageDocs.length === 0) { indexExhausted = true; break; }
     scanned += pageDocs.length;
     const candidates = [];
     for (const doc of pageDocs) {
@@ -95,30 +99,20 @@ async function fetchListableThreads(sdk) {
         if (item && listed.length < LISTED_TARGET) listed.push(item);
       }
     }
+    // A short page (fewer docs than the limit) means the index is exhausted.
+    if (pageDocs.length < FETCH_LIMIT) { indexExhausted = true; break; }
     after = pageDocs[pageDocs.length - 1].id;
   }
-  return listed;
+  // The window counts as filled only when more threads may remain past the
+  // window — an index that ran dry (or the scan budget exhausted by design)
+  // is not "+".
+  const windowFilled = listed.length >= LISTED_TARGET && !indexExhausted;
+  return { listed, windowFilled };
 }
 
-/** Byte-order comparison of the $id identifiers — the chain's ordering. */
-function compareIds(a, b) {
-  let ba = null;
-  let bb = null;
-  try { ba = bs58.decode(a); } catch { /* fall through */ }
-  try { bb = bs58.decode(b); } catch { /* fall through */ }
-  if (ba && bb) {
-    const n = Math.min(ba.length, bb.length);
-    for (let i = 0; i < n; i++) {
-      if (ba[i] !== bb[i]) return ba[i] - bb[i];
-    }
-    return ba.length - bb.length;
-  }
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-/** ($createdAt, $id) ordering, exactly as the chain defines it. */
+/** ($createdAt, $id) ordering — shared with the live app (orphan-rules.ts). */
 function isBefore(a, b) {
-  return a.$createdAt < b.$createdAt || (a.$createdAt === b.$createdAt && compareIds(a.id, b.id) < 0);
+  return beforePost({ createdAt: a.$createdAt, id: a.id }, { createdAt: b.$createdAt, id: b.id });
 }
 
 /** The opening post (orphan rule): the earliest post whose $ownerId equals
@@ -149,12 +143,16 @@ async function openingPost(sdk, thread) {
     });
     if (posts.length === 0) return null; // index exhausted — no opening post
     const mine = posts.filter((p) => p.properties?.threadId === thread.id);
-    mine.sort((a, b) => (isBefore(a, b) ? -1 : isBefore(b, a) ? 1 : 0));
-    const earliestOwner = mine[0];
+    const earliestOwner = openingPostFromPosts(
+      mine.map((p) => ({ createdAt: p.$createdAt, id: p.id, ownerId: p.$ownerId ?? '' })),
+      ownerId,
+    );
     if (earliestOwner) {
-      if (earliestOwner.properties?.modState != null) return null; // opening post hidden → not listed
-      if (lockedAt != null && earliestOwner.$createdAt > lockedAt) return null;
-      return earliestOwner;
+      const opening = mine.find((p) => p.id === earliestOwner.id) ?? null;
+      if (!opening) return null; // the chain returned a phantom id — refuse to list
+      if (opening.properties?.modState != null) return null; // opening post hidden → not listed
+      if (lockedAt != null && opening.$createdAt > lockedAt) return null;
+      return opening;
     }
     if (posts.length < 25) return null; // short page — no opening post
     after = posts[posts.length - 1].id;
@@ -178,28 +176,40 @@ async function main() {
     : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } });
   await sdk.connect();
 
+  // Page through both indexes until they run dry — a 50-doc window cap is a
+  // false-positive gate (a full page is not the same as a full index), and a
+  // page that merely filled must not fail the build. Only the page budget is
+  // a hard stop: a >1000-item index is a real failure worth surfacing.
+  async function fetchAll(type, orderBy) {
+    const out = [];
+    let after = null;
+    for (let page = 0; page < 20; page++) {
+      const docs = await queryList(sdk, type, {
+        // The forum contract carries no sort index (byCategory is composite) —
+        // order only what an index serves.
+        ...(orderBy ? { orderBy } : {}),
+        limit: 50,
+        ...(after ? { startAfter: after } : {}),
+      });
+      out.push(...docs);
+      if (docs.length < 50) return out; // ran dry — no more pages
+      after = docs[docs.length - 1].id;
+    }
+    throw new Error(`completeness gate: ${type} pagination hit the 20-page budget — the index exceeds what the static index can list`);
+  }
+
   const [categories, forums, threadCount] = await Promise.all([
-    queryList(sdk, 'category', { limit: 50 }),
-    queryList(sdk, 'forum', { limit: 50 }),
+    fetchAll('category', [['sort', 'asc']]),
+    fetchAll('forum', undefined),
     countDocuments(sdk, 'thread'),
   ]);
-
-  // Forum/category are NOT documentsCountable in this deployment — the only
-  // honest check is the window-limit tell. Fail loudly if we filled the
-  // window, so a silent cap is impossible.
-  if (forums.length >= 50) {
-    throw new Error(`completeness gate: forum fetch filled the 50-doc window — more forums exist than the static index can list`);
-  }
-  if (categories.length >= 50) {
-    throw new Error(`completeness gate: category fetch filled the 50-doc window — more categories exist than the static index can list`);
-  }
 
   const forumMap = new Map(forums.map((f) => [f.id, f]));
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
 
   // Pages through the thread index until LISTED_TARGET listable threads are
   // found (or HARD_CAP is hit) so orphan spam can't hide every real thread.
-  const listable = await fetchListableThreads(sdk);
+  const { listed: listable, windowFilled } = await fetchListableThreads(sdk);
 
   // Resolve display names for the listed threads' owners — the first paint
   // (and the static pages' nameOf) uses these instead of truncated ids.
@@ -301,6 +311,7 @@ async function main() {
       sort: f.properties?.sort ?? 0,
       archived: Boolean(f.properties?.archived),
     })),
+    threadsWindowFilled: windowFilled,
     threads: listable.map(({ thread: t }) => ({
       id: t.id,
       forumId: t.properties?.forumId ?? null,

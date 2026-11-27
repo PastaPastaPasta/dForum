@@ -75,10 +75,21 @@ describe('redactWif — any key-looking string is scrubbed', () => {
     expect(redactWif('status [1,2,3,4]')).toBe('status [1,2,3,4]')
   })
 
-  it('does NOT redact a longer base58 string that merely starts with a WIF prefix', () => {
-    // A 60-char base58 token starting with 'c' is not a WIF — the lookahead
-    // must reject it rather than scrub the whole token.
+  it('redacts a longer base58 run that merely starts with a WIF prefix', () => {
+    // A 60-char base58 token starting with a WIF prefix is WIF-shaped —
+    // the whole run is redacted (the false-negative side is worse than a
+    // harmless over-redaction of an unreachable case).
     const long = `c${'A'.repeat(59)}`
-    expect(redactWif(`note ${long}`)).toContain(long)
+    const out = redactWif(`note ${long}`)
+    expect(out).not.toContain(long)
+    expect(out).toContain('<redacted-wif>')
+  })
+
+  it('redacts a WIF with ordinary letters stuck on either side', () => {
+    const key = new Uint8Array(32).fill(0xab)
+    const w = wif(key, 0xef, true)
+    expect(redactWif(`prefix${w} suffix`)).toContain('<redacted-wif>')
+    expect(redactWif(`xy${w}zz`)).toContain('<redacted-wif>')
+    expect(redactWif(`${w}abc`)).toContain('<redacted-wif>')
   })
 })

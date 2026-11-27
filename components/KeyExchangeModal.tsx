@@ -25,7 +25,6 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   const registration = useYapprKeyRegistration(controller)
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
-  const [completing, setCompleting] = useState(false)
   const [completeError, setCompleteError] = useState<string | null>(null)
   const registrationStartedRef = useRef(false)
   const completingRef = useRef(false)
@@ -50,11 +49,10 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
   const handleComplete = useCallback(async () => {
     // Ref guard — the two completion effects fire on the same state change
-    // with stale closures over `completing`; the ref is the single source.
+    // with stale closures; the ref is the single source.
     if (completingRef.current) return
     if (!login.result) return
     completingRef.current = true
-    setCompleting(true)
     setCompleteError(null)
     try {
       await controller.loginWithLoginKey(
@@ -67,7 +65,6 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
       onClose?.()
     } catch (err) {
       completingRef.current = false
-      setCompleting(false)
       setCompleteError(redactWif(err instanceof Error ? err.message : 'Signing you in failed — try again'))
     }
   }, [controller, login, registration, onClose])
@@ -398,7 +395,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
-          Your wallet signs the registration; dForum then holds a HIGH-level key for this tab only — it can spend credits on fees for posts, but it cannot withdraw or transfer credits, and it cannot moderate.
+          Your wallet signs the registration; dForum then holds a HIGH-level key for this tab only — App Connect keys are not contract-bound (it can sign documents on the contracts you can read), it cannot withdraw or transfer credits, and it cannot moderate.
         </p>
       </div>
     </div>
