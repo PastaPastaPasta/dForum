@@ -66,19 +66,14 @@ jobs:
         run: npm run build
         env:
           NEXT_PUBLIC_NETWORK: testnet
-          # GH Pages serves under /dForum until forum.dashhq.org is live.
-          # The custom domain doesn't exist yet; remove BASE_PATH once DNS
-          # points the apex at this page.
-          BASE_PATH: /dForum
-          # The public origin the site is served from (no base path). The
-          # sitemap/robots/llms.txt all use this — do not leave it pointing
-          # somewhere that doesn't serve the site.
-          SITE_URL: https://pastapastapasta.github.io
+          # forum.dashhq.org is live — the site serves from the root. Login
+          # with Dash is enabled here (the session machinery is available and
+          # the host gate allows the canonical host).
+          SITE_URL: https://forum.dashhq.org
       - name: SEO files
         run: node scripts/generate-static-seo.mjs
         env:
-          BASE_PATH: /dForum
-          SITE_URL: https://pastapastapasta.github.io
+          SITE_URL: https://forum.dashhq.org
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: out
