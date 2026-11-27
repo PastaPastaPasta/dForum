@@ -4,8 +4,9 @@
  * Batch-resolve profile display names for a set of identity ids.
  * Results are cached module-wide (names rarely change) and fall back to the
  * truncated id until loaded. Profiles hidden by a moderator resolve to
- * "Hidden profile" — never their name. A failed read is not cached: the next
- * render retries it.
+ * "Hidden profile" — never their name. A failed read is not cached and is
+ * retried only when the set of ids changes (the effect key) — an unchanged
+ * id set keeps the shortened id on screen rather than looping fetches.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { query } from '@/lib/services/document-service'

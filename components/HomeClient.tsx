@@ -16,7 +16,7 @@ import { LiveUnavailable } from '@/components/LiveUnavailable'
 
 export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   const snap = snapshot
-  const { session } = useSession()
+  const { session, ready } = useSession()
   // Live fill — re-queries the platform after hydration
   // Errors propagate — useLive catches and flips the badge to "unavailable";
   // the snapshot stays visible and the stale note shows.
@@ -62,7 +62,7 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
     <>
       <Navbar />
       <main id="main" tabIndex={-1} className="flex-1">
-        <Hero counts={counts} session={session} loading={loading} error={error} />
+        <Hero counts={counts} session={session} loading={loading} error={error} ready={ready} />
 
         {error && !loading && (
           <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
@@ -75,10 +75,11 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
           <div className="grid grid-cols-1 gap-3">
             {listedThreads.length === 0 && !loading && !error ? (
               <div className="text-sm text-[#93a1bd] py-8 text-center">
-                {session ? (
+                {!ready ? null
+                  : session ? (
                   <Link href="/new" className="text-[#4db3ff] hover:underline">Start the first thread</Link>
                 ) : LOGIN_AVAILABLE ? (
-                  <>No threads yet. <Link href="/login" className="text-[#4db3ff] hover:underline">Login with Dash</Link> to be the first.</>
+                  <>No threads yet. <Link href="/login?next=%2F" className="text-[#4db3ff] hover:underline">Login with Dash</Link> to be the first.</>
                 ) : (
                   'No threads yet — this deployment is read-only.'
                 )}
@@ -130,7 +131,7 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
   )
 }
 
-function Hero({ counts, session, loading, error }: { counts: { categories: number; forums: number; threads: number; threadsWindowFull: boolean }; session: { identityId: string } | null; loading: boolean; error: boolean }) {
+function Hero({ counts, session, loading, error, ready }: { counts: { categories: number; forums: number; threads: number; threadsWindowFull: boolean }; session: { identityId: string } | null; ready: boolean; loading: boolean; error: boolean }) {
   return (
     <section className="border-b border-[#22304e] bg-gradient-to-b from-[#101b31] to-[#0b1220]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
@@ -152,12 +153,14 @@ function Hero({ counts, session, loading, error }: { counts: { categories: numbe
             Centralized ownership, team-based moderation, every message on-chain. Login with Dash.
           </p>
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            {session ? (
+            {!ready ? (
+              <span className="inline-block h-10 w-28 rounded-lg bg-[#18233c] animate-pulse" aria-hidden="true" />
+            ) : session ? (
               <Link href="/new" className="inline-flex items-center gap-2 btn-primary px-4 py-2.5 font-medium">
                 <Pencil className="w-4 h-4" aria-hidden="true" /> New thread
               </Link>
             ) : LOGIN_AVAILABLE ? (
-              <Link href="/login" className="btn-primary px-4 py-2.5 font-medium">Login with Dash</Link>
+              <Link href="/login?next=%2F" className="btn-primary px-4 py-2.5 font-medium">Login with Dash</Link>
             ) : (
               <span className="inline-flex items-center rounded-lg border border-[#22304e] px-4 py-2.5 text-sm text-[#93a1bd]">Read-only preview</span>
             )}
@@ -284,7 +287,9 @@ async function loadLive(snapshot: Snapshot): Promise<Snapshot> {
   }
   // "+" is claimed only when the window filled because we stopped at the target,
   // not because the index ran dry.
-  const windowFilled = !indexExhausted && listed.length >= HOME_TARGET
+  // "+" means the window may not be complete — either it filled (target
+  // reached without running dry) or the scan budget ran out first.
+  const windowFilled = !indexExhausted && (listed.length >= HOME_TARGET || scanned >= HOME_HARD_CAP)
   // Pinned snapshot threads can sit outside the recent live window — re-verify
   // each against the chain and merge the verified ones (never resurrect a
   // since-hidden thread). A failed check is treated as "not visible", which

@@ -50,7 +50,7 @@ type LoadResult =
 
 export default function ForumClient({ slug, snapshot }: { slug: string; snapshot: Snapshot | null }) {
   const snap = snapshot
-  const { session } = useSession()
+  const { session, ready } = useSession()
   const forum = snap?.forums.find((f) => f.slug === slug) ?? null
 
   const { live, loading: liveLoading, error: liveError, retry } = useLive<LoadResult>(() => loadLiveForum(slug), slug)
@@ -158,7 +158,9 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 fade-up">
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <Link href="/" className="text-sm text-[#93a1bd] hover:text-white transition">← All forums</Link>
-              {session ? (
+              {!ready ? (
+                <span className="inline-block h-9 w-28 rounded-lg bg-[#18233c] animate-pulse" aria-hidden="true" />
+              ) : session ? (
                 <Link href={`/new?forum=${encodeURIComponent(forum?.id ?? slug)}`} className="btn-primary px-3 py-2 text-sm font-medium">
                   <Pencil className="w-4 h-4" aria-hidden="true" /> New thread
                 </Link>
@@ -169,13 +171,14 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             {showStaleNote && <LiveUnavailable className="mt-4" onRetry={retry} />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
               <span className="whitespace-nowrap">{listed.length}{moreCursor != null ? '+' : ''} thread{listed.length === 1 ? '' : 's'}</span>
-              {!session && (
-                LOGIN_AVAILABLE ? (
-                  <Link href="/login" className="text-[#4db3ff] hover:underline">Login to post</Link>
-                ) : (
-                  <span className="text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</span>
-                )
-              )}
+              {!ready ? null
+                : !session && (
+                  LOGIN_AVAILABLE ? (
+                    <Link href={`/login?next=${encodeURIComponent(`/f/${forum?.slug ?? slug}`)}`} className="text-[#4db3ff] hover:underline">Login to post</Link>
+                  ) : (
+                    <span className="text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</span>
+                  )
+                )}
             </div>
           </div>
         </section>
@@ -187,7 +190,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
               <LoadingSkeleton />
             </>
           ) : listed.length === 0 ? (
-            <EmptyForum forum={forum} slug={slug} session={session} />
+            <EmptyForum forum={forum} slug={slug} session={session} ready={ready} />
           ) : (
             <div className="space-y-3">
               {listed.map((t) => (
@@ -217,17 +220,17 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
   )
 }
 
-function EmptyForum({ forum, slug, session }: { forum: { id: string } | null; slug: string; session: { identityId: string } | null }) {
+function EmptyForum({ forum, slug, session, ready }: { forum: { id: string } | null; slug: string; session: { identityId: string } | null; ready: boolean }) {
   return (
     <div className="rounded-xl border border-dashed border-[#22304e] bg-[#111a2e]/50 p-8 text-center fade-up">
       <Users className="w-8 h-8 text-[#93a1bd] mx-auto" aria-hidden="true" />
       <p className="mt-3 text-[#93a1bd]">No threads in this forum yet.</p>
-      {session ? (
+      {!ready ? null : session ? (
         <Link href={`/new?forum=${encodeURIComponent(forum?.id ?? slug)}`} className="mt-3 btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-medium">
           <Pencil className="w-4 h-4" aria-hidden="true" /> Start the first one
         </Link>
       ) : LOGIN_AVAILABLE ? (
-        <Link href="/login" className="mt-3 inline-flex items-center gap-2 text-sm text-[#4db3ff] hover:underline">Login to start the first one</Link>
+        <Link href={`/login?next=${encodeURIComponent(`/f/${slug}`)}`} className="mt-3 inline-flex items-center gap-2 text-sm text-[#4db3ff] hover:underline">Login to start the first one</Link>
       ) : (
         <span className="mt-3 block text-sm text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</span>
       )}

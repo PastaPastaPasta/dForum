@@ -175,7 +175,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
     else if (overLimit) errs.tags = `Too many tags — the forum contract allows at most ${LIMITS.maxTags}.`
     else if (tagList.valid.length === 0 && tags.trim()) errs.tags = 'No usable tags — fix the tags or leave the field empty.'
     const titleTrim = title.trim()
-    if (titleTrim.length < 3) errs.title = 'A title is required (at least 3 characters)'
+    if (codePointLength(titleTrim) < 3) errs.title = 'A title is required (at least 3 characters)'
     const bodyTrim = body.trim()
     if (!bodyTrim) errs.body = 'An opening post is required — a thread with no posts is never listed.'
     else if (new TextEncoder().encode(bodyTrim).length > LIMITS.bodyMaxBytes) errs.body = `Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes (${LIMITS.body} chars max).`
@@ -228,6 +228,9 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
           }
           setCreatedThreadId(found.id)
           setCreatedForumId((found.properties.forumId as string) ?? selected.id)
+          // Keep the forum picker in sync so it never shows the choice the
+          // user made before the guard adopted the existing thread.
+          setForumId((found.properties.forumId as string) ?? selected.id)
           setSubmitting(false)
           setError('Looks like your thread was already created — finish the opening post.')
           return
@@ -286,6 +289,27 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
     setSubmitting(true)
     setError(null)
     try {
+      // A post can fail or time out even though it landed on the chain —
+      // before writing, re-check for this thread's opening post and route
+      // to it instead of creating a duplicate. If the check itself fails
+      // (unknown), refuse to write blindly — the thread is safe; the user
+      // can open it and post manually.
+      let opening: Awaited<ReturnType<typeof earliestOwnerPost>>
+      try {
+        opening = await earliestOwnerPost(createdThreadId, session.identityId)
+      } catch {
+        setError('Could not verify the opening post — your thread is saved; open /t/' + createdThreadId + ' to check it before finishing.')
+        setSubmitting(false)
+        return
+      }
+      if (opening) {
+        const threadId = createdThreadId
+        setCreatedThreadId('')
+        setCreatedForumId('')
+        setBody('')
+        router.push(`/t/${encodeURIComponent(threadId)}`)
+        return
+      }
       await createDocument('post', session.identityId, session.authKeyWif, {
         threadId: createdThreadId,
         forumId: createdForumId,

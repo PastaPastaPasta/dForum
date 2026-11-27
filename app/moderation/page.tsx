@@ -516,7 +516,15 @@ export default function ModerationPage() {
     const gen = wipeGenRef.current
     const hiding = doc.modState == null
     const label = doc.type === 'post' ? 'post' : 'thread'
-    if (!window.confirm(hiding ? `Hide this ${label}? It disappears from live view immediately; the static page and search index keep serving it until the next snapshot rebuild (≤1h).` : `Unhide this ${label}? It will be shown again.`)) return
+    if (!window.confirm(
+      hiding
+        ? doc.type === 'post'
+          ? `Hide this post? If it is the opening post the whole thread hides with it — the thread also needs an explicit unhide to come back. It disappears from live view immediately; the static page and search index keep serving it until the next snapshot rebuild (≤1h).`
+          : `Hide this ${label}? It disappears from live view immediately; the static page and search index keep serving it until the next snapshot rebuild (≤1h).`
+        : doc.type === 'post'
+          ? `Unhide this post? If it was the thread's opening post, the thread stays hidden — unhide the thread separately to bring the thread back.`
+          : `Unhide this ${label}? It will be shown again.`,
+    )) return
     setDocActionBusy(`${doc.id}:hide`)
     setActionError(null)
     void trackInFlight(async () => {

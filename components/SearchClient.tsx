@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Search, Loader2 } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
@@ -11,6 +12,7 @@ import { useProfileNames } from '@/lib/use-profiles'
 import { filterListableWithFailures } from '@/lib/services/orphan'
 import { ThreadRow } from '@/components/ThreadRow'
 import { LiveUnavailable } from '@/components/LiveUnavailable'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 
 interface SearchResult {
   id: string
@@ -223,8 +225,16 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
             <div className="rounded-xl border border-dashed border-[#22304e] p-8 text-center fade-up">
               {failed ? (
                 <p className="text-[#93a1bd]">No threads to show right now.</p>
+              ) : loading ? (
+                <p className="text-[#93a1bd]">Loading threads…</p>
               ) : allThreads.length === 0 ? (
-                <p className="text-[#93a1bd]">No threads yet — be the first to start one.</p>
+                <>
+                  {LOGIN_AVAILABLE ? (
+                    <p className="text-[#93a1bd]">No threads yet — <Link href="/new" className="text-[#4db3ff] hover:underline">start the first one</Link>.</p>
+                  ) : (
+                    <p className="text-[#93a1bd]">No threads yet — this deployment is read-only.</p>
+                  )}
+                </>
               ) : q.trim() ? (
                 <p className="text-[#93a1bd]">No threads match “{q.trim()}”.</p>
               ) : (

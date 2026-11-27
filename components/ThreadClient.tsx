@@ -7,7 +7,7 @@ import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
-import { get, queryRaw, createDocument } from '@/lib/services/document-service'
+import { get, query, queryRaw, createDocument } from '@/lib/services/document-service'
 import { LOGIN_AVAILABLE } from '@/lib/host'
 import { shortId, isModerated } from '@/lib/utils'
 import { useProfileNames } from '@/lib/use-profiles'
@@ -59,7 +59,7 @@ export default function ThreadClient({
   snapshotForumTitle?: string | null
   initialPosts: StaticPost[]
 }) {
-  const { session } = useSession()
+  const { session, ready } = useSession()
   const [replyBody, setReplyBody] = useState('')
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
@@ -69,6 +69,9 @@ export default function ThreadClient({
   const [moreLoading, setMoreLoading] = useState(false)
   const [moreError, setMoreError] = useState(false)
   const [posted, setPosted] = useState<string | null>(null)
+  // Set when a previous write attempt failed — its write may have landed,
+  // so the next attempt re-checks the chain before writing again.
+  const [lastWriteFailed, setLastWriteFailed] = useState(false)
 
   const { live, loading: liveLoading, error: liveError, retry } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
@@ -186,20 +189,34 @@ export default function ThreadClient({
     setPostError(null)
     setPosted(null)
     try {
-      // A reply can fail or time out even though it landed on the chain —
-      // before creating, re-query for this owner's identical recent post in
-      // this thread and adopt it instead of writing a duplicate. Fails open:
-      // on any query error, proceed with creation.
-      try {
-        const recent = await queryRaw('post', {
-          where: [['threadId', '==', thread.id], ['$ownerId', '==', session.identityId], ['$createdAt', '>=', Date.now() - 120_000]],
-          orderBy: [['$createdAt', 'desc']],
-          limit: 3,
-        })
-        const found = recent.docs.find((d) => ((d.properties.body as string) ?? '').trim().toLowerCase() === body.toLowerCase())
+      // A write can fail or time out even though it landed on the chain —
+      // only once a previous attempt failed (not on the first try: a genuine
+      // repeat like "+1" must not be mistaken for a landed duplicate),
+      // re-query for this owner's exact recent threadId-matching body and
+      // adopt it. Queried via the byAuthor index ($ownerId + $createdAt) so
+      // the chain can serve it; threadId is filtered in the client. Fails
+      // open: on any query error, proceed with creation.
+      if (lastWriteFailed) {
+        let recent: Awaited<ReturnType<typeof query>>
+        try {
+          recent = await query('post', {
+            where: [['$ownerId', '==', session.identityId], ['$createdAt', '>=', Date.now() - 120_000]],
+            orderBy: [['$createdAt', 'desc']],
+            limit: 5,
+          })
+        } catch {
+          // Cannot verify — refuse to blind-write: the thread is safe, the
+          // user can check the thread before replying again.
+          setLastWriteFailed(true)
+          setPostError('Could not verify your reply — check this thread before sending again.')
+          setPosting(false)
+          return
+        }
+        const found = recent.find((d) => (d.properties.threadId as string) === thread.id && ((d.properties.body as string) ?? '').trim() === body)
         if (found) {
           setReplyBody('')
           setPosted('Reply posted')
+          setLastWriteFailed(false)
           setCreatedPosts((prev) => (prev.some((p) => p.id === found.id) ? prev : [...prev, {
             id: found.id,
             body: (found.properties.body as string) ?? body,
@@ -212,8 +229,6 @@ export default function ThreadClient({
           setPosting(false)
           return
         }
-      } catch {
-        // Fail open — proceed with creation.
       }
       const created = await createDocument('post', session.identityId, session.authKeyWif, {
         threadId: thread.id,
@@ -222,6 +237,7 @@ export default function ThreadClient({
       })
       setReplyBody('')
       setPosted('Reply posted')
+      setLastWriteFailed(false)
       setCreatedPosts((prev) => [
         ...prev,
         {
@@ -235,6 +251,7 @@ export default function ThreadClient({
         },
       ])
     } catch (e) {
+      setLastWriteFailed(true)
       setPostError(redactWif(e instanceof Error ? e.message : 'Failed to post — try again in a moment'))
       setPosted(null)
     } finally {
@@ -390,7 +407,9 @@ export default function ThreadClient({
                   This thread is locked by moderators. No new replies.
                 </div>
               ) : thread && thread.forumId ? (
-                session ? (
+                !ready ? (
+                  <div className="mt-8 h-24 rounded-xl border border-[#22304e] bg-[#111a2e] animate-pulse" aria-hidden="true" />
+                ) : session ? (
                   <div className="mt-8 rounded-xl border border-[#22304e] bg-[#111a2e] p-4">
                     <label htmlFor="reply" className="text-sm font-medium text-[#93a1bd]">Reply</label>
                     <textarea

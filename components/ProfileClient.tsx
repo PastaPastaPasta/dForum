@@ -45,6 +45,9 @@ interface LiveProfile {
   moreCursor: string | null
   postCount: number
   postCountCapped: boolean
+  // Which reads failed — the caller shows honest states per component instead
+  // of treating a failed read as "empty".
+  failed: Set<'profile' | 'threads' | 'posts'>
 }
 
 const THREAD_WINDOW = 20
@@ -77,10 +80,11 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
   // (useLive retries once silently, then surfaces the banner with a Retry).
   const { live, loading: liveLoading, error: liveError, retry } = useLive<LiveProfile>(async () => {
     const forumByIdLocal = forumById
+    const failed = new Set<'profile' | 'threads' | 'posts'>()
     const [profileDocs, threadsRes, postsRes] = await Promise.all([
-      query('profile', { where: [['$ownerId', '==', identityId]], limit: 1 }).catch(() => null),
-      queryRaw('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: THREAD_WINDOW }).catch(() => null),
-      query('post', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: POST_SCAN_CAP }).catch(() => null),
+      query('profile', { where: [['$ownerId', '==', identityId]], limit: 1 }).catch(() => { failed.add('profile'); return null }),
+      queryRaw('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: THREAD_WINDOW }).catch(() => { failed.add('threads'); return null }),
+      query('post', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: POST_SCAN_CAP }).catch(() => { failed.add('posts'); return null }),
     ])
     if (!profileDocs && !threadsRes && !postsRes) {
       throw new Error('All platform reads failed')
@@ -90,22 +94,17 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
     let threads: OwnedThread[] = []
     let moreCursor: string | null = null
     if (threadsRes) {
-      let listed: { id: string }[] = []
-      try {
-        listed = await filterListable(
-          threadsRes.docs.map((t) => ({
-            id: t.id,
-            ownerId: t.ownerId || null,
-            lockedAt: (t.properties.lockedAt as number | null) ?? null,
-            createdAt: t.createdAt,
-          })),
-          4,
-        )
-      } catch {
-        // Fail open — the honest alternative is hiding every thread; the
-        // orphan filter surfaces its own failures via the banner.
-        listed = threadsRes.docs.map((t) => ({ id: t.id }))
-      }
+      // filterListable never throws — it fails open per thread (lists it
+      // anyway), so its failures are not retryable here.
+      const listed = await filterListable(
+        threadsRes.docs.map((t) => ({
+          id: t.id,
+          ownerId: t.ownerId || null,
+          lockedAt: (t.properties.lockedAt as number | null) ?? null,
+          createdAt: t.createdAt,
+        })),
+        4,
+      )
       const listedIds = new Set(listed.map((t) => t.id))
       threads = threadsRes.docs
         .filter((t) => listedIds.has(t.id))
@@ -145,7 +144,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
     const postCount = visible.length
     const postCountCapped = (postsRes?.length ?? 0) >= POST_SCAN_CAP
 
-    return { profile, threads, moreCursor, postCount, postCountCapped }
+    return { profile, threads, moreCursor, postCount, postCountCapped, failed }
   }, identityId)
 
   const [moreThreads, setMoreThreads] = useState<OwnedThread[]>([])
@@ -161,22 +160,29 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
 
   // First paint shows the snapshot (build-time listed surface). Live wins
   // outright once it lands — a snapshot row hidden since the snapshot must
-  // not be resurrected.
+  // not be resurrected. A READ that failed does NOT count as "empty" —
+  // every numbered claim below is gated on its own read succeeding.
+  const threadsFailed = Boolean(live?.failed.has('threads'))
+  const postsFailed = Boolean(live?.failed.has('posts'))
+  const profileFailed = Boolean(live?.failed.has('profile'))
   const liveThreads = (live?.threads ?? []).filter((t) => !isModerated(t.modState))
-  const threads = live != null ? liveThreads : snapThreads.filter((t) => !isModerated(t.modState))
+  const threads = live != null && !threadsFailed ? liveThreads : snapThreads.filter((t) => !isModerated(t.modState))
   const all = [...threads, ...moreThreads]
-  const postCount = live?.postCount ?? 0
-  const postCountCapped = live?.postCountCapped ?? false
+  const postCount = live != null && !postsFailed ? live.postCount : 0
+  const postCountCapped = live != null && !postsFailed ? live.postCountCapped : false
   const profile = live?.profile ?? null
-  const modState = profile?.modState ?? null
-  const stale = liveError && firstPaint
-  const countsHonest = live != null && !liveError
-  // Missing = live read resolved and found nothing — not yet, not failed.
-  const missing = live != null && !liveError && !profile && threads.length === 0 && postCount === 0
-  const isEmptySelf = isSelf(identityId, session?.identityId) && countsHonest && !missing && !profile && all.length === 0 && postCount === 0
+  const modState = live != null && !profileFailed ? profile?.modState ?? null : null
+  const stale = (liveError || (live != null && live.failed.size > 0)) && firstPaint
+  const threadsHonest = live != null && !liveError && !threadsFailed
+  const postsHonest = live != null && !liveError && !postsFailed
+  const profileHonest = live != null && !liveError && !profileFailed
+  // Missing = live read resolved, found nothing, and every read succeeded —
+  // not yet, not failed.
+  const missing = live != null && !liveError && !threadsFailed && !postsFailed && !profileFailed && !profile && threads.length === 0 && postCount === 0
+  const isEmptySelf = isSelf(identityId, session?.identityId) && threadsHonest && postsHonest && profileHonest && !missing && !profile && all.length === 0 && postCount === 0
   const showError = liveError && snapThreads.length === 0 && !snapProfileName
 
-  const isHidden = isModerated(modState)
+  const isHidden = profileHonest && isModerated(modState)
   const displayName = profile?.displayName || snapProfileName || null
   const headingName = isHidden ? 'Hidden profile' : displayName ?? shortId(identityId, 12)
 
@@ -291,7 +297,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                   <div className="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-amber-400">
                     This profile was hidden by a moderator.
                   </div>
-                ) : (
+                ) : profileFailed ? null : (
                   <>
                     {profile?.customTitle && <p className="mt-2 text-sm text-[#4db3ff] font-medium">{profile.customTitle}</p>}
                     {profile?.bio && <p className="mt-3 text-[#93a1bd] max-w-xl whitespace-pre-wrap">{profile.bio}</p>}
@@ -311,8 +317,8 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                     </>
                   ) : (
                     <>
-                      <span>{countsHonest ? `${all.length}${moreCursor != null ? '+' : ''} thread${all.length === 1 ? '' : 's'}` : '—'}</span>
-                      <span>{countsHonest ? (postCountCapped ? `${postCount}+ posts` : `${postCount} post${postCount === 1 ? '' : 's'}`) : '—'}</span>
+                      <span>{threadsHonest ? `${all.length}${moreCursor != null ? '+' : ''} thread${all.length === 1 ? '' : 's'}` : '—'}</span>
+                      <span>{postsHonest ? (postCountCapped ? `${postCount}+ posts` : `${postCount} post${postCount === 1 ? '' : 's'}`) : '—'}</span>
                     </>
                   )}
                 </div>
@@ -350,6 +356,11 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
                   <span className="sr-only" role="status">Loading threads…</span>
                   {[0, 1].map((i) => <div key={i} aria-hidden="true" className="h-16 rounded-xl border border-[#22304e] bg-[#111a2e] animate-pulse" />)}
                 </>
+              ) : threadsFailed && live != null ? (
+                <div className="rounded-xl border border-dashed border-[#22304e] p-8 text-center">
+                  <p className="text-[#93a1bd]">Couldn&apos;t load threads — retry in a moment.</p>
+                  <button onClick={retry} className="mt-3 btn-secondary px-3 py-2 text-sm">Retry</button>
+                </div>
               ) : all.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[#22304e] p-8 text-center">
                   <UserPlus className="w-6 h-6 text-[#93a1bd] mx-auto" aria-hidden="true" />

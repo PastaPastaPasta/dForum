@@ -104,9 +104,9 @@ async function fetchListableThreads(sdk) {
     after = pageDocs[pageDocs.length - 1].id;
   }
   // The window counts as filled only when more threads may remain past the
-  // window — an index that ran dry (or the scan budget exhausted by design)
-  // is not "+".
-  const windowFilled = listed.length >= LISTED_TARGET && !indexExhausted;
+  // window — an index that ran dry is not "+". The scan budget running out
+  // (before the index does) is enough to claim "+".
+  const windowFilled = !indexExhausted && (listed.length >= LISTED_TARGET || scanned >= HARD_CAP);
   return { listed, windowFilled };
 }
 
