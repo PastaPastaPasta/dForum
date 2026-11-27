@@ -57,11 +57,19 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
   // and the key must never be pulled from storage — a same-origin page here
   // has nothing to sign with. Skipping restore keeps the whole session
   // machinery (and the ~30 MB SDK) off the public read-only deploy.
+  // `gated` starts null (unknown — skeleton, SSR-safe), then becomes true
+  // when the restore is allowed, or false when the gate refuses.
+  const [gated, setGated] = useState<boolean | null>(null)
   const hostAllowed = () => LOGIN_AVAILABLE && hostIsCanonical(window.location.hostname)
 
   // Restore the session once on mount.
   useEffect(() => {
-    if (!hostAllowed()) {
+    const allowed = hostAllowed()
+    setGated(allowed)
+    if (!allowed) {
+      // The vendored controller stays in isAuthRestoring:true forever when
+      // restoreSession() never runs — ready must come from the gate, not
+      // from the vendored state.
       setReady(true)
       return
     }
@@ -131,7 +139,9 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
       value={{
         controller,
         session,
-        ready: ready && !auth.isAuthRestoring,
+        // On the gated (read-only) deploy the vendored controller never
+        // leaves isAuthRestoring — readiness comes from the gate itself.
+        ready: ready && (gated === null ? false : gated ? !auth.isAuthRestoring : true),
         isAuthRestoring: auth.isAuthRestoring,
         authError: auth.error,
         signOut,
