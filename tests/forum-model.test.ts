@@ -143,7 +143,7 @@ describe('live delta', () => {
     expect(newThreads({ threads: [t], posts: [open] }, ctx)).toHaveLength(1)
   })
   it('bumps forum counts and the thread list', () => {
-    const delta = { threads: [t, oldThread], posts: [open, oldOpen, reply] }
+    const delta = { threads: [t, oldThread], posts: [open, oldOpen, reply], heads: { OLD: Infinity } }
     expect(forumActivity(delta, ctx).get('F')).toMatchObject({ threads: 1, posts: 2 })
     const list = mergeForumThreads([old], 'F', delta, ctx)
     expect(list.find((x) => x.id === 'OLD')).toMatchObject({ replies: 4, lastPostAt: 1600, lastPostAuthorId: 'bob' })
@@ -170,12 +170,23 @@ describe('live delta', () => {
     const arch = doc(ARCH, 100, { title: 'Imported', forumId: 'F', origCreatedAt: 1 })
     const first = doc(ARCH, 101, { threadId: arch.id, forumId: 'F', body: 'first', origCreatedAt: 1 })
     const second = { ...doc(ARCH, 102, { threadId: arch.id, forumId: 'F', body: 'second', origCreatedAt: 2, modState: 1 }), moderatedAt: 1500 }
-    const c = deltaChanges({ threads: [arch], posts: [first, second], heads: [arch.id] }, { id: ARCH })
+    const c = deltaChanges({ threads: [arch], posts: [first, second], heads: { [arch.id]: Infinity } }, { id: ARCH })
     expect(c.threadGone(arch.id)).toBe(false)
     const summary = { id: arch.id, forumId: 'F', title: 'Imported', tags: [], ownerId: ARCH, createdAt: 1, sticky: false, locked: false, replies: 1, reactions: 0, lastPostAt: 2, lastPostAuthorId: ARCH }
-    expect(mergeForumThreads([summary], 'F', { threads: [arch], posts: [first, second], heads: [arch.id] }, { snapshotAt, archive: { id: ARCH } })).toHaveLength(1)
+    expect(mergeForumThreads([summary], 'F', { threads: [arch], posts: [first, second], heads: { [arch.id]: Infinity } }, { snapshotAt, archive: { id: ARCH } })).toHaveLength(1)
     const retractedOpen = { ...first, p: { ...first.p, retracted: true } }
-    expect(mergeForumThreads([summary], 'F', { threads: [arch], posts: [retractedOpen, second], heads: [arch.id] }, { snapshotAt, archive: { id: ARCH } })).toHaveLength(0)
+    expect(mergeForumThreads([summary], 'F', { threads: [arch], posts: [retractedOpen, second], heads: { [arch.id]: Infinity } }, { snapshotAt, archive: { id: ARCH } })).toHaveLength(0)
+  })
+  it('fails closed on older threads: no heads loaded, or the opening post pushed past the loaded heads', () => {
+    // Heads not loaded yet: replies wait (G3).
+    expect(newPosts({ threads: [oldThread], posts: [oldOpen, reply] }, ctx)).toHaveLength(0)
+    // Five replies by others before the owner's opening post; the heads hold only those (G1).
+    const spam = doc('mallory', 100, { title: 'Spam', forumId: 'F' })
+    const early = [1, 2, 3, 4, 5].map((i) => doc('sock', 100 + i, { threadId: spam.id, forumId: 'F', body: `r${i}` }))
+    const bump = doc('mallory', 1500, { threadId: spam.id, forumId: 'F', body: 'bump' })
+    const heads = { [spam.id]: 105 }
+    expect(newPosts({ threads: [spam], posts: [...early, bump], heads }, ctx)).toHaveLength(0)
+    expect(deltaChanges({ threads: [spam], posts: [...early, bump], heads }).threadGone(spam.id)).toBe(true)
   })
   it('ignores live posts in hidden or unknown threads', () => {
     expect(newPosts({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [reply] }, ctx)).toHaveLength(0)
@@ -183,7 +194,7 @@ describe('live delta', () => {
   })
   it('keeps member content in forums archived after it was written', () => {
     const archived = { snapshotAt, archivedForums: new Set(['F']), staff: new Set(['carol']) }
-    expect(newPosts({ threads: [oldThread], posts: [oldOpen, reply] }, archived)).toHaveLength(1)
+    expect(newPosts({ threads: [oldThread], posts: [oldOpen, reply], heads: { OLD: Infinity } }, archived)).toHaveLength(1)
   })
   it('lists a thread whose opening post landed just after the snapshot', () => {
     const at = { snapshotAt: 10_000_000 }
@@ -200,7 +211,7 @@ describe('live delta', () => {
     expect(newThreads({ threads: [t], posts: [hiddenOpen, later] }, ctx)).toHaveLength(0)
     const retracted = { ...open, p: { ...open.p, retracted: true } }
     expect(newThreads({ threads: [t], posts: [retracted, later] }, ctx)).toHaveLength(0)
-    expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later], heads: [t.id] }).threadGone(t.id)).toBe(true)
+    expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later], heads: { [t.id]: Infinity } }).threadGone(t.id)).toBe(true)
     // Without the thread's first posts loaded, nothing is judged from partial data.
     expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later] }).threadGone(t.id)).toBe(false)
     expect(newPosts({ threads: [t], posts: [hiddenOpen, later] }, ctx)).toHaveLength(0)
@@ -212,14 +223,14 @@ describe('live delta', () => {
   })
   it('reports moderation of documents the static index lists', () => {
     const hiddenPost = { ...reply, p: { ...reply.p, modState: 1 } }
-    const c = deltaChanges({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [hiddenPost], heads: ['OLD'] })
+    const c = deltaChanges({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [hiddenPost], heads: { ['OLD']: Infinity } })
     expect(c.threadGone('OLD')).toBe(true)
     expect(c.postGone(reply.id)).toBe(true)
     expect(c.threadGone('other')).toBe(false)
   })
   it('counts moved threads toward their new forum', () => {
     const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
-    const a = forumActivity({ threads: [moved], posts: [oldOpen, reply] }, ctx)
+    const a = forumActivity({ threads: [moved], posts: [oldOpen, reply], heads: { OLD: Infinity } }, ctx)
     expect(a.get('G')?.posts).toBe(1)
     expect(a.get('F')).toBeUndefined()
   })

@@ -21,13 +21,14 @@ export interface LiveState {
   posts: RawDoc[]
   reactions: RawDoc[]
   profiles: RawDoc[]
-  /** Threads whose first posts are loaded into `posts`. */
-  heads: string[]
+  /** Threads whose first posts are loaded into `posts`, with the createdAt of the last one loaded
+   * (Infinity when the thread had fewer, i.e. every post is loaded). */
+  heads: Record<string, number>
   updatedAt: number
   truncated: boolean
 }
 
-const EMPTY: LiveState = { status: 'idle', threads: [], posts: [], reactions: [], profiles: [], heads: [], updatedAt: 0, truncated: false }
+const EMPTY: LiveState = { status: 'idle', threads: [], posts: [], reactions: [], profiles: [], heads: {}, updatedAt: 0, truncated: false }
 let state: LiveState = EMPTY
 let since = 0
 let timer: ReturnType<typeof setInterval> | null = null
@@ -43,8 +44,9 @@ function set(next: Partial<LiveState>) {
 // its cursor (a busy page continues next poll), so a capped poll never drops the newest changes.
 const cursors = new Map<string, number>()
 // Threads whose first posts have been loaded (see refreshLive).
-const headsFetched = new Set<string>()
+const headsFetched = new Map<string, number>()
 const HEADS_PER_POLL = 40
+const HEAD_POSTS = 5
 const STEP_OVERLAP_MS = 2 * 60_000
 const MAX_PAGES = 10
 
@@ -109,23 +111,25 @@ export function refreshLive(): Promise<void> {
       // same rule as the snapshot, so the overlay needs each such thread's first posts too. Fetched
       // once per thread; later moderation of them arrives through the $moderatedAt scan.
       const heads: RawDoc[] = []
+      const cutoffs = new Map<string, number>()
       const needHeads = [...new Set(posts.docs.map((p) => str(p, 'threadId')).filter((id): id is string => !!id && !headsFetched.has(id)))]
       for (const id of needHeads.slice(0, HEADS_PER_POLL)) {
-        const page = await queryPage('post', { where: [['threadId', '==', id]], orderBy: [['$createdAt', 'asc']], limit: 5 })
+        const page = await queryPage('post', { where: [['threadId', '==', id]], orderBy: [['$createdAt', 'asc']], limit: HEAD_POSTS })
         heads.push(...page.docs)
+        cutoffs.set(id, page.docs.length < HEAD_POSTS ? Infinity : page.docs[page.docs.length - 1].createdAt)
       }
       set({
         status: 'live',
         threads: allThreads,
         posts: mergeDocs(state.posts, [...posts.docs, ...heads]),
-        heads: [...headsFetched, ...needHeads.slice(0, HEADS_PER_POLL)],
+        heads: Object.fromEntries([...headsFetched, ...cutoffs]),
         reactions: mergeDocs(state.reactions, reactions.docs),
         profiles: mergeDocs(state.profiles, profiles.docs),
         truncated: threads.truncated || posts.truncated || reactions.truncated || profiles.truncated,
         updatedAt: Date.now(),
       })
       for (const [key, value] of [...threads.next, ...posts.next, ...reactions.next, ...profiles.next]) cursors.set(key, value)
-      for (const id of needHeads.slice(0, HEADS_PER_POLL)) headsFetched.add(id)
+      for (const [id, cutoff] of cutoffs) headsFetched.set(id, cutoff)
       if (needHeads.length > HEADS_PER_POLL) setTimeout(() => void refreshLive(), 1500)
       // A capped poll resumes from its cursors right away until it has caught up.
       if (state.truncated) setTimeout(() => void refreshLive(), 1500)

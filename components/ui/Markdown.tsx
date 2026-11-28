@@ -16,7 +16,8 @@ const textOf = (n?: HastNode): string =>
 function fileNameOf(href: string): string {
   const slug = href.match(/\/attachments\/([^/?#]+)/)?.[1]?.replace(/\.\d+$/, '') ?? ''
   const m = slug.match(/^(.+)-([a-z0-9]{2,5})$/i)
-  return decodeURIComponent(m ? `${m[1]}.${m[2]}` : slug)
+  const name = m ? `${m[1]}.${m[2]}` : slug
+  try { return decodeURIComponent(name) } catch { return name }
 }
 
 /** Post bodies. No raw HTML; only http(s)/mailto/relative links; external links are ugc. */

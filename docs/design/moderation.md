@@ -28,7 +28,7 @@ This signs with the owner's CRITICAL key (`DFORUM_OWNER_WIF` and `DFORUM_OWNER_K
 | Pin / unpin a thread | changeFields `sticky` | Sorted first in its forum |
 | Lock / unlock a thread | changeFields `locked` | Consensus refuses new replies, edits of existing posts, reaction changes, and title or tag edits. Moderator changes (hide, move, unlock) still work, and members can still report |
 | Move a thread | changeFields `movedToForumId` | Listed in the new forum |
-| Delete | `moderatorDeleteDocument` | Removed, leaving a removal record (thread keeps forumId; post keeps threadId and forumId). The console recommends hiding instead. |
+| Delete | `moderatorDeleteDocument` | Removed, leaving a removal record (thread keeps forumId; post keeps threadId and forumId). The console recommends hiding instead. Deleting a thread's opening post also hides the thread, since the author's next post would otherwise become the opening post and relist it. |
 | Resolve a report | changeFields `status` (2 actioned, 3 dismissed) + `resolution` | Leaves the open queue |
 | Ban / unban, suspend / unsuspend, warn / clear warnings | contract moderation lists | The network refuses writes from banned or suspended identities (consensus 41107) |
 | Custom member title | changeFields `customTitle` on the profile | Shown on posts and the profile |

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLink, EyeOff, Lock, Pin, ShieldCheck, Trash2, ArrowRightLeft, Eye, Unlock, Flag, Gavel, ScrollText, Search } from 'lucide-react'
 import type { RawDoc } from '@/lib/forum/types'
-import { excerpt, isHidden, memberLabel, num, postBody, str, threadForumId } from '@/lib/forum/model'
+import { excerpt, isHidden, memberLabel, num, postBody, str, threadForumId, threadPosts } from '@/lib/forum/model'
 import { REPORT_REASONS } from '@/lib/forum/actions'
 import { getDoc, queryAll, queryPage } from '@/lib/live/platform'
 import { refreshLive } from '@/lib/live/overlay'
@@ -347,8 +347,16 @@ function Content({ act, busy, forums, moderatorId, openMember }: PanelProps) {
                 )}
                 <button type="button" className="btn btn-quiet text-danger" disabled={!!busy} onClick={() => m && void act('Delete', async () => {
                   if (!isHidden(doc.doc)) await changeDocumentFields(m, doc.type, doc.doc.id, { modState: 1 }, reason)
+                  // Removing an opening post would make the author's next post the opening one and relist
+                  // the thread, so the thread is hidden with it.
+                  if (doc.type === 'post' && thread && !isHidden(thread)) {
+                    const first = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: 100 })
+                    if (threadPosts(thread, first.docs).opening?.id === doc.doc.id) {
+                      await changeDocumentFields(m, 'thread', thread.id, { modState: 1 }, reason || 'Opening post deleted')
+                    }
+                  }
                   await deleteDocument(m, doc.type, doc.doc.id, reason)
-                }, `Delete this ${doc.type} for good? It is hidden first, then removed; only a record of the removal remains. Use Hide unless the content must not exist at all.`).then((ok) => { if (ok) void setDoc(null) })}><Trash2 className="h-4 w-4" />Delete</button>
+                }, `Delete this ${doc.type} for good? It is hidden first, then removed; only a record of the removal remains. Deleting a thread's opening post also hides the thread. Use Hide unless the content must not exist at all.`).then((ok) => { if (ok) void setDoc(null) })}><Trash2 className="h-4 w-4" />Delete</button>
               </div>
             </>
           )}

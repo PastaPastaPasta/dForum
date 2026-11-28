@@ -12,8 +12,22 @@ export interface DeltaDocs {
   /** Changed threads plus the threads of every live post (the overlay resolves them). */
   threads: RawDoc[]
   posts: RawDoc[]
-  /** Threads whose first posts the overlay has loaded into `posts`: their listability is known. */
-  heads?: readonly string[]
+  /** Threads whose first posts the overlay has loaded into `posts`, with the createdAt of the last
+   * post loaded (Infinity: the thread's every post is loaded). */
+  heads?: Readonly<Record<string, number>>
+}
+
+/** The snapshot's listable rule, judged on live data that may be partial. A thread created after the
+ * snapshot has all its posts in the delta: judged in full. An older one is judged only once its first
+ * posts are loaded, and only on those: its opening post must be among them and visible. Anything
+ * less fails closed (a spammer can't push the real opening post out of view and relist the thread). */
+function listableLive(t: RawDoc, posts: RawDoc[], delta: DeltaDocs, snapshotAt: number | undefined, archive?: ArchiveRef): boolean {
+  if (isHidden(t)) return false
+  if (snapshotAt !== undefined && t.createdAt > snapshotAt) return threadPosts(t, posts, archive).listable
+  const cutoff = delta.heads?.[t.id]
+  if (cutoff === undefined) return false
+  const view = threadPosts(t, posts.filter((p) => p.createdAt <= cutoff), archive)
+  return view.listable
 }
 
 /** Delta posts grouped by thread, built once per call site instead of filtering per post. */
@@ -80,16 +94,16 @@ export function deltaChanges(delta: DeltaDocs, archive?: ArchiveRef): DeltaChang
   const threads = byId(delta.threads)
   const posts = byId(delta.posts)
   const grouped = postsByThread(delta.posts)
-  const heads = new Set(delta.heads ?? [])
   const gone = new Map<string, boolean>()
   return {
     threadGone: (id) => {
       const t = threads.get(id)
       if (!t) return false
       if (isHidden(t)) return true
-      // Only threads whose first posts are loaded can be judged: then the snapshot's rule applies.
-      if (!heads.has(id)) return false
-      if (!gone.has(id)) gone.set(id, !threadPosts(t, grouped.get(id) ?? [], archive).listable)
+      // Static listings came from the snapshot: drop one only on evidence, i.e. once its first posts
+      // are loaded and fail the rule.
+      if (delta.heads?.[id] === undefined) return false
+      if (!gone.has(id)) gone.set(id, !listableLive(t, grouped.get(id) ?? [], delta, undefined, archive))
       return gone.get(id) as boolean
     },
     postGone: (id) => { const p = posts.get(id); return !!p && !visible(p) },
@@ -131,7 +145,7 @@ export function newPosts(delta: DeltaDocs, ctx: LiveContext): Array<{ post: RawD
   const grouped = postsByThread(delta.posts)
   const listable = new Map<string, boolean>()
   const isListable = (t: RawDoc) => {
-    if (!listable.has(t.id)) listable.set(t.id, threadPosts(t, grouped.get(t.id) ?? [], ctx.archive).listable)
+    if (!listable.has(t.id)) listable.set(t.id, listableLive(t, grouped.get(t.id) ?? [], delta, ctx.snapshotAt, ctx.archive))
     return listable.get(t.id) as boolean
   }
   const out: Array<{ post: RawDoc; thread: RawDoc }> = []
