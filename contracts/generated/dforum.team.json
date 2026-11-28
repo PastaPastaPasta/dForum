@@ -3,7 +3,7 @@
   "id": "PV5ERAp8YpWhfpG2K8kEYoCEshKM2VgkY4UQyUQCUMCc",
   "ownerId": "PV5ERAp8YpWhfpG2K8kEYoCEshKM2VgkY4UQyUQCUMCc",
   "version": 1,
-  "description": "dForum: a forum on Dash Platform, owned and moderated by the deployer team.",
+  "description": "dForum v2: a forum on Dash Platform, owned and moderated by the deployer team.",
   "config": {
     "$formatVersion": "2",
     "canBeDeleted": false,
@@ -60,8 +60,8 @@
         "rules": {
           "type": "string",
           "minLength": 0,
-          "maxLength": 1000,
-          "maxBytes": 8192,
+          "maxLength": 4000,
+          "maxBytes": 5120,
           "position": 4
         },
         "announcement": {
@@ -70,9 +70,22 @@
           "maxLength": 500,
           "position": 5
         },
-        "hideBannedContent": {
-          "type": "boolean",
+        "archiveOwnerId": {
+          "type": "identifier",
           "position": 6
+        },
+        "archiveSourceName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "position": 7
+        },
+        "archiveSourceUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "pattern": "^(https://\\S+)?$",
+          "position": 8
         }
       },
       "required": [
@@ -98,6 +111,9 @@
       "canBeDeleted": false,
       "creationRestrictionMode": 1,
       "documentsMutable": true,
+      "immutable": [
+        "slug"
+      ],
       "properties": {
         "slug": {
           "type": "string",
@@ -158,45 +174,50 @@
       "creationRestrictionMode": 1,
       "documentsMutable": true,
       "immutable": [
-        "categoryId"
+        "slug"
       ],
       "properties": {
         "categoryId": {
           "type": "identifier",
-          "refersTo": {
-            "type": "permanentDocument",
-            "documentType": "category"
-          },
           "position": 0
+        },
+        "parentForumId": {
+          "type": "identifier",
+          "position": 1
         },
         "slug": {
           "type": "string",
           "minLength": 1,
           "maxLength": 48,
           "pattern": "^[a-z0-9-]{1,48}$",
-          "position": 1
+          "position": 2
         },
         "title": {
           "type": "string",
           "minLength": 3,
           "maxLength": 80,
-          "position": 2
+          "position": 3
         },
         "description": {
           "type": "string",
           "minLength": 0,
           "maxLength": 500,
-          "position": 3
+          "position": 4
         },
         "sort": {
           "type": "integer",
           "minimum": 0,
           "maximum": 65535,
-          "position": 4
+          "position": 5
         },
         "archived": {
           "type": "boolean",
-          "position": 5
+          "position": 6
+        },
+        "origId": {
+          "type": "integer",
+          "minimum": 1,
+          "position": 7
         }
       },
       "required": [
@@ -232,7 +253,7 @@
     },
     "teamMember": {
       "type": "object",
-      "canBeDeleted": false,
+      "canBeDeleted": true,
       "creationRestrictionMode": 1,
       "documentsMutable": true,
       "properties": {
@@ -289,7 +310,9 @@
           "sticky",
           "lockedAt",
           "modState",
-          "modNote"
+          "modNote",
+          "movedToForumId",
+          "modFlags"
         ]
       },
       "properties": {
@@ -320,26 +343,57 @@
           },
           "position": 2
         },
+        "origId": {
+          "type": "integer",
+          "minimum": 1,
+          "position": 3
+        },
+        "origAuthor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50,
+          "position": 4
+        },
+        "origAuthorId": {
+          "type": "integer",
+          "minimum": 0,
+          "position": 5
+        },
+        "origCreatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "position": 6
+        },
         "sticky": {
           "type": "boolean",
-          "position": 3
+          "position": 7
         },
         "lockedAt": {
           "type": "integer",
           "minimum": 0,
-          "position": 4
+          "position": 8
         },
         "modState": {
           "type": "integer",
           "minimum": 1,
           "maximum": 3,
-          "position": 5
+          "position": 9
         },
         "modNote": {
           "type": "string",
           "minLength": 0,
           "maxLength": 200,
-          "position": 6
+          "position": 10
+        },
+        "movedToForumId": {
+          "type": "identifier",
+          "position": 11
+        },
+        "modFlags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "position": 12
         }
       },
       "required": [
@@ -371,8 +425,7 @@
             {
               "$createdAt": "asc"
             }
-          ],
-          "rangeCountable": true
+          ]
         },
         {
           "name": "recent",
@@ -402,6 +455,21 @@
           ]
         },
         {
+          "name": "byOrigin",
+          "properties": [
+            {
+              "$ownerId": "asc"
+            },
+            {
+              "origId": "asc"
+            }
+          ],
+          "unique": true,
+          "skipIfAbsent": [
+            "origId"
+          ]
+        },
+        {
           "name": "byForumSticky",
           "properties": [
             {
@@ -413,6 +481,20 @@
           ],
           "skipIfAbsent": [
             "sticky"
+          ]
+        },
+        {
+          "name": "byMovedTo",
+          "properties": [
+            {
+              "movedToForumId": "asc"
+            },
+            {
+              "$createdAt": "asc"
+            }
+          ],
+          "skipIfAbsent": [
+            "movedToForumId"
           ]
         },
         {
@@ -428,7 +510,7 @@
     },
     "post": {
       "type": "object",
-      "canBeDeleted": true,
+      "canBeDeleted": false,
       "documentsMutable": true,
       "documentsCountable": true,
       "immutable": [
@@ -469,25 +551,57 @@
         "body": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4000,
+          "maxLength": 5120,
           "maxBytes": 5120,
           "position": 2
         },
+        "body2": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 5120,
+          "maxBytes": 5120,
+          "position": 3
+        },
         "replyToId": {
           "type": "identifier",
-          "position": 3
+          "position": 4
+        },
+        "retracted": {
+          "type": "boolean",
+          "position": 5
+        },
+        "origId": {
+          "type": "integer",
+          "minimum": 1,
+          "position": 6
+        },
+        "origAuthor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50,
+          "position": 7
+        },
+        "origAuthorId": {
+          "type": "integer",
+          "minimum": 0,
+          "position": 8
+        },
+        "origCreatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "position": 9
         },
         "modState": {
           "type": "integer",
           "minimum": 1,
           "maximum": 3,
-          "position": 4
+          "position": 10
         },
         "modNote": {
           "type": "string",
           "minLength": 0,
           "maxLength": 200,
-          "position": 5
+          "position": 11
         }
       },
       "required": [
@@ -552,6 +666,38 @@
           ]
         },
         {
+          "name": "byOrigin",
+          "properties": [
+            {
+              "$ownerId": "asc"
+            },
+            {
+              "origId": "asc"
+            }
+          ],
+          "unique": true,
+          "skipIfAbsent": [
+            "origId"
+          ]
+        },
+        {
+          "name": "byOrigAuthor",
+          "properties": [
+            {
+              "$ownerId": "asc"
+            },
+            {
+              "origAuthorId": "asc"
+            },
+            {
+              "$createdAt": "asc"
+            }
+          ],
+          "skipIfAbsent": [
+            "origAuthorId"
+          ]
+        },
+        {
           "name": "moderated",
           "properties": [
             {
@@ -564,14 +710,19 @@
     },
     "reaction": {
       "type": "object",
-      "canBeDeleted": true,
-      "documentsMutable": false,
+      "canBeDeleted": false,
+      "documentsMutable": true,
       "documentsCountable": true,
+      "immutable": [
+        "postId",
+        "postOwnerId",
+        "threadId"
+      ],
       "properties": {
         "postId": {
           "type": "identifier",
           "refersTo": {
-            "type": "deletableDocument",
+            "type": "moderatedDocument",
             "documentType": "post",
             "where": {
               "$ownerId": "postOwnerId",
@@ -590,13 +741,14 @@
         },
         "kind": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 8,
           "position": 3
         }
       },
       "required": [
         "$createdAt",
+        "$updatedAt",
         "postId",
         "postOwnerId",
         "threadId",
@@ -617,34 +769,32 @@
           "unique": true
         },
         {
-          "name": "byPostKind",
+          "name": "byThread",
           "properties": [
             {
-              "postId": "asc"
+              "threadId": "asc"
             },
             {
-              "kind": "asc"
+              "$createdAt": "asc"
             }
-          ],
-          "countable": true
+          ]
         },
         {
           "name": "byRecipient",
           "properties": [
             {
               "postOwnerId": "asc"
-            }
-          ],
-          "countable": true
-        },
-        {
-          "name": "byThreadOwner",
-          "properties": [
-            {
-              "threadId": "asc"
             },
             {
-              "$ownerId": "asc"
+              "$createdAt": "asc"
+            }
+          ]
+        },
+        {
+          "name": "byUpdated",
+          "properties": [
+            {
+              "$updatedAt": "asc"
             }
           ]
         }
@@ -665,8 +815,11 @@
         "postId": {
           "type": "identifier",
           "refersTo": {
-            "type": "deletableDocument",
-            "documentType": "post"
+            "type": "moderatedDocument",
+            "documentType": "post",
+            "where": {
+              "threadId": "threadId"
+            }
           },
           "position": 0
         },
@@ -731,7 +884,7 @@
     },
     "profile": {
       "type": "object",
-      "canBeDeleted": true,
+      "canBeDeleted": false,
       "documentsMutable": true,
       "documentsCountable": true,
       "moderatorAbilities": {
@@ -764,26 +917,33 @@
           "type": "string",
           "minLength": 0,
           "maxLength": 300,
-          "pattern": "^https://[^\\s]+$",
+          "pattern": "^(https://\\S+)?$",
           "position": 3
         },
         "website": {
           "type": "string",
           "minLength": 0,
           "maxLength": 200,
+          "pattern": "^(https?://\\S+)?$",
           "position": 4
+        },
+        "location": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 60,
+          "position": 5
         },
         "customTitle": {
           "type": "string",
           "minLength": 0,
           "maxLength": 40,
-          "position": 5
+          "position": 6
         },
         "modState": {
           "type": "integer",
           "minimum": 1,
           "maximum": 3,
-          "position": 6
+          "position": 7
         }
       },
       "required": [
@@ -801,6 +961,23 @@
             }
           ],
           "unique": true
+        },
+        {
+          "name": "byUpdated",
+          "properties": [
+            {
+              "$updatedAt": "asc"
+            }
+          ]
+        },
+        {
+          "name": "moderated",
+          "properties": [
+            {
+              "$moderatedAt": "asc"
+            }
+          ],
+          "nullSearchable": false
         }
       ]
     }

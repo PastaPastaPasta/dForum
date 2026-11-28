@@ -130,18 +130,18 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
         aria-labelledby="login-modal-title"
         tabIndex={-1}
         onKeyDown={onKeyDownTrap}
-        className="relative w-full max-w-sm max-h-[90dvh] overflow-y-auto rounded-2xl border border-[#22304e] bg-[#111a2e] shadow-2xl p-6 outline-none"
+        className="relative w-full max-w-sm max-h-[90dvh] overflow-y-auto rounded-2xl border border-rule bg-sheet shadow-2xl p-6 outline-none"
       >
         <button
           onClick={onClose}
-          className="absolute right-3 top-3 rounded-lg p-2 text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
+          className="absolute right-3 top-3 rounded-lg p-2 text-ink-2 hover:bg-sunk hover:text-ink transition"
           aria-label="Close login dialog"
         >
           <X className="w-4 h-4" />
         </button>
 
         <h2 id="login-modal-title" className="text-lg font-bold tracking-tight">Login with Dash</h2>
-        <p className="text-sm text-[#93a1bd] mt-1">Sign in to dForum with your Dash identity</p>
+        <p className="text-sm text-ink-2 mt-1">Sign in to dForum with your Dash identity</p>
 
         <div aria-live="polite" className="sr-only">{stepText}</div>
         <div aria-live="polite" className="sr-only">{copied ? 'URI copied' : ''}</div>
@@ -149,8 +149,8 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
         <div className="mt-6 flex flex-col items-center gap-4">
           {login.phase === 'preparing' && (
             <>
-              <Loader2 className="w-8 h-8 animate-spin text-[#4db3ff]" aria-hidden="true" />
-              <p className="text-sm text-[#93a1bd]">Preparing wallet sign-in…</p>
+              <Loader2 className="w-8 h-8 animate-spin text-dash" aria-hidden="true" />
+              <p className="text-sm text-ink-2">Preparing wallet sign-in…</p>
             </>
           )}
 
@@ -160,24 +160,24 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   QR below is the desktop-scan path. */}
               <a
                 href={primaryCarrierUri.uri}
-                className="btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
+                className="btn btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
                 aria-label="Open login URI in wallet"
               >
                 <ExternalLink className="w-4 h-4" aria-hidden="true" /> Open in wallet
               </a>
-              <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
+              <div className="p-3 bg-white rounded-xl border-2 border-dash">
                 <QRCodeSVG value={primaryCarrierUri.uri} size={240} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Login URI QR code" />
               </div>
               <div className="text-center">
                 <p className="text-sm font-medium">Or scan with your Dash wallet</p>
-                <p className="text-xs text-[#93a1bd] mt-1">
+                <p className="text-xs text-ink-2 mt-1">
                   {remaining != null ? `Expires in ${remaining}` : 'Waiting for wallet…'}
                 </p>
               </div>
               {fallbackCarrier && (
                 <a
                   href={fallbackCarrier.uri}
-                  className="text-xs text-[#93a1bd] hover:text-white transition underline underline-offset-2"
+                  className="text-xs text-ink-2 hover:text-ink transition underline underline-offset-2"
                 >
                   Use the {CARRIER_LABELS[fallbackCarrier.carrier]?.name ?? 'alternate'} link
                 </a>
@@ -193,18 +193,18 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                     setCopyFailed(true)
                   }
                 }}
-                className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[#93a1bd] hover:bg-[#18233c] hover:text-white transition"
+                className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-ink-2 hover:bg-sunk hover:text-ink transition"
               >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? <Check className="w-3.5 h-3.5 text-live" /> : <Copy className="w-3.5 h-3.5" />}
                 {copied ? 'URI copied' : 'Copy URI'}
               </button>
               {copyFailed && (
                 <div className="w-full">
-                  <p className="text-xs text-amber-400">Copy failed — select the URI below</p>
-                  <input readOnly value={primaryCarrierUri.uri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-[#22304e] bg-[#0b1220] px-2 py-1.5 text-xs font-mono text-[#c4cfe0] break-all" aria-label="Login URI" />
+                  <p className="text-xs text-archive">Copy failed — select the URI below</p>
+                  <input readOnly value={primaryCarrierUri.uri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-rule bg-paper px-2 py-1.5 text-xs font-mono text-ink break-all" aria-label="Login URI" />
                 </div>
               )}
-              <p className="text-xs text-[#93a1bd] text-center">
+              <p className="text-xs text-ink-2 text-center">
                 Open the URI in your wallet, or scan the QR with it.
               </p>
             </>
@@ -213,7 +213,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
           {login.phase === 'confirm' && (
             <>
               <div className="flex flex-col items-center gap-3">
-                <ShieldCheck className="w-10 h-10 text-[#4db3ff]" aria-hidden="true" />
+                <ShieldCheck className="w-10 h-10 text-dash" aria-hidden="true" />
                 <p className="text-sm font-medium text-center">Wallet responded — choose which identity to sign in with</p>
                 <ul className="w-full space-y-2">
                   {login.candidates.map((candidate) => (
@@ -221,22 +221,22 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                       <button
                         onClick={() => accept(candidate.identityId)}
                         disabled={accepting}
-                        className="w-full flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#18233c] px-4 py-3 text-left hover:border-[#008CE7] hover:bg-[#1d2a45] transition disabled:opacity-50"
+                        className="w-full flex items-center gap-3 rounded-xl border border-rule bg-sunk px-4 py-3 text-left hover:border-dash hover:bg-sunk transition disabled:opacity-50"
                       >
-                        <UserRound className="w-5 h-5 text-[#4db3ff] shrink-0" aria-hidden="true" />
+                        <UserRound className="w-5 h-5 text-dash shrink-0" aria-hidden="true" />
                         <span className="min-w-0 flex-1">
-                          <span className="block text-sm text-white truncate">{candidateNames[candidate.identityId] ?? shortId(candidate.identityId, 12)}</span>
-                          <span className="block text-xs font-mono text-[#93a1bd] truncate" title={candidate.identityId}>{shortId(candidate.identityId, 12)}</span>
+                          <span className="block text-sm text-ink truncate">{candidateNames[candidate.identityId] ?? shortId(candidate.identityId, 12)}</span>
+                          <span className="block text-xs font-mono text-ink-2 truncate" title={candidate.identityId}>{shortId(candidate.identityId, 12)}</span>
                         </span>
                       </button>
                     </li>
                   ))}
                 </ul>
-                {accepting && <Loader2 className="w-5 h-5 animate-spin text-[#4db3ff]" aria-hidden="true" />}
+                {accepting && <Loader2 className="w-5 h-5 animate-spin text-dash" aria-hidden="true" />}
                 <button
                   onClick={retry}
                   disabled={accepting}
-                  className="text-xs text-[#93a1bd] hover:text-white transition disabled:opacity-50"
+                  className="text-xs text-ink-2 hover:text-ink transition disabled:opacity-50"
                 >
                   None of these — start again
                 </button>
@@ -246,28 +246,28 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
           {login.phase === 'accepted' && (
             <>
-              <div className="flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/15">
-                <ShieldCheck className="w-8 h-8 text-emerald-400" aria-hidden="true" />
+              <div className="flex items-center justify-center w-16 h-16 rounded-full bg-live/15">
+                <ShieldCheck className="w-8 h-8 text-live" aria-hidden="true" />
               </div>
-              <p className="text-sm font-medium text-emerald-400">Signing you in…</p>
+              <p className="text-sm font-medium text-live">Signing you in…</p>
             </>
           )}
 
           {showError && (
             <>
               <div role="alert" className="text-center">
-                <p className="text-sm font-medium text-red-400 inline-flex items-center gap-2 justify-center">
+                <p className="text-sm font-medium text-danger inline-flex items-center gap-2 justify-center">
                   <AlertTriangle className="w-4 h-4" aria-hidden="true" />
                   {login.phase === 'timeout' ? 'Timed out' : login.phase === 'too-many' ? 'Too many responses' : 'Login failed'}
                 </p>
-                <p className="text-xs text-[#93a1bd] mt-2">{errorText}</p>
+                <p className="text-xs text-ink-2 mt-2">{errorText}</p>
               </div>
               <div className="flex gap-2">
-                <button onClick={retry} className="btn-primary px-4 py-2 text-sm font-medium">
+                <button onClick={retry} className="btn btn-primary px-4 py-2 text-sm font-medium">
                   Try again
                 </button>
                 {onClose && (
-                  <button onClick={onClose} className="btn-secondary">
+                  <button onClick={onClose} className="btn btn-quiet">
                     Close
                   </button>
                 )}
@@ -276,7 +276,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
+        <p className="mt-6 text-center text-xs text-ink-2 flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           Your wallet adds a key to your identity that can only write to dForum&apos;s contract, can spend at most ~0.5 DASH in fees, and expires in 90 days. dForum keeps its copy in this tab only. Signing out forgets it here — to revoke it, disconnect dForum in your wallet.
         </p>

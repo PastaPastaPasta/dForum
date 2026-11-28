@@ -1,453 +1,416 @@
 #!/usr/bin/env node
 /**
- * Static-index snapshot builder.
+ * Static snapshot of the whole forum, built incrementally.
  *
- * Queries the dForum contract on Platform and writes:
- *   data/snapshot.json      — forums, categories, threads (title/tags/owner/
- *                           forum/sticky/lockedAt), proved counts
- *   data/posts/<id>.json    — the first STATIC_POSTS visible posts of each
- *                           listed thread (the static pages render these)
+ * Every run reads the small owner-only types in full, then pulls thread/post/reaction/profile
+ * changes since the cached watermark through the byUpdated ($updatedAt) and moderated
+ * ($moderatedAt) indexes. `--full` (or a missing/foreign cache) rescans everything, which is the
+ * only way to notice moderator deletes; CI runs it daily.
  *
- * The Pages build reads only these files (never the network) so the site stays
- * static + indexable. The snapshot is a bounded window (it does not ship the
- * full history) — every page re-queries the platform live after hydration.
+ * Outputs (all public, all derived from chain data; the build reads only these):
+ *   data/site.json              structure, counts, latest activity, settings
+ *   data/forum/<forumId>.json   thread summaries (sticky first, then latest activity)
+ *   data/thread/<threadId>.json thread + posts (hidden posts kept as placeholders) + reaction counts
+ *   data/user/<identityId>.json member card + recent threads/posts
+ *   data/members.json           every member with counts
+ * Cache: .cache/snapshot-state.json (raw documents + watermark; never deployed).
  *
- * Completeness gate: failures to FETCH (thread window, counts) fail the
- * build — that is the honest signal, and the last good deploy keeps serving.
- * An honest EMPTY answer (no listable threads) does NOT fail the build — the
- * SPA fallback covers the gap. A hidden/orphan thread is deliberately not
- * listed, never republished.
- *
- * Orphan rule (settled 2026-11-26, data-model.md): the opening post of a
- * thread is the earliest post whose $ownerId equals the thread owner, ordered
- * by ($createdAt, $id) — regardless of its moderation state. A thread is
- * listed only if that opening post is itself visible (not moderated, and
- * not past the lock). Orphan status is decided per thread (one ascending
- * query per thread) so the rule holds regardless of window age.
- *
- * Usage: node scripts/snapshot.mjs
+ * Fails loudly on any read error so the previous deploy keeps serving.
  */
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { EvoSDK } from '@dashevo/evo-sdk';
-import bs58 from 'bs58';
-import { redactWif } from './lib/redact.mjs';
-import { beforePost, openingPostFromPosts } from '../lib/services/orphan-rules.ts';
+import {
+  archiveAuthor, countReactions, effectiveAt, excerpt, isArchive, isHidden, isRetracted, lastPostOf, num,
+  postBody, resolveForumTree, sortThreadSummaries, str, summarizeThread, threadForumId, threadPosts,
+} from '../lib/forum/model.ts';
 
-/** The opening-post scan hit the page budget — distinct from "no opening
- * post" (a legitimate null). The static index treats it as "unknown → not
- * listed" for that one thread (a throw would fail the whole hourly build
- * over a single orphan), keeping the build honest only about real read
- * errors. */
-class OrphanScanExhaustedError extends Error {
-  constructor() {
-    super('orphan scan exhausted its page budget');
-    this.name = 'OrphanScanExhaustedError';
+const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
+const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readDeployment().contractId;
+const DATA = 'data';
+const CACHE = process.env.SNAPSHOT_CACHE || '.cache/snapshot-state.json';
+const PAGE = 100;
+const OVERLAP_MS = 10 * 60_000;
+const FULL = process.argv.includes('--full');
+
+function readDeployment() {
+  const record = JSON.parse(readFileSync(`contracts/deployments/${NETWORK}.json`, 'utf8'));
+  const c = record.contracts?.team ?? record.contracts?.none ?? record.contracts?.network;
+  if (!c?.contractId) throw new Error(`no contract in contracts/deployments/${NETWORK}.json`);
+  return c;
+}
+
+const toPlain = (v) => (typeof v === 'bigint' ? Number(v) : v);
+
+export function toRaw(doc) {
+  const j = doc.toJSON();
+  const p = {};
+  for (const [k, v] of Object.entries(j)) if (!k.startsWith('$') && v !== null && v !== undefined) p[k] = toPlain(v);
+  const raw = {
+    id: j.$id,
+    ownerId: j.$ownerId,
+    revision: Number(j.$revision ?? 1),
+    createdAt: Number(j.$createdAt ?? 0),
+    updatedAt: Number(j.$updatedAt ?? j.$createdAt ?? 0),
+    p,
+  };
+  if (j.$moderatedAt != null) raw.moderatedAt = Number(j.$moderatedAt);
+  return raw;
+}
+
+async function connect() {
+  const sdk = NETWORK === 'mainnet'
+    ? EvoSDK.mainnetTrusted({ settings: { timeoutMs: 60000, retries: 3 } })
+    : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000, retries: 3 } });
+  await sdk.connect();
+  return sdk;
+}
+
+async function withRetry(label, fn, attempts = 4) {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= attempts) throw new Error(`${label}: ${e?.message ?? e}`);
+      await new Promise((r) => setTimeout(r, 1500 * i));
+    }
   }
 }
 
-const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readContractId();
-const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
-const OUT = 'data/snapshot.json';
-const POSTS_DIR = 'data/posts';
-const LISTED_TARGET = 60;       // how many listable threads to ship
-const FETCH_LIMIT = 60;         // max posts fetched per query page
-const HARD_CAP = 300;           // never scan more threads than this
-const STATIC_POSTS = 5;          // visible posts shipped per listed thread
-const FETCH_CONCURRENCY = 4;
+async function* pages(sdk, type, { where = [], orderBy }) {
+  let startAfter;
+  for (;;) {
+    const res = await withRetry(`${type} query`, () => sdk.documents.query({
+      dataContractId: CONTRACT_ID,
+      documentTypeName: type,
+      where,
+      orderBy,
+      limit: PAGE,
+      ...(startAfter ? { startAfter } : {}),
+    }));
+    const docs = [];
+    let last;
+    for (const [key, doc] of res) {
+      last = String(key);
+      if (doc) docs.push(toRaw(doc));
+    }
+    if (docs.length) yield docs;
+    if (res.size < PAGE || !last) return;
+    startAfter = last;
+  }
+}
 
-function readContractId() {
+async function all(sdk, type, opts) {
+  const out = [];
+  for await (const page of pages(sdk, type, opts)) out.push(...page);
+  return out;
+}
+
+async function blockTime(sdk) {
+  const res = await withRetry('block time', () => sdk.documents.queryWithProof({
+    dataContractId: CONTRACT_ID, documentTypeName: 'forumSettings', limit: 1,
+  }));
+  return Number(res.metadata.timeMs);
+}
+
+function loadCache() {
+  if (FULL || !existsSync(CACHE)) return null;
   try {
-    const record = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'));
-    return record.contracts?.team?.contractId || record.contracts?.none?.contractId || record.contracts?.network?.contractId;
+    const c = JSON.parse(readFileSync(CACHE, 'utf8'));
+    return c.contractId === CONTRACT_ID && c.version === 2 ? c : null;
   } catch {
     return null;
   }
 }
 
-function shortStr(s, max = 400) {
-  if (s == null) return '';
-  const str = String(s);
-  if (str.length <= max) return str;
-  return str.slice(0, max - 1) + '…';
+function upsert(map, docs) {
+  for (const d of docs) {
+    const cur = map[d.id];
+    if (!cur || d.revision > cur.revision || (d.revision === cur.revision && (d.moderatedAt ?? 0) >= (cur.moderatedAt ?? 0))) map[d.id] = d;
+  }
 }
 
-/** Page through the thread index with startAfter until LISTED_TARGET listable
- * threads are found or HARD_CAP is hit — so orphan spam cannot push every real
- * thread out of the window. The per-thread orphan checks run with bounded
- * concurrency. Throws on any fetch error (the honest failure). Returns the
- * listed threads AND whether the window filled — the caller writes the
- * honest "+" suffix on the home tile. */
-async function fetchListableThreads(sdk) {
-  const listed = [];
-  const seenIds = new Set();
-  let after = null;
-  let scanned = 0;
-  let page = 0;
-  let indexExhausted = false;
-  while (listed.length < LISTED_TARGET && scanned < HARD_CAP && page < 30) {
-    page += 1;
-    const pageDocs = await queryList(sdk, 'thread', {
-      orderBy: [['$createdAt', 'desc']],
-      limit: FETCH_LIMIT,
-      ...(after ? { startAfter: after } : {}),
-    });
-    if (pageDocs.length === 0) { indexExhausted = true; break; }
-    scanned += pageDocs.length;
-    const candidates = [];
-    for (const doc of pageDocs) {
-      if (doc.properties?.modState != null) continue;
-      if (seenIds.has(doc.id)) continue;
-      seenIds.add(doc.id);
-      candidates.push(doc);
+async function sync(sdk) {
+  const snapshotAt = await blockTime(sdk);
+  const cache = loadCache();
+  const state = cache ?? { version: 2, contractId: CONTRACT_ID, watermark: 0, docs: { thread: {}, post: {}, reaction: {}, profile: {} } };
+  const since = cache ? Math.max(0, cache.watermark - OVERLAP_MS) : 0;
+  const mode = cache ? `incremental since ${new Date(since).toISOString()}` : 'full';
+  for (const type of ['thread', 'post', 'reaction', 'profile']) {
+    const where = since ? [['$updatedAt', '>=', since]] : [];
+    const changed = await all(sdk, type, { where, orderBy: [['$updatedAt', 'asc']] });
+    upsert(state.docs[type], changed);
+    if (type !== 'reaction') {
+      const moderated = await all(sdk, type, {
+        where: [['$moderatedAt', '>=', since]],
+        orderBy: [['$moderatedAt', 'asc']],
+      });
+      upsert(state.docs[type], moderated);
     }
-    for (let i = 0; i < candidates.length; i += FETCH_CONCURRENCY) {
-      if (listed.length >= LISTED_TARGET) break;
-      const batch = candidates.slice(i, i + FETCH_CONCURRENCY);
-      const checked = await Promise.all(batch.map(async (doc) => {
-        try {
-          const opening = await openingPost(sdk, doc);
-          return opening ? { thread: doc, opening } : null;
-        } catch (err) {
-          if (err instanceof OrphanScanExhaustedError) {
-            // Unknown — this thread is NOT shipped (the static index is the
-            // guarded path), but a single orphan must not fail the build.
-            console.log(`snapshot: thread ${doc.id} skipped — orphan scan budget exhausted (unknown)`);
-            return null;
-          }
-          throw err;
-        }
-      }));
-      for (const item of checked) {
-        if (item && listed.length < LISTED_TARGET) listed.push(item);
+    console.log(`snapshot: ${type} ${mode}: ${changed.length} changed`);
+  }
+  state.watermark = snapshotAt;
+  const small = {
+    forumSettings: await all(sdk, 'forumSettings', { where: [['key', '==', 'main']], orderBy: [['key', 'asc']] }),
+    category: await all(sdk, 'category', { orderBy: [['sort', 'asc']] }),
+    forum: await all(sdk, 'forum', { orderBy: [['slug', 'asc']] }),
+    teamMember: await all(sdk, 'teamMember', { orderBy: [['memberId', 'asc']] }),
+  };
+  const contract = await withRetry('contract', () => sdk.contracts.fetch(CONTRACT_ID));
+  return { state, small, snapshotAt, contract };
+}
+
+function moderationRoster(contract) {
+  try {
+    const json = contract.toJSON();
+    const mods = json?.config?.moderation?.moderators;
+    const ids = mods?.identities ?? mods?.interim?.identities ?? [];
+    return { ownerId: json.ownerId, moderators: ids.map(String) };
+  } catch {
+    return { ownerId: '', moderators: [] };
+  }
+}
+
+const writeJson = (path, value) => {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(value));
+};
+
+export function build({ state, small, snapshotAt, contract }) {
+  const settingsDoc = small.forumSettings[0];
+  const settings = settingsDoc
+    ? Object.fromEntries(Object.entries({
+        name: str(settingsDoc, 'name') ?? 'dForum',
+        tagline: str(settingsDoc, 'tagline'),
+        description: str(settingsDoc, 'description'),
+        rules: str(settingsDoc, 'rules'),
+        announcement: str(settingsDoc, 'announcement'),
+        archiveOwnerId: str(settingsDoc, 'archiveOwnerId'),
+        archiveSourceName: str(settingsDoc, 'archiveSourceName'),
+        archiveSourceUrl: str(settingsDoc, 'archiveSourceUrl'),
+      }).filter(([, v]) => v !== undefined))
+    : { name: 'dForum' };
+  const archive = settings.archiveOwnerId;
+  const { ownerId, moderators } = moderationRoster(contract);
+  // Only the contract owner's structure documents count (owner-only types, but be explicit).
+  const owned = (docs) => docs.filter((d) => !ownerId || d.ownerId === ownerId);
+
+  const categories = owned(small.category).map((c) => ({
+    id: c.id, slug: str(c, 'slug'), title: str(c, 'title'), description: str(c, 'description'), sort: num(c, 'sort') ?? 0,
+  })).sort((a, b) => a.sort - b.sort);
+  const forumsRaw = owned(small.forum).map((f) => ({
+    id: f.id, categoryId: str(f, 'categoryId'), parentForumId: str(f, 'parentForumId'), slug: str(f, 'slug'),
+    title: str(f, 'title'), description: str(f, 'description'), sort: num(f, 'sort') ?? 0, archived: f.p.archived === true,
+    threadCount: 0, postCount: 0,
+  }));
+  const forums = resolveForumTree(forumsRaw, categories);
+  const forumIds = new Set(forums.map((f) => f.id));
+
+  const threads = Object.values(state.docs.thread);
+  const posts = Object.values(state.docs.post);
+  const reactionsLive = Object.values(state.docs.reaction).filter((r) => (num(r, 'kind') ?? 0) > 0);
+  const reactions = countReactions(reactionsLive);
+  const postsByThread = new Map();
+  for (const p of posts) {
+    const t = str(p, 'threadId');
+    if (!postsByThread.has(t)) postsByThread.set(t, []);
+    postsByThread.get(t).push(p);
+  }
+
+  const summaries = [];
+  const threadFiles = [];
+  const memberStats = new Map();
+  const stat = (id) => {
+    if (!memberStats.has(id)) memberStats.set(id, { posts: 0, threads: 0, reactionsReceived: 0, firstAt: Infinity, threadIds: [], postRefs: [] });
+    return memberStats.get(id);
+  };
+  const archiveMembers = new Map();
+  let archivePosts = 0;
+  for (const thread of threads) {
+    if (!forumIds.has(threadForumId(thread))) continue;
+    const view = threadPosts(thread, postsByThread.get(thread.id) ?? [], archive);
+    if (!view.listable) continue;
+    const summary = summarizeThread(thread, view, reactions, archive);
+    summaries.push(summary);
+    const threadReactions = {};
+    for (const p of view.posts) if (reactions[p.id]) threadReactions[p.id] = reactions[p.id];
+    threadFiles.push({
+      thread,
+      forumId: summary.forumId,
+      posts: view.posts.map((p) => (isHidden(p) || isRetracted(p) ? { ...p, p: { ...p.p, body: '', body2: undefined } } : p)),
+      reactions: threadReactions,
+    });
+    const owner = stat(thread.ownerId);
+    owner.threads += 1;
+    owner.threadIds.push(summary);
+    for (const p of view.posts) {
+      if (isHidden(p) || isRetracted(p)) continue;
+      const s = stat(p.ownerId);
+      s.posts += 1;
+      s.firstAt = Math.min(s.firstAt, p.createdAt);
+      s.reactionsReceived += Object.values(reactions[p.id] ?? {}).reduce((a, b) => a + b, 0);
+      s.postRefs.push({ p, summary });
+      if (isArchive(p, archive)) {
+        archivePosts += 1;
+        const name = archiveAuthor(p, archive);
+        const key = num(p, 'origAuthorId') !== undefined ? `x${num(p, 'origAuthorId')}` : `n${name}`;
+        const a = archiveMembers.get(key) ?? { key, name, origAuthorId: num(p, 'origAuthorId'), posts: 0, threads: 0, firstAt: Infinity, lastAt: 0 };
+        a.posts += 1;
+        if (p === view.opening) a.threads += 1;
+        const at = effectiveAt(p, archive);
+        a.firstAt = Math.min(a.firstAt, at);
+        a.lastAt = Math.max(a.lastAt, at);
+        archiveMembers.set(key, a);
       }
     }
-    // A short page (fewer docs than the limit) means the index is exhausted.
-    if (pageDocs.length < FETCH_LIMIT) { indexExhausted = true; break; }
-    after = pageDocs[pageDocs.length - 1].id;
   }
-  // The window counts as filled only when more threads may remain past the
-  // window — an index that ran dry is not "+". The scan budget running out
-  // (before the index does) is enough to claim "+".
-  const windowFilled = !indexExhausted && (listed.length >= LISTED_TARGET || scanned >= HARD_CAP);
-  return { listed, windowFilled };
-}
 
-/** ($createdAt, $id) ordering — shared with the live app (orphan-rules.ts). */
-function isBefore(a, b) {
-  return beforePost({ createdAt: a.$createdAt, id: a.id }, { createdAt: b.$createdAt, id: b.id });
-}
-
-/** The opening post (orphan rule): the earliest post whose $ownerId equals
- * the thread owner, ordered by ($createdAt, $id) — regardless of moderation
- * state. Located via the post.byAuthor index ($ownerId + $createdAt >=
- * thread.$createdAt) so pre-opening spam cannot hide it. The thread is
- * listable only if that opening post is itself visible (not moderated, and
- * not past the lock). Fails closed here — a failed read throws and fails the
- * build (honest gate). */
-async function openingPost(sdk, thread) {
-  const ownerId = thread.$ownerId;
-  if (!ownerId) return null;
-  const lockedAt = thread.properties?.lockedAt ?? null;
-  const where = [['$ownerId', '==', ownerId]];
-  if (thread.$createdAt != null) where.push(['$createdAt', '>=', thread.$createdAt]);
-  // Page through the author's owner-posts until the thread's opening post
-  // appears. A short/empty page is a legitimate "no opening post" (null);
-  // exhausting the 12-page budget without a break/return is a scan failure
-  // — an unknown, not "no opening post", so it must fail the build, not
-  // drop the thread from the index.
-  let after = null;
-  for (let page = 0; page < 12; page++) {
-    const posts = await queryList(sdk, 'post', {
-      where,
-      orderBy: [['$createdAt', 'asc']],
-      limit: 25,
-      ...(after ? { startAfter: after } : {}),
-    });
-    if (posts.length === 0) return null; // index exhausted — no opening post
-    const mine = posts.filter((p) => p.properties?.threadId === thread.id);
-    const earliestOwner = openingPostFromPosts(
-      mine.map((p) => ({ createdAt: p.$createdAt, id: p.id, ownerId: p.$ownerId ?? '' })),
-      ownerId,
-    );
-    if (earliestOwner) {
-      const opening = mine.find((p) => p.id === earliestOwner.id) ?? null;
-      if (!opening) return null; // the chain returned a phantom id — refuse to list
-      if (opening.properties?.modState != null) return null; // opening post hidden → not listed
-      if (lockedAt != null && opening.$createdAt > lockedAt) return null;
-      return opening;
+  // Forum counts roll up into ancestors; last post is the newest across the subtree.
+  const byForum = new Map();
+  for (const s of summaries) {
+    if (!byForum.has(s.forumId)) byForum.set(s.forumId, []);
+    byForum.get(s.forumId).push(s);
+  }
+  for (const f of forums) {
+    const own = byForum.get(f.id) ?? [];
+    f.threadCount = own.length;
+    f.postCount = own.reduce((n, s) => n + 1 + s.replies, 0);
+    const last = own.reduce((a, s) => (!a || s.lastPostAt > a.lastPostAt ? s : a), null);
+    if (last) f.lastPost = lastPostOf(last);
+  }
+  const parentOf = new Map(forums.map((f) => [f.id, f.parentForumId]));
+  const rolled = new Map(forums.map((f) => [f.id, { ...f }]));
+  for (const f of forums) {
+    let parent = parentOf.get(f.id);
+    while (parent && rolled.has(parent)) {
+      const r = rolled.get(parent);
+      r.threadCount += f.threadCount;
+      r.postCount += f.postCount;
+      if (f.lastPost && (!r.lastPost || f.lastPost.at > r.lastPost.at)) r.lastPost = f.lastPost;
+      parent = parentOf.get(parent);
     }
-    if (posts.length < 25) return null; // short page — no opening post
-    after = posts[posts.length - 1].id;
   }
-  // The loop completed without a break/return — the opening post may exist
-  // past the page budget. Same signal the live path throws.
-  throw new OrphanScanExhaustedError();
+  const forumViews = [...rolled.values()].map((f) => Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined)));
+
+  const profiles = new Map(Object.values(state.docs.profile).map((p) => [p.ownerId, p]));
+  const members = [];
+  for (const [id, s] of memberStats) {
+    if (id === archive) continue;
+    const prof = profiles.get(id);
+    const hidden = prof ? isHidden(prof) : false;
+    members.push(Object.fromEntries(Object.entries({
+      id,
+      name: (!hidden && str(prof, 'displayName')) || '',
+      title: str(prof, 'customTitle'),
+      avatarUrl: hidden ? undefined : str(prof, 'avatarUrl'),
+      bio: hidden ? undefined : str(prof, 'bio'),
+      signature: hidden ? undefined : str(prof, 'signature'),
+      website: hidden ? undefined : str(prof, 'website'),
+      location: hidden ? undefined : str(prof, 'location'),
+      joinedAt: Math.min(s.firstAt, prof?.createdAt ?? Infinity),
+      posts: s.posts,
+      threads: s.threads,
+      reactionsReceived: s.reactionsReceived,
+      hidden: hidden || undefined,
+    }).filter(([, v]) => v !== undefined && v !== '')));
+  }
+  for (const prof of profiles.values()) {
+    if (memberStats.has(prof.ownerId) || isHidden(prof) || prof.ownerId === archive) continue;
+    members.push(Object.fromEntries(Object.entries({
+      id: prof.ownerId, name: str(prof, 'displayName') ?? '', title: str(prof, 'customTitle'), avatarUrl: str(prof, 'avatarUrl'),
+      bio: str(prof, 'bio'), signature: str(prof, 'signature'), website: str(prof, 'website'), location: str(prof, 'location'),
+      joinedAt: prof.createdAt, posts: 0, threads: 0, reactionsReceived: 0,
+    }).filter(([, v]) => v !== undefined && v !== '')));
+  }
+  members.sort((a, b) => b.posts - a.posts || a.joinedAt - b.joinedAt);
+
+  const sortedSummaries = sortThreadSummaries(summaries.map((s) => ({ ...s, sticky: false })));
+  const latestThreads = [...summaries].sort((a, b) => b.createdAt - a.createdAt).slice(0, 12);
+  const threadById = new Map(summaries.map((s) => [s.id, s]));
+  const latestPosts = [];
+  for (const s of sortedSummaries.slice(0, 15)) {
+    const tf = threadFiles.find((t) => t.thread.id === s.id);
+    const last = tf?.posts.filter((p) => !isHidden(p) && !isRetracted(p)).at(-1);
+    if (!last) continue;
+    latestPosts.push({
+      ...lastPostOf(threadById.get(s.id)), forumId: s.forumId, excerpt: excerpt(postBody(last), 140),
+    });
+  }
+  const tagCounts = new Map();
+  for (const s of summaries) for (const t of s.tags) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+  const newest = members.filter((m) => m.name).sort((a, b) => b.joinedAt - a.joinedAt)[0];
+
+  const site = {
+    version: 2,
+    network: NETWORK,
+    contractId: CONTRACT_ID,
+    generatedAt: Date.now(),
+    snapshotAt,
+    settings,
+    ownerId,
+    moderators,
+    team: owned(small.teamMember).map((t) => ({ memberId: str(t, 'memberId'), role: str(t, 'role'), sort: num(t, 'sort') ?? 0 }))
+      .sort((a, b) => a.sort - b.sort),
+    categories,
+    forums: forumViews,
+    stats: {
+      threads: summaries.length,
+      posts: summaries.reduce((n, s) => n + 1 + s.replies, 0),
+      members: members.length,
+      archivePosts,
+    },
+    latestThreads,
+    latestPosts,
+    ...(newest ? { newestMember: { id: newest.id, name: newest.name } } : {}),
+    tags: [...tagCounts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count).slice(0, 40),
+  };
+
+  const userFiles = members.map((m) => {
+    const s = memberStats.get(m.id);
+    return {
+      member: m,
+      threads: s ? [...s.threadIds].sort((a, b) => b.createdAt - a.createdAt).slice(0, 30) : [],
+      posts: s
+        ? [...s.postRefs].sort((a, b) => b.p.createdAt - a.p.createdAt).slice(0, 30).map(({ p, summary }) => ({
+            postId: p.id, threadId: summary.id, threadTitle: summary.title, at: effectiveAt(p, archive), authorId: p.ownerId,
+            forumId: summary.forumId, excerpt: excerpt(postBody(p), 200),
+          }))
+        : [],
+    };
+  });
+  return {
+    site,
+    forumFiles: forums.map((f) => ({ forumId: f.id, threads: sortThreadSummaries(byForum.get(f.id) ?? []) })),
+    threadFiles,
+    userFiles,
+    members,
+    archiveMembers: [...archiveMembers.values()].sort((a, b) => b.posts - a.posts),
+  };
 }
 
 async function main() {
-  if (!CONTRACT_ID) {
-    console.error('NEXT_PUBLIC_DFORUM_CONTRACT_ID is not set and contracts/deployments/testnet.json has no contract id');
-    process.exit(1);
-  }
-  console.log('snapshot: contract', CONTRACT_ID, 'network', NETWORK);
-
-  await EvoSDK.getLatestVersionNumber();
-  const sdk = NETWORK === 'mainnet'
-    ? EvoSDK.mainnetTrusted({ settings: { timeoutMs: 60000 } })
-    : EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } });
-  await sdk.connect();
-
-  // Page through both indexes until they run dry — a 50-doc window cap is a
-  // false-positive gate (a full page is not the same as a full index), and a
-  // page that merely filled must not fail the build. Only the page budget is
-  // a hard stop: a >1000-item index is a real failure worth surfacing.
-  async function fetchAll(type, orderBy) {
-    const out = [];
-    let after = null;
-    for (let page = 0; page < 20; page++) {
-      const docs = await queryList(sdk, type, {
-        // The forum contract carries no sort index (byCategory is composite) —
-        // order only what an index serves.
-        ...(orderBy ? { orderBy } : {}),
-        limit: 50,
-        ...(after ? { startAfter: after } : {}),
-      });
-      out.push(...docs);
-      if (docs.length < 50) return out; // ran dry — no more pages
-      after = docs[docs.length - 1].id;
-    }
-    throw new Error(`completeness gate: ${type} pagination hit the 20-page budget — the index exceeds what the static index can list`);
-  }
-
-  const [categories, forums, threadCount] = await Promise.all([
-    fetchAll('category', [['sort', 'asc']]),
-    fetchAll('forum', undefined),
-    countDocuments(sdk, 'thread'),
-  ]);
-
-  const forumMap = new Map(forums.map((f) => [f.id, f]));
-  const categoryMap = new Map(categories.map((c) => [c.id, c]));
-
-  // Pages through the thread index until LISTED_TARGET listable threads are
-  // found (or HARD_CAP is hit) so orphan spam can't hide every real thread.
-  const { listed: listable, windowFilled } = await fetchListableThreads(sdk);
-
-  // Resolve display names for the listed threads' owners — the first paint
-  // (and the static pages' nameOf) uses these instead of truncated ids.
-  const ownerIds = [...new Set(listable.map(({ thread }) => thread.$ownerId).filter(Boolean))];
-  const profiles = {};
-  for (let i = 0; i < ownerIds.length; i += 4) {
-    const batch = ownerIds.slice(i, i + 4);
-    const resolved = await Promise.all(batch.map(async (id) => {
-      try {
-        const docs = await queryList(sdk, 'profile', { where: [['$ownerId', '==', id]], limit: 1 });
-        const doc = docs[0];
-        if (!doc) return [id, null];
-        if (doc.properties?.modState != null) return [id, 'Hidden profile'];
-        const name = doc.properties?.displayName;
-        return [id, typeof name === 'string' && name.trim() ? name.trim() : null];
-      } catch (err) {
-        // A profile read failure is a fetch failure — shipping a snapshot
-        // with missing names would be a false "all good".
-        throw err;
-      }
-    }));
-    for (const [id, name] of resolved) {
-      if (name) profiles[id] = name;
-    }
-  }
-
-
-  // Write per-thread static posts: the first STATIC_POSTS visible posts of
-  // each listed thread, in ascending order, starting at the opening post.
-  if (existsSync(POSTS_DIR)) rmSync(POSTS_DIR, { recursive: true, force: true });
-  mkdirSync(POSTS_DIR, { recursive: true });
-  // Counts the static index actually ships — hidden/orphaned threads and
-  // hidden posts are deliberately excluded from public numbers.
-  let visiblePosts = 0;
-  for (const { thread: t, opening } of listable) {
-    const lockedAt = t.properties?.lockedAt ?? null;
-    // Start the static-posts query at the opening post — a thread whose
-    // opening post sits far down the log must not ship zero posts. Page
-    // until STATIC_POSTS visible posts are collected (or the thread runs
-    // out) so hidden posts cannot silently eat the budget and ship fewer.
-    const collected = [];
-    let after = null;
-    for (let page = 0; page < 4 && collected.length < STATIC_POSTS; page++) {
-      const posts = await queryList(sdk, 'post', {
-        where: [['threadId', '==', t.id], ['$createdAt', '>=', opening.$createdAt]],
-        orderBy: [['$createdAt', 'asc']],
-        limit: 25,
-        ...(after ? { startAfter: after } : {}),
-      });
-      if (posts.length === 0) break;
-      const fromOpening = posts.filter((p) => !isBefore(p, opening));
-      for (const p of fromOpening) {
-        if (collected.length >= STATIC_POSTS) break;
-        if (p.properties?.modState != null) continue;
-        if (lockedAt != null && p.$createdAt > lockedAt) continue;
-        collected.push(p);
-      }
-      if (posts.length < 25) break;
-      after = posts[posts.length - 1].id;
-    }
-    const visible = collected.slice(0, STATIC_POSTS)
-      .map((p) => ({
-        id: p.id,
-        body: shortStr(p.properties?.body, 4000),
-        authorId: p.$ownerId,
-        createdAt: Number(p.$createdAt),
-        updatedAt: Number(p.$updatedAt ?? p.$createdAt),
-        modState: null,
-        replyToId: typeof p.properties?.replyToId === 'string' ? p.properties.replyToId : null,
-      }));
-    visiblePosts += visible.length;
-    writeFileSync(`${POSTS_DIR}/${t.id}.json`, JSON.stringify(visible) + '\n');
-  }
-
-  const snapshot = {
-    generatedAt: new Date().toISOString(),
-    network: NETWORK,
-    contractId: CONTRACT_ID,
-    // counts reflect the honest, listed surface — not the total chain size
-    // (hidden/orphaned threads are deliberately not public numbers).
-    counts: {
-      categories: categories.length,
-      forums: forums.filter((f) => !f.properties?.archived).length,
-      threads: listable.length,
-      posts: visiblePosts,
-    },
-    categories: categories.map((c) => ({
-      id: c.id,
-      slug: c.properties?.slug ?? null,
-      title: shortStr(c.properties?.title),
-      description: shortStr(c.properties?.description),
-      sort: c.properties?.sort ?? 0,
-    })),
-    forums: forums.map((f) => ({
-      id: f.id,
-      categoryId: f.properties?.categoryId ?? null,
-      categorySlug: categoryMap.get(f.properties?.categoryId)?.properties?.slug ?? null,
-      slug: f.properties?.slug ?? null,
-      title: shortStr(f.properties?.title),
-      description: shortStr(f.properties?.description),
-      sort: f.properties?.sort ?? 0,
-      archived: Boolean(f.properties?.archived),
-    })),
-    threadsWindowFilled: windowFilled,
-    threads: listable.map(({ thread: t }) => ({
-      id: t.id,
-      forumId: t.properties?.forumId ?? null,
-      forumSlug: forumMap.get(t.properties?.forumId)?.properties?.slug ?? null,
-      title: shortStr(t.properties?.title),
-      tags: Array.isArray(t.properties?.tags) ? t.properties.tags : [],
-      sticky: Boolean(t.properties?.sticky),
-      lockedAt: t.properties?.lockedAt ?? null,
-      modState: null,
-      ownerId: t.$ownerId ?? null,
-      createdAt: t.$createdAt ?? 0,
-      updatedAt: t.$updatedAt ?? 0,
-    })),
-    profiles,
-  };
-
-  mkdirSync('data', { recursive: true });
-  writeFileSync(OUT, JSON.stringify(snapshot, null, 2) + '\n');
-  const size = JSON.stringify(snapshot).length;
-  console.log(`snapshot written: ${OUT} (${(size / 1024).toFixed(1)} KB) — ${listable.length} listed threads (of ${Number(threadCount)} proved), ${snapshot.counts.posts} posts shipped, ${snapshot.counts.forums} forums`);
+  if (!CONTRACT_ID) throw new Error('no contract id');
+  const sdk = await connect();
+  const synced = await sync(sdk);
+  const out = build(synced);
+  const tmp = `${DATA}.next`;
+  rmSync(tmp, { recursive: true, force: true });
+  writeJson(`${tmp}/site.json`, out.site);
+  writeJson(`${tmp}/members.json`, out.members);
+  writeJson(`${tmp}/archive-members.json`, out.archiveMembers);
+  for (const f of out.forumFiles) writeJson(`${tmp}/forum/${f.forumId}.json`, f);
+  for (const t of out.threadFiles) writeJson(`${tmp}/thread/${t.thread.id}.json`, t);
+  for (const u of out.userFiles) writeJson(`${tmp}/user/${u.member.id}.json`, u);
+  rmSync(DATA, { recursive: true, force: true });
+  renameSync(tmp, DATA);
+  writeJson(CACHE, synced.state);
+  console.log(`snapshot: ${out.site.stats.threads} threads, ${out.site.stats.posts} posts, ${out.site.stats.members} members, at ${new Date(out.site.snapshotAt).toISOString()}`);
   process.exit(0);
 }
 
-async function queryList(sdk, type, options) {
-  const page = await sdk.documents.query({
-    dataContractId: CONTRACT_ID,
-    documentTypeName: type,
-    where: options.where,
-    orderBy: options.orderBy,
-    limit: options.limit,
-    ...(options.startAfter !== undefined ? { startAfter: options.startAfter } : {}),
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error('snapshot failed:', e?.message ?? e);
+    process.exit(1);
   });
-  const out = [];
-  for (const doc of page.values()) {
-    const obj = doc.toObject?.() ?? doc;
-    out.push(normalize(obj));
-  }
-  return out;
 }
-
-function normalize($obj) {
-  const rawId = $obj.$id ?? $obj.id;
-  const idStr = identifierify(rawId);
-  const props = {};
-  for (const [key, value] of Object.entries($obj)) {
-    if (key.startsWith('$') || key === 'dataContractId' || key === 'documentTypeName' || key === 'revision') continue;
-    props[key] = normalizeValue(value);
-  }
-  return {
-    id: idStr,
-    properties: props,
-    $createdAt: Number($obj.$createdAt ?? $obj.createdAt ?? 0),
-    $updatedAt: Number($obj.$updatedAt ?? $obj.updatedAt ?? 0),
-    $ownerId: identifierify($obj.$ownerId ?? $obj.ownerId),
-  };
-}
-
-/** Convert any identifier-like value to a base58 string. */
-function identifierify(value) {
-  if (!value) return null;
-  if (typeof value === 'string') {
-    if (/^[0-9a-fA-F]{64}$/.test(value)) return bs58.encode(Buffer.from(value, 'hex'));
-    try { return bs58.encode(bs58.decode(value)); } catch { return value; }
-  }
-  if (value instanceof Uint8Array) return bs58.encode(value);
-  if (Array.isArray(value) && value.length === 32) return bs58.encode(Uint8Array.from(value));
-  if (typeof value === 'object' && value !== null) {
-    const keys = Object.keys(value);
-    if (keys.length === 32 && keys.every((k) => /^\d+$/.test(k))) {
-      const bytes = new Uint8Array(32);
-      for (const k of keys) bytes[Number(k)] = Number(value[k]) & 0xff;
-      return bs58.encode(bytes);
-    }
-  }
-  return null;
-}
-
-function normalizeValue(value) {
-  if (Array.isArray(value)) {
-    if (value.length === 0) return [];
-    if (value.every((v) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
-      return value.map((v) => normalizeValue(v));
-    }
-    const idents = value.map((v) => identifierify(v));
-    return idents.every(Boolean) ? idents : value.map((v) => normalizeValue(v));
-  }
-  if (value instanceof Uint8Array) return identifierify(value);
-  if (typeof value === 'object' && value !== null) {
-    const asIdent = identifierify(value);
-    if (asIdent) return asIdent;
-    const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = normalizeValue(v);
-    return out;
-  }
-  return value;
-}
-
-async function countDocuments(sdk, type) {
-  // Errors here fail the build — the gate is the whole point; a swallowed
-  // count would let a broken snapshot through silently.
-  const map = await sdk.documents.count({
-    dataContractId: CONTRACT_ID,
-    documentTypeName: type,
-  });
-  let total = 0n;
-  for (const v of map.values()) total += v;
-  return total;
-}
-
-main().catch((e) => {
-  const parts = [];
-  for (const k of ['message', 'name', 'code']) if (e[k] !== undefined) parts.push(`${k}=${e[k]}`);
-  try { parts.push(`toString=${e.toString()}`); } catch {}
-  console.error('ERROR:', redactWif(parts.join(' | ')));
-  process.exit(1);
-});

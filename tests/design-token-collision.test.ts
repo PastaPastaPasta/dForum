@@ -22,7 +22,7 @@ describe('tailwind color tokens do not shadow utilities', () => {
     // Guard the case the collision produces: the token is renamed but the
     // name must not be used again (either token or utility).
     const colorTokens = Object.keys(theme?.extend?.colors ?? {})
-    expect(colorTokens).toContain('page')
+    expect(colorTokens).toContain('paper')
     expect(colorTokens).not.toContain('base')
   })
 })

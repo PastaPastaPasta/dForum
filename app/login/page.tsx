@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { MessageSquare, KeyRound, ShieldCheck, Loader2, ExternalLink } from 'lucide-react'
-import { Navbar } from '@/components/Navbar'
-import { Footer } from '@/components/Footer'
+import { KeyRound, ShieldCheck, Loader2, ExternalLink, Wallet } from 'lucide-react'
 import { KeyExchangeModal } from '@/components/KeyExchangeModal'
 import { useSession } from '@/lib/session'
 import { hostIsCanonical, canonicalHost, LOGIN_AVAILABLE } from '@/lib/host'
@@ -60,143 +58,85 @@ export default function LoginPage() {
 
   if (frameState === 'unknown') {
     return (
-      <>
-        <Navbar />
-        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center">
-          <span className="sr-only" role="status">Loading…</span>
-        </main>
-        <Footer />
-      </>
+      <span className="sr-only" role="status">Loading…</span>
     )
   }
 
   if (frameState === 'framed') {
     return (
-      <>
-        <Navbar />
-        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
-          <div className="text-center fade-up max-w-md">
-            <ExternalLink className="w-8 h-8 text-[#4db3ff] mx-auto" aria-hidden="true" />
-            <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">In a frame</p>
-            <h1 className="text-2xl font-bold mt-2">Open dForum in its own tab</h1>
-            <p className="text-sm text-[#93a1bd] mt-2">
-              The login flow holds key material — it only runs on its own top-level page.
-            </p>
-            <p className="mt-6 text-sm text-[#93a1bd]">The login flow lives on <code className="text-[#c4cfe0]">{canonicalHost()}</code>.</p>
-          </div>
-        </main>
-        <Footer />
-      </>
+      <div className="panel mx-auto max-w-md p-8 text-center">
+        <ExternalLink className="mx-auto h-8 w-8 text-dash" aria-hidden="true" />
+        <h1 className="mt-3 text-xl font-semibold">Open this page in its own tab</h1>
+        <p className="mt-2 text-ink-2">Logging in handles key material, so it only runs as a top-level page on {canonicalHost()}.</p>
+      </div>
     )
   }
 
   return (
-    <>
-      <Navbar />
-      <main id="main" tabIndex={-1} className="flex-1">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
-          <div className="grid md:grid-cols-2 gap-8 items-center">
-            <div className="fade-up">
-              <p className="inline-flex items-center rounded-full border border-[#22304e] bg-[#111a2e] px-3 py-1 text-xs text-[#4db3ff]">
-                App Connect v2 — wallet-native sign-in
-              </p>
-              <h1 className="mt-4 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
-                Sign in with your<br />Dash identity
-              </h1>
-              <p className="mt-4 text-[#93a1bd]">
-                No passwords, no sign-up forms. Your identity is a Dash Platform identity —
-                you sign in by scanning a QR code with your wallet.
-              </p>
-
-              <div className="mt-6 space-y-3 text-sm">
-                <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — dForum is a static site over the Dash Platform" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet adds a key to your identity that can only write to dForum's contract, spend at most ~0.5 DASH in fees, and expire in 90 days. dForum keeps its copy in this tab only — signing out forgets it here; to revoke it, disconnect dForum in your wallet" />
-                <Benefit icon={<MessageSquare className="w-4 h-4" />} text="Posts, profiles, forums and settings all live on-chain" />
-              </div>
-
-              {alreadySignedIn ? (
-                <div ref={signedInRef} tabIndex={-1} className="mt-8 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4">
-                  <p className="text-sm font-medium text-emerald-400">You are signed in</p>
-                  <p className="text-xs text-[#93a1bd] mt-1 font-mono truncate">{session?.identityId}</p>
-                  {nextPath ? (
-                    // Same validation + base-path re-rooting as the post-login
-                    // redirect — a plain Link would re-apply the basePath to a
-                    // path that already carries it.
-                    <button
-                      type="button"
-                      onClick={() => window.location.assign(nextPath)}
-                      className="mt-3 inline-flex items-center gap-2 btn-primary px-4 py-2 text-sm font-medium"
-                    >
-                      Continue to your page
-                    </button>
-                  ) : (
-                    <Link href="/" className="mt-3 inline-flex items-center gap-2 btn-primary px-4 py-2 text-sm font-medium">
-                      Go to dForum
-                    </Link>
-                  )}
-                </div>
-              ) : !canonical ? (
-                <div className="mt-6 rounded-xl border border-[#22304e] bg-[#111a2e] p-4 text-sm text-[#93a1bd]">
-                  <p className="font-medium text-[#e8edf7]">Read-only preview — no sign-in here</p>
-                  <p className="mt-2">
-                    Signing in happens on <code className="text-[#c4cfe0]">{canonicalHost()}</code>. This build is a
-                    read-only index of the live forum — you can read threads, forums and profiles, never sign in,
-                    post or moderate. The login flow holds key material in this tab&apos;s session storage, so it
-                    only runs on a dedicated host.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <button
-                    onClick={openModal}
-                    disabled={!ready}
-                    className="mt-8 btn-primary px-5 py-3 font-semibold"
-                  >
-                    {!ready ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
-                    Login with Dash
-                  </button>
-                  {authError && (
-                    <p role="alert" className="mt-3 text-sm text-red-400">{redactWif(authError)}</p>
-                  )}
-                </>
-              )}
-            </div>
-
-            {LOGIN_AVAILABLE && (
-              <div className="rounded-2xl border border-[#22304e] bg-[#111a2e] p-6">
-                <ol className="space-y-5">
-                  <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dashpay://connect code shown in the login modal." />
-                  <Step number={2} title="Approve the request" body="Confirm the App Connect request in your wallet — your wallet registers the bound key as part of the approval, on chain." />
-                  <Step number={3} title="You're in" body="Your wallet adds a key that can only write to dForum's contract (~0.5 DASH budget, 90-day expiry). dForum keeps its copy in this tab only. Signing out forgets the copy here — it does NOT revoke the key; to revoke it, disconnect dForum in your wallet." />
-                </ol>
-              </div>
+    <div className="mx-auto grid max-w-4xl gap-8 py-6 md:grid-cols-[1fr_22rem] md:py-10">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Log in with Dash</h1>
+        <p className="mt-3 max-w-prose text-ink-2">
+          Your account is your Dash identity. There is no password and no sign-up form: you approve the login in your Dash wallet, and your posts are written to Dash Platform under your identity.
+        </p>
+        <ul className="mt-6 space-y-3 text-sm">
+          <Benefit icon={<Wallet className="h-4 w-4" />} text="Works with DashPay wallets that support App Connect. Testnet builds use a testnet wallet." />
+          <Benefit icon={<KeyRound className="h-4 w-4" />} text="Your wallet adds a key that can only write to this forum, spend at most about 0.5 DASH in fees, and expires after 90 days." />
+          <Benefit icon={<ShieldCheck className="h-4 w-4" />} text="This tab keeps its copy of that key until you log out. To revoke it everywhere, disconnect the forum in your wallet." />
+        </ul>
+        {alreadySignedIn ? (
+          <div ref={signedInRef} tabIndex={-1} className="mt-8 rounded-lg border border-live/40 bg-live/10 p-4">
+            <p className="font-medium text-live">You are logged in</p>
+            <p className="mt-1 truncate font-mono text-xs text-ink-2">{session?.identityId}</p>
+            {nextPath ? (
+              <button type="button" onClick={() => window.location.assign(nextPath)} className="btn btn-primary mt-3">Continue</button>
+            ) : (
+              <Link href="/" className="btn btn-primary mt-3">Go to the forums</Link>
             )}
           </div>
-        </div>
-      </main>
-      <Footer />
-
+        ) : !canonical ? (
+          <div className="panel mt-6 p-4 text-sm text-ink-2">
+            <p className="font-medium text-ink">Logging in is not available on this address</p>
+            <p className="mt-1">Log in on <a className="link" href={`https://${canonicalHost()}/login/`}>{canonicalHost()}</a>. Other copies of the site are read only, because the login keeps key material in the browser tab.</p>
+          </div>
+        ) : (
+          <>
+            <button onClick={openModal} disabled={!ready} className="btn btn-primary mt-8 px-5 py-2.5 text-base">
+              {!ready ? <Loader2 className="h-5 w-5 animate-spin" /> : <KeyRound className="h-5 w-5" />}
+              Log in with Dash
+            </button>
+            {authError && <p role="alert" className="mt-3 text-sm text-danger">{redactWif(authError)}</p>}
+          </>
+        )}
+      </div>
+      {LOGIN_AVAILABLE && (
+        <ol className="panel space-y-5 self-start p-5">
+          <Step number={1} title="Scan the code" body="Open your Dash wallet and scan the QR code, or tap the link on a phone." />
+          <Step number={2} title="Approve in your wallet" body="Your wallet shows what the forum asks for and registers the limited key when you approve." />
+          <Step number={3} title="Start posting" body="The forum confirms the key on Dash Platform and logs you in." />
+        </ol>
+      )}
       {showModal && <KeyExchangeModal onClose={closeModal} />}
-    </>
+    </div>
   )
 }
 
 function Benefit({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="mt-0.5 flex items-center justify-center w-7 h-7 rounded-lg bg-[#18233c] text-[#4db3ff] shrink-0">{icon}</span>
-      <p className="text-[#93a1bd]">{text}</p>
-    </div>
+    <li className="flex items-start gap-3">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-dash/10 text-dash">{icon}</span>
+      <p className="text-ink-2">{text}</p>
+    </li>
   )
 }
 
 function Step({ number, title, body }: { number: number; title: string; body: string }) {
   return (
     <li className="flex gap-4">
-      <span aria-hidden="true" className="flex items-center justify-center w-8 h-8 rounded-full bg-[#0070c0]/15 text-[#4db3ff] text-sm font-bold shrink-0">{number}</span>
+      <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-dash/10 text-sm font-bold text-dash">{number}</span>
       <div>
-        <p className="font-medium text-sm">{title}</p>
-        <p className="text-xs text-[#93a1bd] mt-0.5">{body}</p>
+        <p className="font-medium">{title}</p>
+        <p className="mt-0.5 text-sm text-ink-2">{body}</p>
       </div>
     </li>
   )

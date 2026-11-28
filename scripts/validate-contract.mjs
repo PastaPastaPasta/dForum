@@ -22,7 +22,7 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === '--dir') dir = args[++i];
 }
 const files = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => join(dir, f));
-const PROTOCOL_VERSION = 14;
+const PROTOCOL_VERSION = Number(process.env.PLATFORM_PROTOCOL_VERSION || 15);
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function b58encode(bytes) {

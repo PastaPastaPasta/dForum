@@ -1,34 +1,19 @@
 import type { Metadata } from 'next'
-import ProfileClient from '@/components/ProfileClient'
-import { loadSnapshot } from '@/lib/services/snapshot-server'
+import { members, site, userFile } from '@/lib/server/site-data'
+import { rolesFor } from '@/lib/server/thread-route'
+import { ProfilePage } from '@/components/forum/ProfilePage'
 
 export const dynamicParams = false
-
 export function generateStaticParams() {
-  const snap = loadSnapshot()
-  // Empty snapshot → one placeholder param, never zero: Next's export build
-  // throws on an empty param list. The placeholder renders the normal client
-  // component, which shows the live-fallback ("not found / loading") state.
-  const owners = new Set<string>()
-  for (const t of snap.threads) if (t.ownerId) owners.add(t.ownerId)
-  if (owners.size === 0) return [{ id: '__stub__' }]
-  return [...owners].map((id) => ({ id }))
+  const m = members()
+  return m.length ? m.map((x) => ({ id: x.id })) : [{ id: '__none__' }]
 }
-
 export function generateMetadata({ params }: { params: { id: string } }): Metadata {
-  const snap = loadSnapshot()
-  const name = snap.profiles[params.id]
-  const threadCount = snap.threads.filter((t) => t.ownerId === params.id).length
-  return {
-    title: name ? `${name} — member profile` : 'Member profile',
-    description: name
-      ? `${name}'s threads on dForum — ${threadCount} listed thread${threadCount === 1 ? '' : 's'} on the static index.`
-      : 'Member profile on dForum',
-    alternates: { canonical: `/u/${params.id}/` },
-  }
+  const m = userFile(params.id)?.member
+  return { title: m?.name || 'Member', robots: m?.hidden ? { index: false } : undefined, alternates: { canonical: `/u/${params.id}/` } }
 }
-
-export default function ProfileRoute({ params }: { params: { id: string } }) {
-  const snap = loadSnapshot()
-  return <ProfileClient key={params.id} identityId={params.id} snapshot={snap} />
+export default function Page({ params }: { params: { id: string } }) {
+  const s = site()
+  return <ProfilePage id={params.id} file={userFile(params.id)} role={rolesFor()[params.id]} snapshotAt={s.snapshotAt}
+    forumTitles={Object.fromEntries(s.forums.map((f) => [f.id, f.title]))} />
 }

@@ -10,16 +10,7 @@
  * the same byte layout the unbound legacy path produces, just wrapped in a
  * batch.
  */
-import {
-  BatchedTransition,
-  BatchTransition,
-  DocumentCreateTransition,
-  DocumentReplaceTransition,
-  PrivateKey,
-  type Document,
-  type IdentityPublicKey,
-  type StateTransition,
-} from '@dashevo/wasm-sdk'
+import type { Document, IdentityPublicKey, StateTransition } from '@dashevo/wasm-sdk'
 import { getSdk } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID } from '@/lib/constants'
 
@@ -54,6 +45,7 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
   if (documentOwnerId && documentOwnerId !== args.ownerId) {
     throw new Error('Batched write owner does not match the document owner')
   }
+  const { BatchedTransition, BatchTransition, DocumentCreateTransition, DocumentReplaceTransition, PrivateKey } = await import('@dashevo/wasm-sdk')
   const transition =
     args.kind === 'create'
       ? new DocumentCreateTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()

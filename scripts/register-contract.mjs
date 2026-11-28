@@ -21,7 +21,7 @@ import { DataContract, DataContractCreateTransition, EvoSDK, IdentityPublicKey, 
 import { criticalAuthKey, deriveIdentityKeys, loadMnemonic } from './derive-identities.mjs';
 import { redactWif } from './lib/redact.mjs';
 
-const PROTOCOL_VERSION = 14;
+const PROTOCOL_VERSION = Number(process.env.PLATFORM_PROTOCOL_VERSION || 15);
 const MAX_STATE_TRANSITION_SIZE = 20480;
 const PUT_SETTINGS = { connectTimeoutMs: 10000, timeoutMs: 90000, retries: 3 };
 const NONCE_MASK = 0xFFFFFFFFFFn;

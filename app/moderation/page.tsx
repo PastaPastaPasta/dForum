@@ -6,8 +6,6 @@ import {
   Shield, Ban, Undo2, Clock, AlertTriangle, Trash2, Bell, BellOff, Loader2, ShieldCheck,
   Eye, EyeOff, Pin, Lock, Unlock, KeyRound, Search, RefreshCw, ShieldAlert, ExternalLink,
 } from 'lucide-react'
-import { Navbar } from '@/components/Navbar'
-import { Footer } from '@/components/Footer'
 import { queryRaw, get } from '@/lib/services/document-service'
 import {
   prepareModerator, validateCriticalKey, getRoster, moderationStatus,
@@ -670,30 +668,27 @@ export default function ModerationPage() {
   if (frameState === 'unknown') {
     return (
       <>
-        <Navbar />
         <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center">
           <span className="sr-only" role="status">Loading…</span>
         </main>
-        <Footer />
       </>
     )
   }
 
   return (
     <>
-      <Navbar />
       <main id="main" tabIndex={-1} className="flex-1">
-        <section className="border-b border-[#22304e]">
+        <section className="border-b border-rule">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
             <div className="flex items-center gap-3">
-              <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#0070c0]/15 text-[#4db3ff] shrink-0"><Shield className="w-5 h-5" /></span>
+              <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-dash/15 text-dash shrink-0"><Shield className="w-5 h-5" /></span>
               <div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Moderator console</h1>
-                <p className="text-sm text-[#93a1bd]">
+                <p className="text-sm text-ink-2">
                   Centralized, team-based moderation · <span className="font-mono">{NETWORK}</span> · {roster?.mode ? `${roster.mode} mode` : rosterError ? 'mode unavailable' : 'mode loading…'} · {shortId(CONTRACT_ID, 16)}
                 </p>
                 {roster?.mode === 'network' && (
-                  <p className="mt-1 text-xs text-amber-400">Network (elected) mode is a testnet-only configuration — never a production default.</p>
+                  <p className="mt-1 text-xs text-archive">Network (elected) mode is a testnet-only configuration — never a production default.</p>
                 )}
               </div>
             </div>
@@ -706,23 +701,23 @@ export default function ModerationPage() {
           <NonCanonicalRefuse />
         ) : (
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-            <section className="rounded-2xl border border-[#22304e] bg-[#111a2e] p-5 fade-up">
+            <section className="rounded-2xl border border-rule bg-sheet p-5 ">
               <div className="flex items-center gap-2 flex-wrap">
-                <KeyRound className="w-4 h-4 text-[#4db3ff]" />
+                <KeyRound className="w-4 h-4 text-dash" />
                 <h2 className="font-semibold">Admin key (CRITICAL)</h2>
                 {admin && (
-                  <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300">
+                  <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-live/40 bg-live/10 px-3 py-1 text-xs text-live">
                     <ShieldCheck className="w-3.5 h-3.5" /> Valid CRITICAL key
                   </span>
                 )}
               </div>
-              <p className="mt-2 text-sm text-[#93a1bd]">
+              <p className="mt-2 text-sm text-ink-2">
                 Moderation is signed with a <strong>CRITICAL</strong> key from your moderator identity — the session key (HIGH) cannot moderate.
                 Your WIF is kept in this tab&apos;s memory only. The <strong>owner</strong> holds full contract authority and is refused on non-localhost hosts — keep it offline; use an appointed moderator identity here.
               </p>
               <div className="mt-4 grid sm:grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="text-xs text-[#93a1bd]">Moderator identity ID</span>
+                  <span className="text-xs text-ink-2">Moderator identity ID</span>
                   <input
                     value={identityId}
                     disabled={validating || actionBusy != null || docActionBusy != null}
@@ -735,11 +730,11 @@ export default function ModerationPage() {
                       setAdmin(null)
                     }}
                     placeholder="6Dft…"
-                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
+                    className="mt-1 w-full rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
                   />
                 </label>
                 <label className="block">
-                  <span className="text-xs text-[#93a1bd]">CRITICAL key WIF</span>
+                  <span className="text-xs text-ink-2">CRITICAL key WIF</span>
                   <input
                     type="password"
                     value={wif}
@@ -753,7 +748,7 @@ export default function ModerationPage() {
                       setAdmin(null)
                     }}
                     placeholder="L…"
-                    className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
+                    className="mt-1 w-full rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
                     autoComplete="one-time-code"
                     data-lpignore="true"
                     data-1p-ignore="true"
@@ -762,7 +757,7 @@ export default function ModerationPage() {
                 </label>
               </div>
               {!localhost && host && (
-                <p className="mt-3 text-xs text-[#93a1bd]">
+                <p className="mt-3 text-xs text-ink-2">
                   The owner key is refused on this host — it is kept offline for contract updates. Appointed moderators sign on this host.
                 </p>
               )}
@@ -770,7 +765,7 @@ export default function ModerationPage() {
                 <button
                   onClick={handleValidate}
                   disabled={validating || actionBusy != null || docActionBusy != null || !identityId.trim() || !wif.trim() || !hostIsCanon || !host}
-                  className="btn-primary px-4 py-2 text-sm font-semibold"
+                  className="btn btn-primary px-4 py-2 text-sm font-semibold"
                 >
                   {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                   Validate &amp; sign in as admin
@@ -779,48 +774,48 @@ export default function ModerationPage() {
                   <button
                     onClick={handleClearAdmin}
                     disabled={actionBusy != null || docActionBusy != null}
-                    className="btn-secondary"
+                    className="btn btn-quiet"
                   >
                     Clear admin
                   </button>
                 )}
               </div>
               {validation && !validation.ok && (
-                <p role="alert" className="mt-3 text-sm text-red-400">✗ {redactWif(validation.reason ?? 'Validation failed')}</p>
+                <p role="alert" className="mt-3 text-sm text-danger">✗ {redactWif(validation.reason ?? 'Validation failed')}</p>
               )}
               {validation?.ok && isModerator && (
-                <p role="status" className="mt-3 text-sm text-emerald-400">✓ Signed in as a contract moderator ({isOwner ? 'owner' : 'appointed'}).</p>
+                <p role="status" className="mt-3 text-sm text-live">✓ Signed in as a contract moderator ({isOwner ? 'owner' : 'appointed'}).</p>
               )}
               {validation?.ok && !isModerator && (
-                <p role="status" className="mt-3 text-sm text-amber-400">Key valid but <strong>this identity is not the owner or an appointed moderator</strong> of the contract. Actions are disabled — the roster gate blocks them, and the chain would refuse them anyway.</p>
+                <p role="status" className="mt-3 text-sm text-archive">Key valid but <strong>this identity is not the owner or an appointed moderator</strong> of the contract. Actions are disabled — the roster gate blocks them, and the chain would refuse them anyway.</p>
               )}
             </section>
 
             {wipedNotice && (
-              <div role="status" className="rounded-xl border border-amber-400/40 bg-amber-400/5 px-4 py-3 text-sm text-amber-300 flex items-center gap-2">
+              <div role="status" className="rounded-xl border border-amber-400/40 bg-amber-400/5 px-4 py-3 text-sm text-archive flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 shrink-0" />
                 <span>Key cleared — {wipedNotice}. Re-enter your CRITICAL key to continue.</span>
-                <button onClick={() => setWipedNotice(null)} className="ml-auto rounded-lg px-2 py-1 text-xs text-[#93a1bd] hover:text-white hover:bg-[#18233c] transition">Dismiss</button>
+                <button onClick={() => setWipedNotice(null)} className="ml-auto rounded-lg px-2 py-1 text-xs text-ink-2 hover:text-ink hover:bg-sunk transition">Dismiss</button>
               </div>
             )}
 
             {actionError && (
-              <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 flex items-center gap-2">
+              <div role="alert" className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span>{actionError}</span>
-                <button onClick={() => setActionError(null)} className="ml-auto rounded-lg px-2 py-1 text-xs text-[#93a1bd] hover:text-white hover:bg-[#18233c] transition">Dismiss</button>
+                <button onClick={() => setActionError(null)} className="ml-auto rounded-lg px-2 py-1 text-xs text-ink-2 hover:text-ink hover:bg-sunk transition">Dismiss</button>
               </div>
             )}
             {actionSuccess && (
-              <div role="status" className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300 flex items-center gap-2">
+              <div role="status" className="rounded-xl border border-live/40 bg-live/10 px-4 py-3 text-sm text-live flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 shrink-0" />
                 <span>{actionSuccess}</span>
               </div>
             )}
 
             <div className="grid lg:grid-cols-2 gap-6">
-              <section className="rounded-2xl border border-[#22304e] bg-[#111a2e] p-5">
-                <h2 className="font-semibold flex items-center gap-2"><Shield className="w-4 h-4 text-[#4db3ff]" /> Team roster</h2>
+              <section className="rounded-2xl border border-rule bg-sheet p-5">
+                <h2 className="font-semibold flex items-center gap-2"><Shield className="w-4 h-4 text-dash" /> Team roster</h2>
                 {roster ? (
                   <div className="mt-3 space-y-2">
                     {/* Owner: always the moderator on the chain, but refused
@@ -833,39 +828,39 @@ export default function ModerationPage() {
                       <RosterRow key={id} label="Appointed moderator" id={id} highlight={id === identityTrim} />
                     ))}
                     {roster.appointed.filter((id) => id !== roster.ownerId).length === 0 && (
-                      <p className="text-xs text-amber-400">
+                      <p className="text-xs text-archive">
                         No appointed moderator can act from this host yet — the contract only has its owner (offline). An appointed moderator must be added by the owner to act here.
                       </p>
                     )}
-                    <p className="text-[12px] text-[#93a1bd] pt-1">Appointed moderators are set by the owner in the contract&apos;s moderation config (owner-managed; the change applies to new moderation actions).</p>
+                    <p className="text-[12px] text-ink-2 pt-1">Appointed moderators are set by the owner in the contract&apos;s moderation config (owner-managed; the change applies to new moderation actions).</p>
                   </div>
                 ) : rosterError ? (
                   <div className="mt-3">
-                    <p className="text-sm text-red-400">Couldn&apos;t load the roster. Check your connection and retry.</p>
-                    <button onClick={retryRoster} className="mt-2 text-xs text-[#4db3ff] hover:underline">Retry</button>
+                    <p className="text-sm text-danger">Couldn&apos;t load the roster. Check your connection and retry.</p>
+                    <button onClick={retryRoster} className="mt-2 text-xs text-dash hover:underline">Retry</button>
                   </div>
                 ) : (
-                  <p className="mt-3 text-sm text-[#93a1bd] flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading roster…</p>
+                  <p className="mt-3 text-sm text-ink-2 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading roster…</p>
                 )}
               </section>
 
-              <section className="rounded-2xl border border-[#22304e] bg-[#111a2e] p-5 flex flex-col">
-                <h2 className="font-semibold flex items-center gap-2"><Search className="w-4 h-4 text-[#4db3ff]" /> Identity status &amp; actions</h2>
+              <section className="rounded-2xl border border-rule bg-sheet p-5 flex flex-col">
+                <h2 className="font-semibold flex items-center gap-2"><Search className="w-4 h-4 text-dash" /> Identity status &amp; actions</h2>
                 <div className="mt-3">
-                  <label htmlFor="target-id" className="text-xs text-[#93a1bd]">Identity ID to look up</label>
+                  <label htmlFor="target-id" className="text-xs text-ink-2">Identity ID to look up</label>
                   <div className="mt-1 flex gap-2">
                     <input
                       id="target-id"
                       value={targetId}
                       onChange={(e) => { setTargetId(e.target.value); setStatus(null); setStatusForId(null); setActionSuccess(null) }}
                       placeholder="identity ID to look up"
-                      className="min-w-0 flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
+                      className="min-w-0 flex-1 rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
                       onKeyDown={(e) => e.key === 'Enter' && refreshStatus()}
                     />
                     <button
                       onClick={refreshStatus}
                       disabled={statusLoading || !targetId.trim()}
-                      className="btn-secondary p-2 disabled:opacity-50"
+                      className="btn btn-quiet p-2 disabled:opacity-50"
                       aria-label="Refresh status"
                     >
                       {statusLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -880,7 +875,7 @@ export default function ModerationPage() {
                       <StatusPill tone={status.suspendedUntil ? 'amber' : 'neutral'} icon={<Clock className="w-3 h-3" />} label={status.suspendedUntil ? `Suspended until ${formatDate(Number(status.suspendedUntil))}` : 'Not suspended'} />
                       <StatusPill tone={status.warnings?.length ? 'amber' : 'neutral'} icon={<Bell className="w-3 h-3" />} label={`${status.warnings?.length ?? 0} warning${status.warnings?.length === 1 ? '' : 's'}`} />
                     </div>
-                    {status.banReason?.text && <p className="mt-2 text-xs text-[#93a1bd]">Ban reason: {status.banReason.text}</p>}
+                    {status.banReason?.text && <p className="mt-2 text-xs text-ink-2">Ban reason: {status.banReason.text}</p>}
 
                     <div className="mt-4 grid sm:grid-cols-2 gap-2">
                       <TextInput id="ban-reason" label="Ban reason (required)" value={banReason} onChange={setBanReason} />
@@ -890,13 +885,13 @@ export default function ModerationPage() {
                     </div>
 
                     {!canOperate && (
-                      <p className="mt-3 text-xs text-amber-400 border border-amber-400/30 rounded-lg px-3 py-2">Admin key required — validate it above to enable moderation actions.</p>
+                      <p className="mt-3 text-xs text-archive border border-amber-400/30 rounded-lg px-3 py-2">Admin key required — validate it above to enable moderation actions.</p>
                     )}
                     {staleBlocker && (
-                      <p className="mt-3 text-xs text-amber-400 border border-amber-400/30 rounded-lg px-3 py-2">Status is stale — the identity changed since this status was loaded. Refresh to see the current state (and act).</p>
+                      <p className="mt-3 text-xs text-archive border border-amber-400/30 rounded-lg px-3 py-2">Status is stale — the identity changed since this status was loaded. Refresh to see the current state (and act).</p>
                     )}
                     {!suspendHoursValid && suspendHours.trim() && (
-                      <p className="mt-3 text-xs text-amber-400">Suspend duration must be a whole number of hours between 1 and 8760.</p>
+                      <p className="mt-3 text-xs text-archive">Suspend duration must be a whole number of hours between 1 and 8760.</p>
                     )}
 
                     <div className="mt-3 grid grid-cols-2 gap-2">
@@ -955,21 +950,21 @@ export default function ModerationPage() {
                   </>
                 )}
                 {isSelfTarget && (
-                  <p className="mt-4 text-xs text-amber-400">The chain refuses to moderate your own identity — pick another identity to moderate.</p>
+                  <p className="mt-4 text-xs text-archive">The chain refuses to moderate your own identity — pick another identity to moderate.</p>
                 )}
                 {!status && !statusLoading && !isSelfTarget && (
-                  <p className="mt-4 text-sm text-[#93a1bd]">Enter an identity ID and press the refresh button to read its status.</p>
+                  <p className="mt-4 text-sm text-ink-2">Enter an identity ID and press the refresh button to read its status.</p>
                 )}
               </section>
             </div>
 
-            <section className="rounded-2xl border border-[#22304e] bg-[#111a2e] p-5">
+            <section className="rounded-2xl border border-rule bg-sheet p-5">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="font-semibold flex items-center gap-2"><Pin className="w-4 h-4 text-[#4db3ff]" /> Moderate documents</h2>
-                <span className="text-xs text-[#93a1bd]">Recent threads &amp; posts · change fields and deletion are signed by the admin key</span>
-                {docsLoading && <Loader2 className="w-4 h-4 animate-spin text-[#93a1bd]" />}
+                <h2 className="font-semibold flex items-center gap-2"><Pin className="w-4 h-4 text-dash" /> Moderate documents</h2>
+                <span className="text-xs text-ink-2">Recent threads &amp; posts · change fields and deletion are signed by the admin key</span>
+                {docsLoading && <Loader2 className="w-4 h-4 animate-spin text-ink-2" />}
                 {docsError && !docsLoading && (
-                  <button onClick={() => loadDocs()} className="ml-2 text-xs text-[#4db3ff] hover:underline inline-flex items-center gap-1">
+                  <button onClick={() => loadDocs()} className="ml-2 text-xs text-dash hover:underline inline-flex items-center gap-1">
                     <RefreshCw className="w-3 h-3" /> Retry
                   </button>
                 )}
@@ -980,38 +975,38 @@ export default function ModerationPage() {
                   onChange={(e) => setLookupId(e.target.value)}
                   placeholder="Look up a thread or post ID…"
                   aria-label="Look up a thread or post ID"
-                  className="min-w-0 flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
+                  className="min-w-0 flex-1 rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
                   onKeyDown={(e) => e.key === 'Enter' && lookupDocument()}
                 />
                 <button
                   onClick={lookupDocument}
                   disabled={lookupBusy || !lookupId.trim()}
-                  className="btn-secondary gap-2 disabled:opacity-50"
+                  className="btn btn-quiet gap-2 disabled:opacity-50"
                 >
                   {lookupBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                   Find
                 </button>
               </div>
-              {lookupError && <p role="alert" className="mt-2 text-sm text-red-400">{lookupError}</p>}
+              {lookupError && <p role="alert" className="mt-2 text-sm text-danger">{lookupError}</p>}
               {lookupDoc && !docsError && (
                 <DocumentCard doc={lookupDoc} canOperate={canOperate} busy={docActionBusy ?? actionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} />
               )}
               {docsError && !docsLoading && !lookupDoc && (
-                <p role="alert" className="mt-3 text-sm text-red-400">Couldn&apos;t load recent documents. Check your connection and retry.</p>
+                <p role="alert" className="mt-3 text-sm text-danger">Couldn&apos;t load recent documents. Check your connection and retry.</p>
               )}
               {!canOperate && !docsLoading && (
-                <p className="mt-3 text-xs text-amber-400 border border-amber-400/30 rounded-lg px-3 py-2">Admin key required.</p>
+                <p className="mt-3 text-xs text-archive border border-amber-400/30 rounded-lg px-3 py-2">Admin key required.</p>
               )}
               <div className="mt-4 space-y-2">
                 {docs.length === 0 && !docsLoading && !lookupDoc && (
-                  <p className="text-sm text-[#93a1bd]">No documents yet.</p>
+                  <p className="text-sm text-ink-2">No documents yet.</p>
                 )}
                 {docs.map((doc) => (
                   <DocumentCard key={`${doc.type}:${doc.id}`} doc={doc} canOperate={canOperate} busy={docActionBusy ?? actionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} />
                 ))}
               </div>
               {(threadsMore || postsMore) && !docsLoading && (threadsAfter || postsAfter) && (
-                <button onClick={() => loadDocs(true)} className="btn-secondary mt-3">
+                <button onClick={() => loadDocs(true)} className="btn btn-quiet mt-3">
                   <RefreshCw className="w-3.5 h-3.5" /> Load more
                 </button>
               )}
@@ -1020,7 +1015,6 @@ export default function ModerationPage() {
           </div>
         )}
       </main>
-      <Footer />
     </>
   )
 }
@@ -1041,20 +1035,20 @@ function DocumentCard({ doc, canOperate, busy, ownsDoc, actions, highlight }: {
   const owns = ownsDoc(doc)
   const isPost = doc.type === 'post'
   return (
-    <div className={`flex items-center gap-2 sm:gap-3 rounded-xl border px-3 sm:px-4 py-3 flex-wrap ${highlight ? 'border-[#4db3ff]/50 bg-[#4db3ff]/5' : 'border-[#22304e] bg-[#0b1220]'}`}>
-      <span className={`text-[12px] uppercase tracking-wider rounded px-1.5 py-0.5 border shrink-0 ${isPost ? 'text-emerald-400 border-emerald-400/30' : 'text-[#4db3ff] border-[#4db3ff]/40'}`}>{doc.type}</span>
+    <div className={`flex items-center gap-2 sm:gap-3 rounded-xl border px-3 sm:px-4 py-3 flex-wrap ${highlight ? 'border-rule/50 bg-sunk/5' : 'border-rule bg-paper'}`}>
+      <span className={`text-[12px] uppercase tracking-wider rounded px-1.5 py-0.5 border shrink-0 ${isPost ? 'text-live border-emerald-400/30' : 'text-dash border-rule/40'}`}>{doc.type}</span>
       <div className="min-w-0 flex-1 basis-40">
         <p className="text-sm truncate">
           {isPost ? (
             doc.title
           ) : (
-            <Link href={`/t/${encodeURIComponent(doc.id)}`} className="text-white hover:underline">{doc.title}</Link>
+            <Link href={`/t/${encodeURIComponent(doc.id)}`} className="text-ink hover:underline">{doc.title}</Link>
           )}
-          {doc.modState != null && <span className="ml-2 text-[12px] uppercase tracking-wider text-amber-400">hidden</span>}
+          {doc.modState != null && <span className="ml-2 text-[12px] uppercase tracking-wider text-archive">hidden</span>}
         </p>
-        <p className="text-xs text-[#93a1bd]">
+        <p className="text-xs text-ink-2">
           {shortId(doc.ownerId, 12)} · {formatRelativeTime(doc.createdAt)}
-          {owns && <span className="block text-[12px] text-amber-400">own document — the chain refuses self-moderation; these actions are disabled</span>}
+          {owns && <span className="block text-[12px] text-archive">own document — the chain refuses self-moderation; these actions are disabled</span>}
         </p>
       </div>
       {!isPost ? (
@@ -1074,27 +1068,27 @@ function DocumentCard({ doc, canOperate, busy, ownsDoc, actions, highlight }: {
 function RosterRow({ label, id, highlight }: { label: string; id: string | null; highlight?: boolean }) {
   if (!id) return null
   return (
-    <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${highlight ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-[#22304e] bg-[#0b1220]'}`}>
-      <span className="text-xs text-[#93a1bd]">{label}</span>
-      <span className="text-xs font-mono text-white truncate" title={id}>{highlight ? `${shortId(id, 14)} (you)` : shortId(id, 18)}</span>
+    <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${highlight ? 'border-live/40 bg-live/5' : 'border-rule bg-paper'}`}>
+      <span className="text-xs text-ink-2">{label}</span>
+      <span className="text-xs font-mono text-ink truncate" title={id}>{highlight ? `${shortId(id, 14)} (you)` : shortId(id, 18)}</span>
     </div>
   )
 }
 
 function StatusPill({ tone, icon, label }: { tone: 'red' | 'amber' | 'neutral'; icon: React.ReactNode; label: string }) {
   const tones = {
-    red: 'border-red-500/40 bg-red-500/10 text-red-300',
-    amber: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-    neutral: 'border-[#22304e] bg-[#0b1220] text-[#93a1bd]',
+    red: 'border-danger/40 bg-danger/10 text-danger',
+    amber: 'border-amber-400/40 bg-amber-400/10 text-archive',
+    neutral: 'border-rule bg-paper text-ink-2',
   }
   return <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${tones[tone]}`}>{icon}{label}</span>
 }
 
 function ActionButton({ disabled, busy, icon, label, tone, describedBy, onClick }: { disabled: boolean; busy: boolean; icon: React.ReactNode; label: string; tone: 'red' | 'amber' | 'neutral'; describedBy?: string; onClick: () => void }) {
   const tones = {
-    red: 'border-red-500/40 text-red-300 hover:bg-red-500/10',
-    amber: 'border-amber-400/40 text-amber-300 hover:bg-amber-400/10',
-    neutral: 'border-[#22304e] text-[#93a1bd] hover:text-white hover:border-[#008CE7]',
+    red: 'border-danger/40 text-danger hover:bg-danger/10',
+    amber: 'border-amber-400/40 text-archive hover:bg-amber-400/10',
+    neutral: 'border-rule text-ink-2 hover:text-ink hover:border-dash',
   }
   return (
     <button
@@ -1111,10 +1105,10 @@ function ActionButton({ disabled, busy, icon, label, tone, describedBy, onClick 
 
 function SmallButton({ icon, label, active, danger, disabled, busy, onClick }: { icon: React.ReactNode; label: string; active?: boolean | null; danger?: boolean; disabled?: boolean; busy?: boolean; onClick: () => void }) {
   const cls = danger
-    ? 'border-red-500/40 text-red-300 hover:bg-red-500/10'
+    ? 'border-danger/40 text-danger hover:bg-danger/10'
     : active
-      ? 'border-[#4db3ff]/60 bg-[#4db3ff]/10 text-[#4db3ff]'
-      : 'border-[#22304e] text-[#93a1bd] hover:text-white hover:border-[#008CE7]'
+      ? 'border-rule/60 bg-sunk/10 text-dash'
+      : 'border-rule text-ink-2 hover:text-ink hover:border-dash'
   return (
     <button
       onClick={onClick}
@@ -1132,13 +1126,13 @@ function SmallButton({ icon, label, active, danger, disabled, busy, onClick }: {
 function TextInput({ label, value, onChange, type = 'text', id }: { label: string; value: string; onChange: (v: string) => void; type?: string; id?: string }) {
   return (
     <label className="block">
-      <span className="text-xs text-[#93a1bd]">{label}</span>
+      <span className="text-xs text-ink-2">{label}</span>
       <input
         id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-xs focus:border-[#008CE7]"
+        className="mt-1 w-full rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-xs focus:border-dash"
       />
     </label>
   )
@@ -1147,14 +1141,14 @@ function TextInput({ label, value, onChange, type = 'text', id }: { label: strin
 function FramedNotice({ what }: { what: string }) {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
-      <div className="text-center fade-up max-w-md mx-auto">
-        <ExternalLink className="w-8 h-8 text-[#4db3ff] mx-auto" aria-hidden="true" />
-        <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">In a frame</p>
+      <div className="text-center  max-w-md mx-auto">
+        <ExternalLink className="w-8 h-8 text-dash mx-auto" aria-hidden="true" />
+        <p className="text-sm uppercase tracking-widest text-ink-2 mt-3">In a frame</p>
         <h1 className="text-2xl font-bold mt-2">Open {what} in its own tab</h1>
-        <p className="text-sm text-[#93a1bd] mt-2">
+        <p className="text-sm text-ink-2 mt-2">
           This surface holds key material — it only runs on its own top-level page.
         </p>
-        <a href={`https://${canonicalHost()}/moderation`} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
+        <a href={`https://${canonicalHost()}/moderation`} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-2 btn btn-primary px-4 py-2">
           Open in a new tab <ExternalLink className="w-4 h-4" />
         </a>
       </div>
@@ -1165,15 +1159,15 @@ function FramedNotice({ what }: { what: string }) {
 function NonCanonicalRefuse() {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
-      <div className="text-center fade-up max-w-md mx-auto">
-        <ShieldAlert className="w-8 h-8 text-red-400 mx-auto" aria-hidden="true" />
-        <p className="text-sm uppercase tracking-widest text-[#93a1bd] mt-3">Not available here</p>
+      <div className="text-center  max-w-md mx-auto">
+        <ShieldAlert className="w-8 h-8 text-danger mx-auto" aria-hidden="true" />
+        <p className="text-sm uppercase tracking-widest text-ink-2 mt-3">Not available here</p>
         <h1 className="text-2xl font-bold mt-2">The moderation console is not available on this host</h1>
-        <p className="text-sm text-[#93a1bd] mt-2">
+        <p className="text-sm text-ink-2 mt-2">
           This console holds a CRITICAL key — it runs only on <code>{canonicalHost()}</code> (and localhost).
           On any other origin — including a shared Pages origin — it refuses to load so the key cannot leak.
         </p>
-        <a href={`https://${canonicalHost()}/moderation`} className="mt-6 inline-flex items-center gap-2 btn-primary px-4 py-2">
+        <a href={`https://${canonicalHost()}/moderation`} className="mt-6 inline-flex items-center gap-2 btn btn-primary px-4 py-2">
           Open on the canonical host <ExternalLink className="w-4 h-4" />
         </a>
       </div>
