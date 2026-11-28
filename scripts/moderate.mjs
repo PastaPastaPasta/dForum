@@ -47,6 +47,27 @@ signer.addKeyFromWif(wif);
 const reason = o.reason ? { text: o.reason } : undefined;
 try {
   if (action === 'delete') {
+    // As in the console: deleting a thread's opening post (or a post in a thread whose opening post
+    // can't be found) hides the thread too, or the author's next post would relist it.
+    if (type === 'post') {
+      const post = (await sdk.documents.get(contractId, 'post', id))?.toJSON();
+      const thread = post && (await sdk.documents.get(contractId, 'thread', post.threadId))?.toJSON();
+      if (thread && thread.modState == null) {
+        let opening = null;
+        let startAfter;
+        for (let i = 0; i < 5 && !opening; i++) {
+          const res = await sdk.documents.query({ dataContractId: contractId, documentTypeName: 'post', where: [['threadId', '==', thread.$id]], orderBy: [['$createdAt', 'asc']], limit: 100, ...(startAfter ? { startAfter } : {}) });
+          const docs = [...res.values()].filter(Boolean).map((d) => d.toJSON());
+          opening = docs.find((d) => d.$ownerId === thread.$ownerId) ?? null;
+          if (docs.length < 100) break;
+          startAfter = docs[docs.length - 1].$id;
+        }
+        if (!opening || opening.$id === id) {
+          await sdk.contracts.moderatorChangeDocumentFields({ identity, contractId, documentTypeName: 'thread', documentId: thread.$id, fields: { modState: 1 }, signer, reason: reason ?? { text: 'Opening post deleted' } });
+          console.log(`hide thread ${thread.$id}: done (its opening post is being deleted)`);
+        }
+      }
+    }
     await sdk.contracts.moderatorDeleteDocument({ identity, contractId, documentTypeName: type, documentId: id, signer, reason });
   } else {
     await sdk.contracts.moderatorChangeDocumentFields({ identity, contractId, documentTypeName: type, documentId: id, fields: FIELDS[action], signer, reason });

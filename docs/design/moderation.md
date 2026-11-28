@@ -46,7 +46,7 @@ The network refuses moderation of documents owned by the moderator, the owner or
   - **Members**: status, ban, suspend and warn. Ban, suspend and warn need a reason, which is stored on chain.
   - **Audit log**: documents by `$moderatedAt`.
 - Starting a new lookup clears the previous target before any action buttons render.
-- `scripts/moderate.mjs` performs the same document actions from a terminal: `hide|unhide|pin|unpin|lock|unlock|move|unmove|delete <type> <id>`.
+- `scripts/moderate.mjs` performs the same document actions from a terminal: `hide|unhide|pin|unpin|lock|unlock|move|unmove|delete <type> <id>`. Like the console, deleting a thread's opening post (or a post in a thread whose opening post can't be found) hides the thread first.
 
 ## Known limits
 

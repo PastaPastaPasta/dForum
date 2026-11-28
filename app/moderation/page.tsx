@@ -350,8 +350,16 @@ function Content({ act, busy, forums, moderatorId, openMember }: PanelProps) {
                   // Removing an opening post would make the author's next post the opening one and relist
                   // the thread, so the thread is hidden with it.
                   if (doc.type === 'post' && thread && !isHidden(thread)) {
-                    const first = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: 100 })
-                    if (threadPosts(thread, first.docs).opening?.id === doc.doc.id) {
+                    // Page to the owner's first post; if it can't be found, hide anyway (fail closed).
+                    let opening: RawDoc | null = null
+                    let startAfter: string | undefined
+                    for (let i = 0; i < 5 && !opening; i++) {
+                      const page = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: 100, startAfter })
+                      opening = threadPosts(thread, page.docs).opening
+                      if (!page.full || !page.last) break
+                      startAfter = page.last
+                    }
+                    if (!opening || opening.id === doc.doc.id) {
                       await changeDocumentFields(m, 'thread', thread.id, { modState: 1 }, reason || 'Opening post deleted')
                     }
                   }

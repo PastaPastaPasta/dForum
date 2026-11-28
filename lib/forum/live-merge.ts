@@ -15,6 +15,8 @@ export interface DeltaDocs {
   /** Threads whose first posts the overlay has loaded into `posts`, with the createdAt of the last
    * post loaded (Infinity: the thread's every post is loaded). */
   heads?: Readonly<Record<string, number>>
+  /** The last poll hit its page cap: the delta may be missing posts until it catches up. */
+  truncated?: boolean
 }
 
 /** The snapshot's listable rule, judged on live data that may be partial. A thread created after the
@@ -23,7 +25,8 @@ export interface DeltaDocs {
  * less fails closed (a spammer can't push the real opening post out of view and relist the thread). */
 function listableLive(t: RawDoc, posts: RawDoc[], delta: DeltaDocs, snapshotAt: number | undefined, archive?: ArchiveRef): boolean {
   if (isHidden(t)) return false
-  if (snapshotAt !== undefined && t.createdAt > snapshotAt) return threadPosts(t, posts, archive).listable
+  // Newer threads are complete in the delta, unless the last poll was capped: then wait (fail closed).
+  if (snapshotAt !== undefined && t.createdAt > snapshotAt) return !delta.truncated && threadPosts(t, posts, archive).listable
   const cutoff = delta.heads?.[t.id]
   if (cutoff === undefined) return false
   const view = threadPosts(t, posts.filter((p) => p.createdAt <= cutoff), archive)
