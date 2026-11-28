@@ -71,7 +71,7 @@ v3 dropped indexes that only the snapshot could answer more cheaply: `recent` on
 
 Readers are the snapshot, the build and the browser. They all use the same functions.
 
-- **Trust:** `orig*` fields count only on documents owned by `forumSettings.archiveOwnerId` and, when `archiveTrustUntil` is set, created on chain before it. The effective date is `origCreatedAt` (ms) for those documents and `$createdAt` otherwise. Changing `archiveOwnerId` later withdraws trust from every existing archive document, by design. Archived forums accept documents from the owner, moderators and the archivist only; readers drop anything else that lands there.
+- **Trust:** `orig*` fields count only on documents owned by `forumSettings.archiveOwnerId` and, when `archiveTrustUntil` is set, created on chain before it. The effective date is `origCreatedAt` (ms) for those documents and `$createdAt` otherwise. Changing `archiveOwnerId` later withdraws trust from every existing archive document, by design. Archived forums refuse new threads and posts at consensus; what was written before a forum was archived stays listed.
 - **Opening post:** the owner's earliest post by effective date, then `$createdAt`, then `$id` bytes. A thread is listed when that post exists, is not hidden and is not retracted, and the thread itself is not hidden.
 - **Hidden** means `modState` is set. Hidden posts stay in the thread as placeholders, so numbering and permalinks are stable. Hidden threads and profiles drop out of every listing, page and feed.
 - **Locked** means `locked` is `true`. Consensus refuses new replies (above); the app also closes the composer, edits and reactions.

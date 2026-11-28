@@ -14,7 +14,7 @@ import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { useWatch } from '@/lib/watch'
 import { useMarkSeen } from '@/lib/seen'
-import { mayWriteIn, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
+import { acceptsReplies, type LiveContextProps } from '@/lib/forum/live-merge'
 import { getDoc, queryAll } from '@/lib/live/platform'
 import { useSession } from '@/lib/session'
 import { LOGIN_AVAILABLE } from '@/lib/host'
@@ -97,16 +97,14 @@ export function ThreadPage(props: ThreadPageProps) {
   const livePosts = useMemo(() => live.posts.filter((p) => str(p, 'threadId') === threadId), [live.posts, threadId])
   const posts = useMemo(() => {
     if (!thread) return []
-    const lc = toLiveContext(props.ctx ?? { snapshotAt, archive, archivedForums: [], staff: [] })
-    const allowed = (p: RawDoc) => mayWriteIn(threadForumId(thread), p.ownerId, lc)
-    if (!props.thread) return threadPosts(thread, mergeDocs(fetched.posts, livePosts).filter(allowed), archive).posts
+    if (!props.thread) return threadPosts(thread, mergeDocs(fetched.posts, livePosts), archive).posts
     const known = new Set(props.postIndex)
     const updated = mergeDocs(props.posts, livePosts.filter((p) => props.posts.some((q) => q.id === p.id)))
     const fresh = page === pages
-      ? livePosts.filter((p) => !known.has(p.id.slice(0, ID_PREFIX)) && p.createdAt > snapshotAt && allowed(p))
+      ? livePosts.filter((p) => !known.has(p.id.slice(0, ID_PREFIX)) && p.createdAt > snapshotAt)
       : []
     return [...updated.sort(byEffective(archive)), ...fresh.sort(byEffective(archive))]
-  }, [thread, props.thread, props.posts, props.postIndex, props.ctx, fetched.posts, livePosts, page, pages, snapshotAt, archive])
+  }, [thread, props.thread, props.posts, props.postIndex, fetched.posts, livePosts, page, pages, snapshotAt, archive])
   const newElsewhere = page < pages ? livePosts.filter((p) => p.createdAt > snapshotAt && !props.postIndex.includes(p.id.slice(0, ID_PREFIX))).length : 0
 
   const reactionDocs = useMemo(() => mergeDocs(threadReactions ?? [], live.reactions.filter((r) => str(r, 'threadId') === threadId)), [threadReactions, live.reactions, threadId])
@@ -216,7 +214,11 @@ export function ThreadPage(props: ThreadPageProps) {
   const imported = archiveAuthor(thread, archive)
   const opener = imported ?? nameOf(thread.ownerId)
   const ownThread = session?.identityId === thread.ownerId && !imported
-  const canReply = canWrite && !locked && !forumArchived && !isHidden(thread)
+  const archivedForums = new Set([...(props.ctx?.archivedForums ?? []), ...(props.forums ?? []).filter((x) => x.archived).map((x) => x.id)])
+  // A reply's forumId is the thread's original forum, so a thread moved out of an archived forum
+  // stays closed too (consensus refuses the post).
+  forumArchived = forumArchived || archivedForums.has(str(thread, 'forumId') ?? '')
+  const canReply = canWrite && acceptsReplies(thread, { archivedForums }) && !forumArchived
   const hrefFor = (n: number) => (n === 1 ? `/t/${threadId}/` : `/t/${threadId}/page/${n}/`)
 
   return (

@@ -35,7 +35,7 @@ node scripts/import/xenforo.mjs archive
 node scripts/import/xenforo.mjs trust --until now
 ```
 
-**Backfilling again later.** The crawl, ledger and structure map are all resumable, so a later backfill (new threads on dash.org/forum, or forums skipped the first time) is the same sequence: `crawl` the new pages, `trust --until open`, `structure` (existing categories and forums are found by slug and reused), `load` (the ledger and the `byOrigin` index skip everything already written), then `trust --until now`. Forums already archived refuse new posts at consensus; to add history to one, the owner clears `archived` first and runs `archive` again afterwards.
+**Backfilling again later.** The crawl, ledger and structure map are all resumable, so a later backfill (new threads on dash.org/forum, or forums skipped the first time) is the same sequence: `crawl --refresh` (refetches the node index, forum lists and the newest page of each known thread; older pages come from the cache), `trust --until open` (refused if the archivist wrote anything while the window was closed), `structure` (existing categories and forums are found by slug and reused), `load` (the ledger and the `byOrigin` index skip everything already written), then `trust --until now`. Forums already archived refuse new posts at consensus; to add history to one, the owner clears `archived` first and runs `archive` again afterwards.
 
 The structure map is kept per contract (`structure-map-<contract>.json`), as is the ledger, so registering a new contract starts a clean import.
 

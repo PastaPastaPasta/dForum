@@ -5,7 +5,7 @@ import { PenSquare, Archive } from 'lucide-react'
 import type { ForumView, ThreadSummary } from '@/lib/forum/types'
 import { THREADS_PER_PAGE } from '@/lib/forum/types'
 import { sortThreadSummaries } from '@/lib/forum/model'
-import { mergeForumThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
+import { forumActivity, mergeForumThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { useSession } from '@/lib/session'
@@ -27,12 +27,16 @@ export function ForumPage({ forum, crumbs, subforums, threads, page, pages, name
 }) {
   const { session } = useSession()
   const live = useLive(ctx.snapshotAt)
-  const merged = mergeForumThreads(threads, forum.id, live, toLiveContext(ctx), page === 1)
+  const lc = toLiveContext(ctx)
+  const merged = mergeForumThreads(threads, forum.id, live, lc, page === 1)
   // New threads and bumped ones surface on page 1; later pages keep their static order.
   const shown = page === 1 ? sortThreadSummaries(merged).slice(0, Math.max(THREADS_PER_PAGE, threads.length)) : merged
   const ids = shown.flatMap((t) => [t.ownerId, t.lastPostAuthorId])
   const nameOf = useNames(names, ids, live.profiles)
-  const latest = Math.max(forum.lastPost?.at ?? 0, ...shown.map((t) => t.lastPostAt))
+  const activity = forumActivity(live, lc)
+  // Includes live posts in sub-forums, which the index counts toward this forum's "New posts".
+  const latest = Math.max(forum.lastPost?.at ?? 0, ...shown.map((t) => t.lastPostAt),
+    ...[forum.id, ...subforums.map((s) => s.id)].map((id) => activity.get(id)?.last?.at ?? 0))
   useMarkSeen('forums', page === 1 ? forum.id : undefined, latest || undefined)
   return (
     <div className="space-y-5">

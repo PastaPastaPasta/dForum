@@ -3,7 +3,7 @@ import type { RawDoc } from '@/lib/forum/types'
 import {
   compareIds, countReactions, effectiveAt, isArchive, mergeDocs, resolveForumTree, summarizeThread, threadPosts, sortThreadSummaries, excerpt,
 } from '@/lib/forum/model'
-import { forumActivity, mayWriteIn, mergeForumThreads, newPosts, newThreads } from '@/lib/forum/live-merge'
+import { acceptsReplies, deltaChanges, forumActivity, mergeForumThreads, newPosts, newThreads } from '@/lib/forum/live-merge'
 import { isUnread } from '@/lib/seen'
 import { splitBody, byteLength } from '@/lib/forum/actions'
 import { normalizeTagInput } from '@/lib/forum/tags'
@@ -41,12 +41,12 @@ describe('archive trust window', () => {
     expect(effectiveAt(after, ref)).toBe(3_000)
     expect(isArchive(after, { id: ARCH })).toBe(true)
   })
-  it('lets only staff and the archivist write in archived forums', () => {
-    const ctx = { archive: { id: ARCH }, archivedForums: new Set(['F']), staff: new Set(['MOD']) }
-    expect(mayWriteIn('F', ARCH, ctx)).toBe(true)
-    expect(mayWriteIn('F', 'MOD', ctx)).toBe(true)
-    expect(mayWriteIn('F', 'someone', ctx)).toBe(false)
-    expect(mayWriteIn('open', 'someone', ctx)).toBe(true)
+  it('closes replies in locked threads and in threads whose original or current forum is archived', () => {
+    const ctx = { archivedForums: new Set(['ARCHIVED']) }
+    expect(acceptsReplies(doc('a', 1, { forumId: 'OPEN' }), ctx)).toBe(true)
+    expect(acceptsReplies(doc('a', 1, { forumId: 'OPEN', locked: true }), ctx)).toBe(false)
+    expect(acceptsReplies(doc('a', 1, { forumId: 'ARCHIVED', movedToForumId: 'OPEN' }), ctx)).toBe(false)
+    expect(acceptsReplies(doc('a', 1, { forumId: 'OPEN', movedToForumId: 'ARCHIVED' }), ctx)).toBe(false)
   })
 })
 
@@ -139,13 +139,29 @@ describe('live delta', () => {
     const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
     expect(mergeForumThreads([old], 'F', { threads: [moved], posts: [] }, ctx)).toHaveLength(0)
   })
-  it('ignores live posts in hidden threads, unknown threads, and archived forums', () => {
+  it('ignores live posts in hidden or unknown threads', () => {
     expect(newPosts({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [reply] }, ctx)).toHaveLength(0)
     expect(newPosts({ threads: [], posts: [reply] }, ctx)).toHaveLength(0)
-    const archived = { snapshotAt, archivedForums: new Set(['F']), staff: new Set(['carol']), archive: 'ARCH' }
-    expect(newPosts({ threads: [oldThread], posts: [reply] }, archived)).toHaveLength(0)
-    expect(newPosts({ threads: [oldThread], posts: [{ ...reply, ownerId: 'carol' }] }, archived)).toHaveLength(1)
-    expect(newThreads({ threads: [t], posts: [open] }, archived)).toHaveLength(0)
+  })
+  it('keeps member content in forums archived after it was written', () => {
+    const archived = { snapshotAt, archivedForums: new Set(['F']), staff: new Set(['carol']) }
+    expect(newPosts({ threads: [oldThread], posts: [reply] }, archived)).toHaveLength(1)
+  })
+  it('lists a thread whose opening post landed just after the snapshot', () => {
+    const at = { snapshotAt: 10_000_000 }
+    const straddle = doc('dave', 9_999_990, { title: 'Straddle', forumId: 'F' })
+    const first = doc('dave', 10_000_004, { threadId: straddle.id, forumId: 'F', body: 'first' })
+    expect(newThreads({ threads: [straddle], posts: [first] }, at)).toHaveLength(1)
+    const older = doc('carol', 5_000_000, { title: 'Older', forumId: 'F' })
+    const ownerReply = doc('carol', 10_000_700, { threadId: older.id, forumId: 'F', body: 'later' })
+    expect(newThreads({ threads: [older], posts: [ownerReply] }, at)).toHaveLength(0)
+  })
+  it('reports moderation of documents the static index lists', () => {
+    const hiddenPost = { ...reply, p: { ...reply.p, modState: 1 } }
+    const c = deltaChanges({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [hiddenPost] })
+    expect(c.threadGone('OLD')).toBe(true)
+    expect(c.postGone(reply.id)).toBe(true)
+    expect(c.threadGone('other')).toBe(false)
   })
   it('counts moved threads toward their new forum', () => {
     const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }

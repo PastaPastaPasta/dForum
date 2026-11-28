@@ -57,7 +57,7 @@ function Console() {
 
   useEffect(() => { if (session && !identityId) setIdentityId(session.identityId) }, [session, identityId])
   useEffect(() => {
-    queryAll('forum', { orderBy: [['slug', 'asc']] }).then((r) => setForums(r.docs.map((f) => ({ id: f.id, title: str(f, 'title') ?? f.id })))).catch(() => undefined)
+    queryAll('forum', { orderBy: [['slug', 'asc']] }).then((r) => setForums(r.docs.filter((f) => f.p.archived !== true).map((f) => ({ id: f.id, title: str(f, 'title') ?? f.id })))).catch(() => undefined)
   }, [])
 
   const act = useCallback(async (label: string, fn: () => Promise<unknown>, confirmText?: string) => {
@@ -141,14 +141,16 @@ function Reports({ act, busy }: PanelProps) {
   const [showDone, setShowDone] = useState(false)
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [failed, setFailed] = useState(false)
+  const [truncated, setTruncated] = useState(false)
   // Outcomes this console just wrote. A node can answer the reload before it has the change, so
   // these stay applied until the chain reports a status of its own.
   const [done, setDone] = useState<Record<string, { status: number; hidPost?: string }>>({})
   const load = useCallback(async () => {
     setFailed(false)
-    const r = await queryAll('report', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']] }, 5).catch(() => null)
+    const r = await queryAll('report', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']] }, 30).catch(() => null)
     if (!r) { setFailed(true); return }
     setReports(r.docs)
+    setTruncated(r.truncated)
     const ids = [...new Set(r.docs.map((d) => str(d, 'postId')).filter((x): x is string => !!x))]
     const found: Record<string, RawDoc> = {}
     for (let i = 0; i < ids.length; i += 100) {
@@ -169,7 +171,7 @@ function Reports({ act, busy }: PanelProps) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-3 text-sm">
-        <p className="text-ink-2">{open.length} open of {reports.length} reports</p>
+        <p className="text-ink-2">{open.length} open of {reports.length} {truncated ? 'most recent ' : ''}reports</p>
         <label className="ml-auto flex items-center gap-2"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />Show resolved</label>
         <button type="button" className="btn btn-quiet" onClick={() => void load()}>Refresh</button>
       </div>

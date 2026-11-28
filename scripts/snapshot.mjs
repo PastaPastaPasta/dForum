@@ -24,7 +24,6 @@ import {
   archiveAuthor, archiveRef, countReactions, effectiveAt, excerpt, isArchive, isHidden, isRetracted, lastPostOf, num,
   postBody, resolveForumTree, sortThreadSummaries, str, summarizeThread, threadForumId, threadPosts,
 } from '../lib/forum/model.ts';
-import { mayWriteIn } from '../lib/forum/live-merge.ts';
 
 const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
 const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readDeployment().contractId;
@@ -170,7 +169,9 @@ async function byValue(sdk, type, field, since) {
 async function removals(sdk, type) {
   const ids = [];
   let startAfter;
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; ; i++) {
+    // A partial list would leave deleted documents published; fail the run instead.
+    if (i >= 1000) throw new Error(`${type} removals: more than 100k records; raise the cap`);
     const page = await withRetry(`${type} removals`, () => sdk.contracts.documentRemovals({
       contractId: CONTRACT_ID, documentTypeName: type, limit: 100, ...(startAfter ? { startAfter } : {}),
     }));
@@ -216,7 +217,7 @@ async function sync(sdk) {
       const name = await sdk.dpns.username(id);
       state.dpns[id] = typeof name === 'string' ? name.replace(/\.dash$/, '') : '';
     } catch {
-      state.dpns[id] = '';
+      // Not cached: a transient failure is retried on the next run.
     }
   }
   state.watermark = snapshotAt;
@@ -279,11 +280,6 @@ export function build({ state, small, snapshotAt, contract }) {
   }));
   const forums = resolveForumTree(forumsRaw, categories);
   const forumIds = new Set(forums.map((f) => f.id));
-  const writeCtx = {
-    archive,
-    archivedForums: new Set(forums.filter((f) => f.archived).map((f) => f.id)),
-    staff: new Set([ownerId, ...moderators].filter(Boolean)),
-  };
 
   // Documents created after the watermark belong to the next snapshot; the browser counts
   // anything created after snapshotAt as new, so including them here would count them twice.
@@ -311,11 +307,9 @@ export function build({ state, small, snapshotAt, contract }) {
   for (const thread of threads) {
     const forumId = threadForumId(thread);
     if (!forumIds.has(forumId)) continue;
-    // Archived forums take writes from staff and the archivist only; the contract can't refuse
-    // the others, so every reader drops them.
-    if (!mayWriteIn(forumId, thread.ownerId, writeCtx)) continue;
-    const allowedPosts = (postsByThread.get(thread.id) ?? []).filter((p) => mayWriteIn(forumId, p.ownerId, writeCtx));
-    const view = threadPosts(thread, allowedPosts, archive);
+    // Archived forums are read-only at consensus (contract v3), so everything here was written
+    // before the forum was archived and stays listed.
+    const view = threadPosts(thread, postsByThread.get(thread.id) ?? [], archive);
     if (!view.listable) continue;
     const summary = summarizeThread(thread, view, reactions, archive);
     summaries.push(summary);

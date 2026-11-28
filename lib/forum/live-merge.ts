@@ -1,11 +1,11 @@
 /**
  * Folding the live delta (everything changed since the snapshot) into snapshot views. Pure.
- * Every reader goes through `livePostThread`, so locks, hidden threads, moves and archived
- * forums apply to live content exactly as the snapshot applies them.
+ * Live posts go through `livePostThread`, so hidden threads and moves apply to live content exactly
+ * as the snapshot applies them; locks and archived forums are refused at consensus.
  */
 import type { LastPost, RawDoc, ThreadSummary } from './types.ts'
 import {
-  archiveAuthor, archiveId, type ArchiveRef, effectiveAt, isArchive, isHidden, isLocked, isRetracted, num, str, threadForumId, threadTags,
+  archiveAuthor, type ArchiveRef, effectiveAt, isArchive, isHidden, isLocked, isRetracted, num, str, threadForumId, threadTags,
 } from './model.ts'
 
 export interface DeltaDocs {
@@ -17,7 +17,7 @@ export interface DeltaDocs {
 export interface LiveContext {
   snapshotAt: number
   archive?: ArchiveRef
-  /** Forums that only staff and the archivist may write to. */
+  /** Archived (read-only) forums. Consensus refuses new threads and posts in them (contract v3). */
   archivedForums?: ReadonlySet<string>
   /** Owner and moderators. */
   staff?: ReadonlySet<string>
@@ -42,11 +42,32 @@ export function toLiveContext(p: LiveContextProps): LiveContext {
 }
 
 const visible = (d: RawDoc) => !isHidden(d) && !isRetracted(d)
+const byId = (docs: RawDoc[]) => new Map(docs.map((d) => [d.id, d]))
 
-/** Archived forums accept writes from staff and the archivist only (enforced by every reader). */
-export function mayWriteIn(forumId: string, ownerId: string, ctx: Pick<LiveContext, 'archive' | 'archivedForums' | 'staff'>): boolean {
-  if (!ctx.archivedForums?.has(forumId)) return true
-  return ownerId === archiveId(ctx.archive) || !!ctx.staff?.has(ownerId)
+/** Whether new replies can land in this thread: consensus checks the post's forumId, which is the
+ * thread's original forum, and the thread's lock; the app also closes threads moved into an
+ * archived forum. */
+export function acceptsReplies(thread: RawDoc, ctx: Pick<LiveContext, 'archivedForums'>): boolean {
+  if (isLocked(thread) || isHidden(thread)) return false
+  const archived = ctx.archivedForums
+  return !archived?.has(str(thread, 'forumId') ?? '') && !archived?.has(threadForumId(thread))
+}
+
+/** Moderation and edits the live delta has seen on documents the static index already lists. */
+export interface DeltaChanges {
+  threadGone(id: string): boolean
+  postGone(id: string): boolean
+  thread(id: string): RawDoc | undefined
+}
+
+export function deltaChanges(delta: DeltaDocs): DeltaChanges {
+  const threads = byId(delta.threads)
+  const posts = byId(delta.posts)
+  return {
+    threadGone: (id) => { const t = threads.get(id); return !!t && isHidden(t) },
+    postGone: (id) => { const p = posts.get(id); return !!p && !visible(p) },
+    thread: (id) => threads.get(id),
+  }
 }
 
 /** The thread a live post belongs to, when the post may be shown; null otherwise. */
@@ -54,17 +75,23 @@ export function livePostThread(p: RawDoc, threads: ReadonlyMap<string, RawDoc>, 
   if (!visible(p)) return null
   const thread = threads.get(str(p, 'threadId') ?? '')
   if (!thread || isHidden(thread)) return null
-  const forumId = threadForumId(thread)
-  if (!mayWriteIn(forumId, p.ownerId, ctx) || !mayWriteIn(forumId, thread.ownerId, ctx)) return null
   return thread
 }
 
-const byId = (docs: RawDoc[]) => new Map(docs.map((d) => [d.id, d]))
 
-/** New listable threads (opening post present and visible) created after the snapshot. */
+/** A thread and its opening post are two writes a few seconds apart; a snapshot can fall between them. */
+const STRADDLE_MS = 120_000
+
+/** New listable threads (opening post present and visible) that the snapshot could not list: created
+ * after it, or created just before it with an opening post that landed after it. */
 export function newThreads(delta: DeltaDocs, ctx: LiveContext): RawDoc[] {
-  return delta.threads.filter((t) => t.createdAt > ctx.snapshotAt && !isHidden(t) && mayWriteIn(threadForumId(t), t.ownerId, ctx)
-    && delta.posts.some((p) => str(p, 'threadId') === t.id && p.ownerId === t.ownerId && visible(p)))
+  return delta.threads.filter((t) => {
+    if (isHidden(t)) return false
+    const own = delta.posts.filter((p) => str(p, 'threadId') === t.id && p.ownerId === t.ownerId)
+    if (!own.some(visible)) return false
+    if (t.createdAt > ctx.snapshotAt) return true
+    return t.createdAt > ctx.snapshotAt - STRADDLE_MS && own.every((p) => p.createdAt > ctx.snapshotAt)
+  })
 }
 
 /** New posts since the snapshot that may be shown, with their threads. */

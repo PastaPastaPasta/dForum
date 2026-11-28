@@ -5,7 +5,7 @@
 - **Watermark.** Each run starts by reading the platform block time (`queryWithProof` metadata). That time becomes the watermark.
 - **Small types are read in full:** forumSettings, category, forum and teamMember. The contract is read for the owner and roster.
 - **Incremental reads.** thread, post, reaction and profile are read by `$updatedAt >=` the last watermark minus 10 minutes, plus `$moderatedAt >=` for moderated types. Results merge into the raw-document cache (`.cache/snapshot-state.json`), where the higher revision wins.
-- **`--full`** (and any missing cache or contract change) rescans everything. CI runs a full scan daily at 03:00 UTC and on manual dispatch. A full scan is the only way a moderator *delete* drops out; hides, edits and author deletes arrive incrementally.
+- **`--full`** (and any missing cache, contract change, or cache older than 24 hours) rescans everything; CI also passes `--full` on manual dispatch. Every run, full or incremental, also reads the contract's removal records, so moderator deletes drop out within the hour; hides, edits and author deletes arrive through the `byUpdated` and `moderated` indexes.
 - **Outputs**, through the same rules as the browser (lib/forum/model.ts):
   - `data/site.json`: settings, roster, categories, forums with rolled-up counts and last post, stats, latest threads and posts, tags.
   - `data/forum/<id>.json`: thread summaries, pinned first, then latest activity.

@@ -92,15 +92,15 @@ export function NewThread({ categories, forums }: { categories: CategoryView[]; 
         </label>
         <label className="block">
           <span className="text-sm font-medium">Title</span>
-          <input className="field mt-1" value={title} maxLength={150} onChange={(e) => setTitle(e.target.value)} placeholder="What do you want to discuss?" />
+          <input className="field mt-1" value={title} maxLength={150} readOnly={!!pending} onChange={(e) => setTitle(e.target.value)} placeholder="What do you want to discuss?" />
         </label>
       </div>
       <label className="block">
         <span className="text-sm font-medium">Tags</span>
-        <input className="field mt-1" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="governance, wallet (up to 5)" />
+        <input className="field mt-1" value={tags} readOnly={!!pending} onChange={(e) => setTags(e.target.value)} placeholder="governance, wallet (up to 5)" />
         {tagList.length > 0 && <span className="mt-1 flex flex-wrap gap-1.5">{tagList.map((t) => <span key={t} className="rounded bg-sunk px-1.5 text-xs leading-5">{t}</span>)}</span>}
       </label>
-      {pending && !busy && <p className="text-sm text-ink-2">The thread was created; its opening post still needs to be saved. Posting again finishes it.</p>}
+      {pending && !busy && <p className="text-sm text-ink-2">The thread was created, but its opening post wasn&apos;t saved. Post again to finish it; the title and tags are already saved.</p>}
       <Composer value={body} onChange={setBody} busy={busy} submitLabel={pending ? 'Save opening post' : 'Post thread'} label="Opening post" placeholder="Write the opening post…" onSubmit={() => void submit()} error={error} />
       <p className="text-sm text-ink-2">Your thread is saved to Dash Platform and shows up for everyone within a few seconds.</p>
     </div>

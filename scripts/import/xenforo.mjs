@@ -5,6 +5,8 @@
  *   crawl      fetch nodes, thread lists and threads into a local cache (resumable)
  *              --source html  public pages (optionally through the Wayback Machine: --wayback)
  *              --source api   XenForo REST API (XF-Api-Key with read access; the forum operator's key)
+ *              --refresh      refetch the node index, forum lists and the newest thread pages, so a
+ *                             later backfill picks up new threads and replies
  *   plan       counts, bytes, and estimated credits for what `load` would write
  *   structure  create categories/forums (owner-only types: signs with the contract OWNER key)
  *   load       write threads/posts as the ARCHIVIST identity, oldest first, resumable and
@@ -49,6 +51,7 @@ const { values: opts, positionals } = parseArgs({
     'budget-dash': { type: 'string', default: '5' },
     limit: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
+    refresh: { type: 'boolean', default: false },
     'archive-forums': { type: 'string' },
     until: { type: 'string' },
   },
@@ -92,9 +95,10 @@ async function fetchText(url, { headers = {}, attempts = 6, redirect = 'follow' 
   }
 }
 
-async function cachedPage(kind, key, url) {
+/** Raw pages are cached; `fresh` refetches (and re-caches) a page that may have changed. */
+async function cachedPage(kind, key, url, fresh = false) {
   const path = join(CACHE, 'raw', kind, `${key}.html`);
-  if (existsSync(path)) return readFileSync(path, 'utf8');
+  if (!fresh && existsSync(path)) return readFileSync(path, 'utf8');
   const html = await fetchText(sourceUrl(url));
   if (html === null) return null;
   mkdirSync(join(path, '..'), { recursive: true });
@@ -106,7 +110,8 @@ const base = opts.base.endsWith('/') ? opts.base : `${opts.base}/`;
 const pageUrl = (url, page) => (page > 1 ? `${url.replace(/\/$/, '')}/page-${page}` : url);
 
 async function crawlHtml() {
-  const indexHtml = await cachedPage('index', 'index', base);
+  const refresh = opts.refresh;
+  const indexHtml = await cachedPage('index', 'index', base, refresh);
   if (!indexHtml) throw new Error(`no node index at ${base}`);
   const index = parseNodeIndex(indexHtml, base);
   const wanted = opts.forums ? new Set(opts.forums.split(',').map(Number)) : null;
@@ -124,7 +129,7 @@ async function crawlHtml() {
     const entry = { origId: node.origId, kind: node.kind, title: node.title, description: node.description, url: node.url, parentOrigId: parent, threads: [] };
     category.forums.push(entry);
     const included = !wanted || wanted.has(node.origId) || (parent !== null && wanted.has(parent));
-    const html = await cachedPage('forum', `${node.origId}-1`, node.url);
+    const html = await cachedPage('forum', `${node.origId}-1`, node.url, refresh);
     if (!html) { log(`forum ${node.origId} unavailable`); continue; }
     const first = parseForumPage(html, node.url);
     for (const sub of first.subNodes ?? []) queue.push({ node: sub, category, parent: node.origId });
@@ -132,7 +137,7 @@ async function crawlHtml() {
     const lastPage = Math.min(first.lastPage || 1, Number(opts['max-pages']));
     let threads = [...first.threads];
     for (let p = 2; p <= lastPage && threads.length < maxThreads; p++) {
-      const ph = await cachedPage('forum', `${node.origId}-${p}`, pageUrl(node.url, p));
+      const ph = await cachedPage('forum', `${node.origId}-${p}`, pageUrl(node.url, p), refresh);
       if (ph) threads.push(...parseForumPage(ph, node.url).threads);
     }
     threads = threads.slice(0, maxThreads);
@@ -140,14 +145,18 @@ async function crawlHtml() {
     for (const t of threads) {
       entry.threads.push(t.origId);
       const out = join(CACHE, 'threads', `${t.origId}.json`);
-      if (existsSync(out)) continue;
-      const th = await cachedPage('thread', `${t.origId}-1`, t.url);
+      const known = readJson(out, null);
+      if (known && !refresh) continue;
+      // On refresh only page 1 (for the page count) and pages from the last known one onward can
+      // hold new replies; earlier pages come from the cache.
+      const knownPages = known?.pages ?? 1;
+      const th = await cachedPage('thread', `${t.origId}-1`, t.url, refresh);
       if (!th) { log(`thread ${t.origId} unavailable`); continue; }
       const page1 = parseThreadPage(th, t.url);
       const posts = [...page1.posts];
       const tLast = Math.min(page1.lastPage || 1, Number(opts['max-pages']));
       for (let p = 2; p <= tLast; p++) {
-        const ph = await cachedPage('thread', `${t.origId}-${p}`, pageUrl(t.url, p));
+        const ph = await cachedPage('thread', `${t.origId}-${p}`, pageUrl(t.url, p), refresh && p >= knownPages);
         if (ph) posts.push(...parseThreadPage(ph, t.url).posts);
       }
       const seen = new Set();
@@ -161,6 +170,7 @@ async function crawlHtml() {
         locked: t.locked,
         tags: page1.tags ?? [],
         url: t.url,
+        pages: tLast,
         posts: posts
           .filter((p) => !seen.has(p.origId) && seen.add(p.origId))
           .map((p) => ({ origId: p.origId, author: p.author, authorId: p.authorId ?? null, createdAt: p.createdAt, markdown: xfHtmlToMarkdown(p.html, { baseUrl: t.url }) })),
@@ -446,6 +456,7 @@ async function load() {
   }
   events.sort((a, b) => a.at - b.at || a.t.origId - b.t.origId || a.i - b.i);
   let written = 0;
+  let lastCheck = 0;
   for (const ev of events) {
     if (written >= limit) break;
     const { t, p, forumId } = ev;
@@ -469,7 +480,8 @@ async function load() {
       written++;
       saveLedger();
     }
-    if (written % 25 === 0) {
+    if (written - lastCheck >= 25) {
+      lastCheck = written;
       const now = BigInt(await ctx.sdk.identities.balance(archivist.identityId));
       ledger.spentCredits = Number(startBalance - now) + (ledger.spentBefore ?? 0);
       log(`progress: ${written} writes, spent ${(Number(startBalance - now) / 1e11).toFixed(4)} DASH this run`);
@@ -520,6 +532,21 @@ async function trust() {
   const doc = [...res.values()].find(Boolean);
   if (!doc) throw new Error('no forumSettings document; run scripts/seed-forum.mjs first');
   const j = doc.toJSON();
+  // Reopening would re-trust anything the archivist key wrote while the window was closed (a leaked
+  // key's forgeries included), so refuse while such documents exist.
+  if (at === undefined || (j.archiveTrustUntil && at > j.archiveTrustUntil)) {
+    const archivist = j.archiveOwnerId;
+    for (const type of ['thread', 'post']) {
+      if (!archivist || !j.archiveTrustUntil) break;
+      const res = await ctx.sdk.documents.query({
+        dataContractId: ctx.contractId, documentTypeName: type,
+        where: [['$ownerId', '==', archivist], ['$createdAt', '>', j.archiveTrustUntil]], orderBy: [['$ownerId', 'asc'], ['$createdAt', 'asc']], limit: 1,
+      });
+      if ([...res.values()].some(Boolean)) {
+        throw new Error(`the archivist wrote ${type}s after the trust window closed (${new Date(j.archiveTrustUntil).toISOString()}); reopening would trust them. Review and remove them first.`);
+      }
+    }
+  }
   const props = Object.fromEntries(Object.entries(j).filter(([k, v]) => !k.startsWith('$') && v !== null && k !== 'archiveTrustUntil'));
   if (at !== undefined) props.archiveTrustUntil = at;
   if (opts['dry-run']) { log('would set archiveTrustUntil', at === undefined ? 'open' : new Date(at).toISOString()); process.exit(0); }

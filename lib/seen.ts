@@ -20,7 +20,13 @@ function load(): Seen {
   if (cache) return cache
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Seen | null
-    cache = raw && typeof raw.since === 'number' ? raw : { since: Date.now(), threads: {}, forums: {} }
+    if (raw && typeof raw.since === 'number') {
+      cache = raw
+    } else {
+      // Remember the first visit right away, so activity after it shows as unread on the next load.
+      cache = { since: Date.now(), threads: {}, forums: {} }
+      localStorage.setItem(KEY, JSON.stringify(cache))
+    }
   } catch {
     cache = { since: Date.now(), threads: {}, forums: {} }
   }

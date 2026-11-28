@@ -2,7 +2,7 @@
 
 import type { SiteFile, ThreadSummary } from '@/lib/forum/types'
 import { archiveAuthor, effectiveAt, sortThreadSummaries, str, threadForumId, isLocked, threadTags } from '@/lib/forum/model'
-import { newPosts, newThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
+import { deltaChanges, newPosts, newThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { ThreadList } from './ThreadList'
@@ -16,7 +16,13 @@ export function WhatsNew({ threads, ctx, names, forumTitles }: {
   const live = useLive(ctx.snapshotAt)
   const lc = toLiveContext(ctx)
   const archive = ctx.archive
-  const byId = new Map(threads.map((t) => [t.id, { ...t }]))
+  const changes = deltaChanges(live)
+  const byId = new Map<string, ThreadSummary>()
+  for (const t of threads) {
+    if (changes.threadGone(t.id)) continue
+    const doc = changes.thread(t.id)
+    byId.set(t.id, doc ? { ...t, title: str(doc, 'title') ?? t.title, forumId: threadForumId(doc), locked: isLocked(doc), tags: threadTags(doc) } : { ...t })
+  }
   for (const t of newThreads(live, lc)) {
     byId.set(t.id, {
       id: t.id, forumId: threadForumId(t), title: str(t, 'title') ?? '', tags: threadTags(t), ownerId: t.ownerId, archiveAuthor: archiveAuthor(t, archive),

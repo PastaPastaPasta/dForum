@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import type { SiteFile } from '@/lib/forum/types'
 import { archiveRef, excerpt, postBody, str, archiveAuthor, effectiveAt } from '@/lib/forum/model'
-import { newPosts, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
+import { deltaChanges, newPosts, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { useSession } from '@/lib/session'
@@ -22,8 +22,13 @@ export function HomeSidebar({ site, names, ctx }: { site: SiteFile; names: Recor
     postId: p.id, threadId: thread.id, threadTitle: str(thread, 'title') ?? '', at: effectiveAt(p, archive),
     authorId: p.ownerId, archiveAuthor: archiveAuthor(p, archive), forumId: str(thread, 'forumId') ?? '', excerpt: excerpt(postBody(p), 140),
   }))
+  // Static entries drop out as soon as the live delta shows their thread or post hidden.
+  const changes = deltaChanges(live)
+  const still = site.latestPosts
+    .filter((l) => !changes.threadGone(l.threadId) && !changes.postGone(l.postId))
+    .map((l) => { const t = changes.thread(l.threadId); return t ? { ...l, threadTitle: str(t, 'title') ?? l.threadTitle } : l })
   const seen = new Set<string>()
-  const latest = [...fresh, ...site.latestPosts]
+  const latest = [...fresh, ...still]
     .sort((a, b) => b.at - a.at)
     .filter((p) => (seen.has(p.threadId) ? false : (seen.add(p.threadId), true)))
     .slice(0, 8)
