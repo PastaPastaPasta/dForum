@@ -42,6 +42,8 @@ const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000
 function hostAllowed(): boolean {
   if (typeof window === 'undefined') return false
   if (!LOGIN_AVAILABLE) return false
+  // A framed copy of the site never reads or writes key material.
+  if (window.top !== window.self) return false
   return hostIsCanonical(window.location.hostname)
 }
 
@@ -104,8 +106,15 @@ export const sessionStore: SessionStore = {
       const ts = Number(parsed.timestamp ?? 0)
       if (!Number.isFinite(ts) || ts <= 0) return null
       if (Date.now() - ts > SESSION_MAX_AGE_MS) {
-        // Stale snapshot — drop it so the controller signs out cleanly.
+        // Stale snapshot — drop the snapshot AND the write-side keys it
+        // points at. App code can't reach the keys any more, but anything
+        // same-origin could, so they go too.
         write(SESSION_KEY, null)
+        const identityId = parsed.user.identityId
+        for (const prefix of [SK_PREFIX, ENC_PREFIX, ENC_TYPE_PREFIX, DEK_PREFIX]) {
+          write(`${prefix}${identityId}`, null)
+        }
+        write(`${NS}transfer:${identityId}`, null)
         return null
       }
       return parsed
@@ -123,6 +132,7 @@ export const sessionStore: SessionStore = {
 
 export const secretStore: SecretStore = {
   async storePrivateKey(identityId: string, privateKey: string): Promise<void> {
+    if (!hostAllowed()) return
     write(`${SK_PREFIX}${identityId}`, privateKey)
   },
   async getPrivateKey(identityId: string): Promise<string | null> {
@@ -137,6 +147,7 @@ export const secretStore: SecretStore = {
     write(`${SK_PREFIX}${identityId}`, null)
   },
   async storeEncryptionKey(identityId: string, encryptionKey: string): Promise<void> {
+    if (!hostAllowed()) return
     write(`${ENC_PREFIX}${identityId}`, encryptionKey)
   },
   async getEncryptionKey(identityId: string): Promise<string | null> {
@@ -149,12 +160,14 @@ export const secretStore: SecretStore = {
     write(`${ENC_PREFIX}${identityId}`, null)
   },
   async storeEncryptionKeyType(identityId: string, type: 'derived' | 'external'): Promise<void> {
+    if (!hostAllowed()) return
     write(`${ENC_TYPE_PREFIX}${identityId}`, type)
   },
   async clearEncryptionKeyType(identityId: string): Promise<void> {
     write(`${ENC_TYPE_PREFIX}${identityId}`, null)
   },
   async storeTransferKey(identityId: string, transferKey: string): Promise<void> {
+    if (!hostAllowed()) return
     write(`${NS}transfer:${identityId}`, transferKey)
   },
   async getTransferKey(identityId: string): Promise<string | null> {
@@ -180,6 +193,7 @@ export const secretStore: SecretStore = {
     void identityId
   },
   async storeAuthVaultDek(identityId: string, dek: Uint8Array): Promise<void> {
+    if (!hostAllowed()) return
     write(`${DEK_PREFIX}${identityId}`, toBase64(dek))
   },
   async getAuthVaultDek(identityId: string): Promise<Uint8Array | null> {

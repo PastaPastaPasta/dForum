@@ -44,6 +44,21 @@ function describeErr(e) {
   return redactWif(parts.join(' | '));
 }
 
+/** Platform's locked core height trails the core tip by a block or two; a chain proof at the
+ * tip height is refused (10506) until it catches up. */
+async function createWithCoreHeightRetry(create, attempts = 12) {
+  for (let i = 1; ; i++) {
+    try {
+      return await create();
+    } catch (e) {
+      const text = `${e?.message ?? ''} ${e?.code ?? ''}`;
+      if (i >= attempts || !/10506|higher than the current consensus core height/.test(text)) throw e;
+      console.log(`platform core height behind the proof; retry ${i}/${attempts - 1} in 20s …`);
+      await new Promise((r) => setTimeout(r, 20000));
+    }
+  }
+}
+
 export function generateAssetLockKeypair() {
   const privateKeyBytes = secpUtils.randomSecretKey();
   const publicKeyHex = Buffer.from(getPublicKey(privateKeyBytes, true)).toString('hex');
@@ -134,12 +149,12 @@ async function main() {
     const sdk = EvoSDK.testnetTrusted({ settings: { timeoutMs: SDK_TIMEOUT_MS } });
     await sdk.connect();
     console.log(`registering identity ${identityId.toBase58()} (index ${identityIndex}) …`);
-    await sdk.identities.create({
+    await createWithCoreHeightRetry(() => sdk.identities.create({
       identity,
       assetLockProof,
       assetLockPrivateKey: PrivateKey.fromBytes(assetLock.privateKeyBytes, 'testnet'),
       signer,
-    });
+    }));
     const id = identityId.toBase58();
     const balance = await sdk.identities.balance(id);
     console.log(`identity registered: ${id}  balance=${balance} credits`);
@@ -231,12 +246,12 @@ async function main() {
     const sdk = EvoSDK.testnetTrusted({ settings: { timeoutMs: SDK_TIMEOUT_MS } });
     await sdk.connect();
     console.log(`registering identity ${identityId.toBase58()} (index ${identityIndex}) …`);
-    await sdk.identities.create({
+    await createWithCoreHeightRetry(() => sdk.identities.create({
       identity,
       assetLockProof,
       assetLockPrivateKey: PrivateKey.fromBytes(assetLock.privateKeyBytes, 'testnet'),
       signer,
-    });
+    }));
     const id = identityId.toBase58();
     const balance = await sdk.identities.balance(id);
     console.log(`identity registered: ${id}  balance=${balance} credits`);

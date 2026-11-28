@@ -21,7 +21,7 @@ import { DataContract, DataContractCreateTransition, EvoSDK, IdentityPublicKey, 
 import { criticalAuthKey, deriveIdentityKeys, loadMnemonic } from './derive-identities.mjs';
 import { redactWif } from './lib/redact.mjs';
 
-const PROTOCOL_VERSION = 14;
+const PROTOCOL_VERSION = Number(process.env.PLATFORM_PROTOCOL_VERSION || 15);
 const MAX_STATE_TRANSITION_SIZE = 20480;
 const PUT_SETTINGS = { connectTimeoutMs: 10000, timeoutMs: 90000, retries: 3 };
 const NONCE_MASK = 0xFFFFFFFFFFn;
@@ -131,6 +131,8 @@ const privateKey = PrivateKey.fromWIF(critKey.wif);
 st.sign(privateKey, publicKey);
 const stBytes = st.toBytes();
 const size = stBytes.length;
+// The on-chain tx hash of the signed transition (what the explorer shows).
+const registrationTxHash = st.hash(false);
 console.log(`signed create transition: ${size} B (limit ${MAX_STATE_TRANSITION_SIZE}, room ${MAX_STATE_TRANSITION_SIZE - size})`);
 if (size > MAX_STATE_TRANSITION_SIZE) throw new Error(`transition exceeds max size ${MAX_STATE_TRANSITION_SIZE}`);
 if (size > MAX_STATE_TRANSITION_SIZE - 1024) {
@@ -183,6 +185,7 @@ const entry = {
   costCredits: cost.toString(),
   sizeBytes: size,
   transitionSha256: createHash('sha256').update(stBytes).digest('hex'),
+  registrationTxHash,
 };
 record.contracts = record.contracts ?? {};
 record.contracts[mode] = entry;

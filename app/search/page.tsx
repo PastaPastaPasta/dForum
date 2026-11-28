@@ -1,14 +1,10 @@
 import type { Metadata } from 'next'
-import SearchClient from '@/components/SearchClient'
-import { loadSnapshot } from '@/lib/services/snapshot-server'
+import { liveContext, site } from '@/lib/server/site-data'
+import { Search } from '@/components/site/Search'
 
-export const metadata: Metadata = {
-  title: 'Search',
-  description: 'Search dForum threads by title, tag or forum.',
-  alternates: { canonical: '/search/' },
-}
+export const metadata: Metadata = { title: 'Search', alternates: { canonical: '/search/' } }
 
 export default function SearchPage() {
-  const snap = loadSnapshot()
-  return <SearchClient snapshot={snap} />
+  const s = site()
+  return <Search ctx={liveContext()} forumTitles={Object.fromEntries(s.forums.map((f) => [f.id, f.title]))} />
 }

@@ -9,7 +9,7 @@
  */
 import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import bs58 from 'bs58'
-import { batchedWrite } from '@/lib/services/batch-write'
+import { batchedWrite, STALE_NONCE } from '@/lib/services/batch-write'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { hash160 } from '@/lib/auth/protocol'
@@ -29,6 +29,64 @@ export interface DocRef {
 }
 
 const SEQUENCE_MASK = (1n << 40n) - 1n
+
+/** Identifier-typed properties per document type (contracts/build.mjs). Writes must carry them as
+ * 32 raw bytes; reads normalize them to base58. */
+const IDENTIFIER_FIELDS: Record<string, readonly string[]> = {
+  forumSettings: ['archiveOwnerId'],
+  forum: ['categoryId', 'parentForumId'],
+  teamMember: ['memberId'],
+  thread: ['forumId', 'movedToForumId'],
+  post: ['threadId', 'forumId', 'replyToId'],
+  reaction: ['postId', 'postOwnerId', 'threadId'],
+  report: ['postId', 'threadId'],
+}
+
+function identifierBytes(v: string, label: string): Uint8Array {
+  const bytes = bs58.decode(v)
+  if (bytes.length !== 32) throw new Error(`${label} is not a 32-byte identifier`)
+  return bytes
+}
+
+/** Properties in the byte-preserving shape Document.fromObject needs: identifiers as raw bytes. */
+export function toWireProperties(type: string, properties: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(properties)) {
+    if (v === undefined || v === null) continue
+    out[k] = IDENTIFIER_FIELDS[type]?.includes(k) && typeof v === 'string' ? identifierBytes(v, `${type}.${k}`) : v
+  }
+  return out
+}
+
+/**
+ * Builds a WASM Document with Document.fromObject (the constructor round-trips properties
+ * through JSON and turns byte arrays into integer arrays, which consensus rejects). A create
+ * derives its id from entropy + the identity contract nonce, exactly as the transition will.
+ */
+async function buildDocument(input: {
+  type: string
+  ownerId: string
+  properties: Record<string, unknown>
+  revision: bigint
+  nonce: bigint
+  id?: string
+  entropy?: Uint8Array
+}) {
+  const sdk = await getSdk()
+  const { Document, PlatformVersion } = await import('@dashevo/evo-sdk')
+  const platformVersion = new PlatformVersion(sdk.version())
+  const id = input.id ?? bs58.encode(Document.generateId(input.type, input.ownerId, CONTRACT_ID, input.entropy as Uint8Array, input.nonce, platformVersion))
+  return Document.fromObject({
+    $formatVersion: '0',
+    $id: identifierBytes(id, 'document id'),
+    $ownerId: identifierBytes(input.ownerId, 'owner id'),
+    $dataContractId: identifierBytes(CONTRACT_ID, 'contract id'),
+    $type: input.type,
+    $revision: input.revision,
+    ...(input.entropy ? { $entropy: input.entropy } : {}),
+    ...toWireProperties(input.type, input.properties),
+  } as never, platformVersion)
+}
 
 // ---- normalization helpers --------------------------------------------------
 
@@ -84,9 +142,8 @@ function normalizeValue(value: unknown): unknown {
 function normalizeDoc(raw: unknown): DocRef | null {
   if (!raw) return null
   try {
-    const obj = typeof (raw as { toObject?: () => unknown }).toObject === 'function'
-      ? (raw as { toObject: () => Record<string, unknown> }).toObject()
-      : (raw as Record<string, unknown>)
+    const r = raw as { toJSON?: () => Record<string, unknown>; toObject?: () => Record<string, unknown> }
+    const obj = typeof r.toJSON === 'function' ? r.toJSON() : typeof r.toObject === 'function' ? r.toObject() : (raw as Record<string, unknown>)
     if (!obj || typeof obj !== 'object') return null
 
     const id = identifierify(obj.$id ?? obj.id)
@@ -113,7 +170,7 @@ function normalizeDoc(raw: unknown): DocRef | null {
       ownerId,
       dataContractId,
       documentTypeName: String(documentTypeName),
-      revision: revisionRaw !== undefined ? BigInt(typeof revisionRaw === 'bigint' ? revisionRaw : Number(revisionRaw)) : 1n,
+      revision: revisionRaw !== undefined && revisionRaw !== null ? BigInt(typeof revisionRaw === 'bigint' ? revisionRaw : Number(revisionRaw)) : 1n,
       createdAt: createdAtRaw ? Number(createdAtRaw) : 0,
       updatedAt: updatedAtRaw ? Number(updatedAtRaw) : 0,
       properties: props,
@@ -175,25 +232,6 @@ export async function queryRaw(
   const keys = [...page.keys()]
   const lastId = keys.length > 0 ? String(keys[keys.length - 1]) : null
   return { docs: out, rawCount: page.size, lastId }
-}
-
-export async function count(
-  type: string,
-  options: {
-    where?: [string, string, unknown][]
-    groupBy?: string[]
-  } = {},
-): Promise<Map<string, bigint>> {
-  const sdk = await getSdk()
-  const map = await sdk.documents.count({
-    dataContractId: CONTRACT_ID,
-    documentTypeName: type,
-    where: options.where as never,
-    groupBy: options.groupBy ?? [],
-  })
-  const out = new Map<string, bigint>()
-  for (const [key, value] of map.entries()) out.set(String(key), value)
-  return out
 }
 
 export async function get(type: string, documentId: string): Promise<DocRef | null> {
@@ -319,10 +357,47 @@ function securityLevelNumber(level: string): number {
   }
 }
 
+// The last nonce this tab handed out per identity. A node that hasn't seen our previous write yet would
+// hand back the same nonce (40204 "nonce already present at tip"); never go backwards.
+const usedNonce = new Map<string, bigint>()
+
 async function freshNonce(identityId: string): Promise<bigint> {
   const sdk = await getSdk()
   const raw = (await sdk.wasm.getIdentityContractNonce(identityId, CONTRACT_ID)) ?? 0n
-  return (raw & SEQUENCE_MASK) + 1n
+  const chainNext = (raw & SEQUENCE_MASK) + 1n
+  const mine = (usedNonce.get(identityId) ?? 0n) + 1n
+  const next = chainNext > mine ? chainNext : mine
+  // Reserved now, so writes running at the same time in this tab (reacting to two posts quickly)
+  // take different nonces. A write that fails leaves a gap, which Platform tolerates; the landed
+  // check keeps the stale-nonce retry from duplicating a write that went through.
+  usedNonce.set(identityId, next)
+  return next
+}
+
+/** Records a nonce once its write went through, so the next write in this tab starts above it. */
+function nonceUsed(identityId: string, nonce: bigint) {
+  if ((usedNonce.get(identityId) ?? 0n) < nonce) usedNonce.set(identityId, nonce)
+}
+
+
+/** Runs a write once more when the chosen nonce turned out stale (the write did not happen). */
+async function withNonceRetry<T>(identityId: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write()
+  } catch (e) {
+    const text = String((e as { message?: unknown })?.message ?? e)
+    // Too many failed writes left the reserved nonce too far ahead: start again from the chain's.
+    if (/too far in (the )?future/i.test(text)) {
+      usedNonce.delete(identityId)
+      return write()
+    }
+    if (!STALE_NONCE.test(text)) throw e
+    // The message prints the chain's nonce as "24" or "Some(24)".
+    const current = text.match(/current identity nonce is (?:Some\()?(\d+)/)?.[1]
+    if (current) nonceUsed(identityId, BigInt(current))
+    await new Promise((r) => setTimeout(r, 1500))
+    return write()
+  }
 }
 
 export async function createDocument(
@@ -331,22 +406,24 @@ export async function createDocument(
   authKeyWif: string,
   properties: Record<string, unknown>,
 ): Promise<DocRef> {
+  return withNonceRetry(identityId, () => createOnce(type, identityId, authKeyWif, properties))
+}
+
+async function createOnce(
+  type: string,
+  identityId: string,
+  authKeyWif: string,
+  properties: Record<string, unknown>,
+): Promise<DocRef> {
   const sdk = await getSdk()
-  const { Document } = await getSdkClasses()
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
   try {
     const entropy = crypto.getRandomValues(new Uint8Array(32))
     const nonce = await freshNonce(identityId)
-    const document = new Document({
-      properties: stripModeratorFields(type, properties),
-      documentTypeName: type,
-      dataContractId: CONTRACT_ID,
-      ownerId: identityId,
-      revision: 1n,
-      entropy,
-      identityContractNonce: nonce,
+    const document = await buildDocument({
+      type, ownerId: identityId, properties: stripModeratorFields(type, properties), revision: 1n, nonce, entropy,
     })
     if (sign.bound) {
       // Contract-bound keys sign batches only (20013 otherwise).
@@ -357,7 +434,9 @@ export async function createDocument(
         nonce,
         authKeyWif,
         identityKey: sign.identityKey as never,
+        landed: async (id) => !!(await get(type, id)),
       })
+      nonceUsed(identityId, nonce)
       const after = await get(type, documentId).catch(() => null)
       return after ?? {
         id: documentId,
@@ -371,6 +450,7 @@ export async function createDocument(
       }
     }
     const created = await sdk.documents.create({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+    nonceUsed(identityId, nonce)
     const normalized = normalizeDoc(created)
     if (!normalized) throw new Error('Document create returned an unreadable document')
     return normalized
@@ -385,8 +465,16 @@ export async function replaceDocument(
   authKeyWif: string,
   properties: Record<string, unknown>,
 ): Promise<DocRef> {
+  return withNonceRetry(identityId, () => replaceOnce(existing, identityId, authKeyWif, properties))
+}
+
+async function replaceOnce(
+  existing: DocRef,
+  identityId: string,
+  authKeyWif: string,
+  properties: Record<string, unknown>,
+): Promise<DocRef> {
   const sdk = await getSdk()
-  const { Document } = await getSdkClasses()
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
@@ -396,17 +484,12 @@ export async function replaceDocument(
     // never set them.
     const updatedProps = buildAuthorUpdate(existing.documentTypeName, existing.properties, properties)
     const nonce = await freshNonce(identityId)
-    const document = new Document({
-      properties: updatedProps,
-      documentTypeName: existing.documentTypeName,
-      dataContractId: CONTRACT_ID,
-      ownerId: identityId,
-      revision: existing.revision + 1n,
-      id: existing.id,
-      identityContractNonce: nonce,
+    const document = await buildDocument({
+      type: existing.documentTypeName, ownerId: identityId, properties: updatedProps, revision: existing.revision + 1n, nonce, id: existing.id,
     })
     if (sign.bound) {
       // Contract-bound keys sign batches only (20013 otherwise).
+      const nextRevision = existing.revision + 1n
       await batchedWrite({
         kind: 'replace',
         document,
@@ -414,7 +497,12 @@ export async function replaceDocument(
         nonce,
         authKeyWif,
         identityKey: sign.identityKey as never,
+        landed: async (id) => {
+          const now = await get(existing.documentTypeName, id)
+          return !!now && now.revision >= nextRevision && now.updatedAt > existing.updatedAt
+        },
       })
+      nonceUsed(identityId, nonce)
       // The chain wrote the document — a re-read failure is not a write
       // failure. Report honestly: return what the write produced.
       const after = await get(existing.documentTypeName, existing.id).catch(() => null)
@@ -431,6 +519,7 @@ export async function replaceDocument(
       }
     }
     await sdk.documents.replace({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+    nonceUsed(identityId, nonce)
     // The chain wrote the document — a re-read failure is not a write
     // failure. Report honestly: return what the write produced.
     const after = await get(existing.documentTypeName, existing.id).catch(() => null)

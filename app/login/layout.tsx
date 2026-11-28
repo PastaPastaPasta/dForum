@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Login with Dash',
-  description: 'Sign in to dForum with your Dash identity. Not indexed.',
+  title: 'Log in with Dash',
+  description: 'Log in with your Dash wallet to post, reply and react.',
   robots: { index: false },
 }
 

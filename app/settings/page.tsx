@@ -2,331 +2,125 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Loader2, LogOut, Save, AlertCircle, ShieldCheck } from 'lucide-react'
-import { Navbar } from '@/components/Navbar'
-import { Footer } from '@/components/Footer'
-import { Avatar } from '@/components/Avatar'
+import { Loader2 } from 'lucide-react'
 import { useSession } from '@/lib/session'
-import { query, createDocument, replaceDocument } from '@/lib/services/document-service'
-import { LIMITS } from '@/lib/constants'
-import { redactWif } from '@/lib/redact'
-import { shortId, safeHttpUrl, codePointSlice, codePointLength } from '@/lib/utils'
+import { KeyNotice } from '@/components/site/KeyNotice'
 import { LOGIN_AVAILABLE } from '@/lib/host'
+import { saveProfile } from '@/lib/forum/actions'
+import { str } from '@/lib/forum/model'
+import { queryPage } from '@/lib/live/platform'
+import { writeFailureMessage } from '@/lib/services/write-errors'
+import { Avatar } from '@/components/ui/Avatar'
 
-interface ProfileDraft {
-  displayName: string
-  bio: string
-  website: string
-  signature: string
+const FIELDS = [
+  { key: 'displayName', label: 'Display name', max: 40, hint: 'Shown on your posts. Names are not unique; your identity id is.' },
+  { key: 'location', label: 'Location', max: 60 },
+  { key: 'website', label: 'Website', max: 200, hint: 'Starts with https:// or http://' },
+  { key: 'avatarUrl', label: 'Avatar image URL', max: 300, hint: 'An https:// image. Leave empty for initials.' },
+  { key: 'bio', label: 'About you', max: 1000, area: true, hint: 'Markdown supported.' },
+  { key: 'signature', label: 'Signature', max: 300, area: true, hint: 'Shown under each of your posts.' },
+] as const
+
+type Draft = Record<(typeof FIELDS)[number]['key'], string>
+const EMPTY: Draft = { displayName: '', location: '', website: '', avatarUrl: '', bio: '', signature: '' }
+
+function validate(d: Draft): string | null {
+  if (!d.displayName.trim()) return 'Enter a display name.'
+  if (d.website && !/^https?:\/\/\S+$/.test(d.website.trim())) return 'The website must start with https:// or http://.'
+  if (d.avatarUrl && !/^https:\/\/\S+$/.test(d.avatarUrl.trim())) return 'The avatar URL must start with https://.'
+  return null
 }
 
-const EMPTY: ProfileDraft = { displayName: '', bio: '', website: '', signature: '' }
-
 export default function SettingsPage() {
-  const { session, ready, signOut } = useSession()
-  const [draft, setDraft] = useState<ProfileDraft>(EMPTY)
-  const [profileId, setProfileId] = useState<string | null>(null)
-  const [revision, setRevision] = useState<bigint>(1n)
-  const [existingProps, setExistingProps] = useState<Record<string, unknown>>({})
-  const [loaded, setLoaded] = useState(false)
-  const [loadError, setLoadError] = useState(false)
+  const { session, ready, signOut, keyState } = useSession()
+  const [draft, setDraft] = useState<Draft>(EMPTY)
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [fieldError, setFieldError] = useState<{ displayName?: string; website?: string } | null>(null)
-  const [saved, setSaved] = useState(false)
-  const [signingOut, setSigningOut] = useState(false)
-
-  const identityId = session?.identityId ?? null
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
-    if (!identityId || !ready) return
-    let cancelled = false
-    query('profile', { where: [['$ownerId', '==', identityId]], limit: 1 })
-      .then((docs) => {
-        if (cancelled) return
-        const doc = docs[0]
-        if (doc) {
-          const p = doc.properties
-          setDraft({
-            displayName: (p.displayName as string) ?? '',
-            bio: (p.bio as string) ?? '',
-            website: (p.website as string) ?? '',
-            signature: (p.signature as string) ?? '',
-          })
-          setProfileId(doc.id)
-          setRevision(doc.revision)
-          setExistingProps({ ...p })
-        } else {
-          setDraft({ ...EMPTY, displayName: '' })
-          setProfileId(null)
-          setRevision(1n)
-          setExistingProps({})
-        }
-        setLoaded(true)
+    if (!session) return
+    let alive = true
+    queryPage('profile', { where: [['$ownerId', '==', session.identityId]], limit: 1 })
+      .then(({ docs }) => {
+        if (!alive) return
+        const p = docs[0]
+        if (p) setDraft((cur) => (cur === EMPTY ? (Object.fromEntries(FIELDS.map((f) => [f.key, str(p, f.key) ?? ''])) as Draft) : cur))
+        setState('ready')
       })
-      .catch(() => {
-        // Never silently treat a failed load as "no profile exists" — that
-        // would make save create a duplicate profile instead of updating one.
-        if (!cancelled) {
-          setLoadError(true)
-          setLoaded(true)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [identityId, ready])
+      .catch(() => alive && setState('error'))
+    return () => { alive = false }
+  }, [session])
 
-  if (!ready) {
-    // Session unresolved — a neutral skeleton, not the real page behind a
-    // half-loaded session (the navbar shows not-signed-in for a moment).
-    return (
-      <>
-        <Navbar />
-        <main id="main" tabIndex={-1} className="flex-1">
-          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12" aria-busy="true" aria-live="polite">
-            <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Loading…</p>
-            <div className="mt-6 rounded-xl border border-[#22304e] bg-[#111a2e] p-4 flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-[#18233c] animate-pulse" aria-hidden="true" />
-              <div className="flex-1 space-y-2">
-                <div className="h-4 w-40 rounded bg-[#18233c] animate-pulse" aria-hidden="true" />
-                <div className="h-3 w-24 rounded bg-[#18233c] animate-pulse" aria-hidden="true" />
-              </div>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </>
-    )
-  }
-
+  if (!ready) return <p role="status" className="py-10 text-center text-ink-2">Loading…</p>
   if (!session) {
     return (
-      <>
-        <Navbar />
-        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center px-6">
-          <div className="text-center fade-up">
-            <p className="text-sm uppercase tracking-widest text-[#93a1bd]">Login required</p>
-            <h1 className="text-2xl font-bold mt-2">Sign in to manage your profile</h1>
-            {LOGIN_AVAILABLE ? (
-              <Link href="/login?next=/settings" className="mt-6 btn-primary">Login with Dash</Link>
-            ) : (
-              <p className="mt-6 text-sm text-[#93a1bd]">Read-only deployment — sign in on forum.dashhq.org</p>
-            )}
-          </div>
-        </main>
-        <Footer />
-      </>
+      <div className="panel mx-auto max-w-md p-8 text-center">
+        <h1 className="text-xl font-semibold">Settings</h1>
+        <p className="mt-2 text-ink-2">Log in to edit your profile.</p>
+        {LOGIN_AVAILABLE && <Link href="/login/?next=/settings/" className="btn btn-primary mt-4">Log in with Dash</Link>}
+      </div>
     )
   }
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault()
-    if (saving) return // a save is in flight — never start a duplicate write
-    if (!session || !session.authKeyWif) {
-      setError('Your session has no signable key. Try logging in again.')
-      return
-    }
-    if (!loaded || loadError) return
-
-    const displayName = codePointSlice(draft.displayName.trim(), LIMITS.displayName)
-    const website = draft.website.trim()
-    const errs: { displayName?: string; website?: string } = {}
-    if (!displayName) errs.displayName = 'Display name is required.'
-    if (website && !safeHttpUrl(website)) errs.website = 'Website must be a full http(s) URL, e.g. https://example.com'
-    if (Object.keys(errs).length) { setFieldError(errs); return }
-    setFieldError(null)
-
+  const save = async () => {
+    const problem = validate(draft)
+    if (problem) { setMessage({ ok: false, text: problem }); return }
+    if (!session.authKeyWif) return
     setSaving(true)
-    setError(null)
-    setSaved(false)
+    setMessage(null)
     try {
-      const properties = {
-        displayName,
-        bio: codePointSlice(draft.bio.trim(), LIMITS.bio),
-        website: safeHttpUrl(website) ?? '',
-        signature: codePointSlice(draft.signature.trim(), LIMITS.signature),
-      }
-      if (profileId) {
-        // Moderator-owned fields (customTitle, modState) are never sent by the
-        // author — the contract rejects them and document-service's
-        // buildAuthorUpdate passes the stored values through unchanged.
-        const updated = await replaceDocument(
-          {
-            id: profileId,
-            ownerId: identityId ?? '',
-            dataContractId: '',
-            documentTypeName: 'profile',
-            revision,
-            createdAt: 0,
-            updatedAt: 0,
-            properties: existingProps as Record<string, unknown>,
-          },
-          identityId ?? '',
-          session.authKeyWif,
-          properties,
-        )
-        setRevision(updated.revision)
-        setExistingProps({ ...updated.properties })
-      } else {
-        const created = await createDocument('profile', identityId ?? '', session.authKeyWif, properties)
-        setProfileId(created.id)
-        setRevision(created.revision)
-        setExistingProps({ ...properties })
-      }
-      setSaved(true)
+      await saveProfile({ identityId: session.identityId, authKeyWif: session.authKeyWif }, draft)
+      setMessage({ ok: true, text: 'Profile saved to Dash Platform.' })
     } catch (e) {
-      setError(redactWif(e instanceof Error ? e.message : 'Failed to save — try again in a moment'))
+      const f = writeFailureMessage(e)
+      setMessage({ ok: false, text: f.message })
+      if (f.sessionLogout) void signOut()
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleSignOut() {
-    setSigningOut(true)
-    try {
-      await signOut()
-    } finally {
-      setSigningOut(false)
-    }
-  }
-
   return (
-    <>
-      <Navbar />
-      <main id="main" tabIndex={-1} className="flex-1">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-          {identityId && (
-            <Link href={`/u/${encodeURIComponent(identityId)}`} className="text-sm text-[#93a1bd] hover:text-white transition">← Profile</Link>
-          )}
-          <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">Settings</h1>
-          <p className="mt-1 text-sm text-[#93a1bd]">Your profile lives on-chain — every save is a platform write.</p>
-
-          <div className="mt-6 flex items-center gap-4 rounded-xl border border-[#22304e] bg-[#111a2e] p-4">
-            <Avatar name={draft.displayName || identityId || 'dForum'} id={identityId ?? null} />
-            <div className="min-w-0">
-              <p className="font-medium truncate">{draft.displayName || shortId(identityId ?? '', 20)}</p>
-              <p className="text-xs font-mono text-[#93a1bd] truncate">{identityId ? shortId(identityId, 24) : '…'}</p>
-            </div>
-          </div>
-
-          {!loaded ? (
-            <div className="mt-8 rounded-xl border border-dashed border-[#22304e] p-8 text-center">
-              <Loader2 className="w-5 h-5 animate-spin text-[#4db3ff] mx-auto" aria-hidden="true" />
-              <p className="mt-2 text-sm text-[#93a1bd]">Loading your profile…</p>
-            </div>
-          ) : loadError ? (
-            <div className="mt-8 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4 text-center text-sm text-amber-400">
-              Couldn&apos;t load your current profile — saving is disabled so we don&apos;t overwrite or duplicate it. Reload and try again.
-            </div>
-          ) : (
-            <form noValidate onSubmit={handleSave} className="mt-6 space-y-5">
-              <div>
-                <label htmlFor="displayName" className="text-sm font-medium text-[#93a1bd]">Display name</label>
-                <input
-                  id="displayName"
-                  value={draft.displayName}
-                  onChange={(e) => { setDraft((d) => ({ ...d, displayName: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.displayName}
-                  aria-invalid={Boolean(fieldError?.displayName)}
-                  aria-describedby={fieldError?.displayName ? 'displayName-error' : undefined}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
-                  placeholder="Your display name"
-                />
-                {fieldError?.displayName ? (
-                  <p id="displayName-error" className="mt-1 text-xs text-red-400">{fieldError.displayName}</p>
-                ) : (
-                  <CharCount count={codePointLength(draft.displayName)} max={LIMITS.displayName} />
-                )}
-              </div>
-              <div>
-                <label htmlFor="bio" className="text-sm font-medium text-[#93a1bd]">Bio</label>
-                <textarea
-                  id="bio"
-                  value={draft.bio}
-                  onChange={(e) => { setDraft((d) => ({ ...d, bio: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.bio}
-                  rows={4}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] p-3 text-base sm:text-sm focus:border-[#008CE7] w-full resize-y"
-                  placeholder="A short bio — what you post about."
-                />
-                <CharCount count={codePointLength(draft.bio)} max={LIMITS.bio} />
-              </div>
-              <div>
-                <label htmlFor="website" className="text-sm font-medium text-[#93a1bd]">Website <span className="text-[#93a1bd] font-normal">(optional)</span></label>
-                <input
-                  id="website"
-                  type="url"
-                  inputMode="url"
-                  value={draft.website}
-                  onChange={(e) => { setDraft((d) => ({ ...d, website: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.website}
-                  aria-invalid={Boolean(fieldError?.website)}
-                  aria-describedby={fieldError?.website ? 'website-error' : 'website-hint'}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
-                  placeholder="https://yoursite.com"
-                />
-                {fieldError?.website ? (
-                  <p id="website-error" className="mt-1 text-xs text-red-400">{fieldError.website}</p>
-                ) : (
-                  <p id="website-hint" className="mt-1 text-xs text-[#93a1bd]">Full http(s) URL only — this is rendered as a link on your profile.</p>
-                )}
-              </div>
-              <div>
-                <label htmlFor="signature" className="text-sm font-medium text-[#93a1bd]">Signature <span className="text-[#93a1bd] font-normal">(shown on your profile)</span></label>
-                <input
-                  id="signature"
-                  value={draft.signature}
-                  onChange={(e) => { setDraft((d) => ({ ...d, signature: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.signature}
-                  className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
-                  placeholder="Shown on your profile"
-                />
-                <CharCount count={codePointLength(draft.signature)} max={LIMITS.signature} />
-              </div>
-
-              {error && (
-                <div className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300" role="alert">
-                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="btn-primary px-5 py-3 font-semibold"
-                >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Save className="w-4 h-4" aria-hidden="true" />}
-                  {saving ? 'Saving…' : saved ? 'Saved' : 'Save profile'}
-                </button>
-                {saved && !saving && (
-                  <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400" role="status"><ShieldCheck className="w-4 h-4" aria-hidden="true" /> Saved to the platform</span>
-                )}
-              </div>
-            </form>
-          )}
-
-          <div className="mt-10 border-t border-[#22304e] pt-6">
-            <h2 className="text-sm font-medium text-[#93a1bd] uppercase tracking-wider">Session</h2>
-            <p className="mt-2 text-sm text-[#93a1bd]">Your session is held in this tab&apos;s session storage until you log out or the browser session ends — signing out clears your keys from this browser.</p>
-            <button
-              onClick={handleSignOut}
-              disabled={signingOut}
-              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-500/40 text-red-300 px-4 py-2 text-sm hover:bg-red-500/10 transition disabled:opacity-50"
-            >
-              <LogOut className="w-4 h-4" />
-              {signingOut ? 'Signing out…' : 'Sign out'}
-            </button>
+    <div className="mx-auto max-w-2xl space-y-6">
+      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+      <section className="panel space-y-4 p-5" aria-labelledby="profile-h">
+        <div className="flex items-center gap-4">
+          <Avatar seed={session.identityId} name={draft.displayName || session.identityId} src={draft.avatarUrl} size={64} />
+          <div className="min-w-0">
+            <h2 id="profile-h" className="font-semibold">Public profile</h2>
+            <p className="truncate font-mono text-xs text-ink-2">{session.identityId}</p>
           </div>
         </div>
-      </main>
-      <Footer />
-    </>
+        {state === 'loading' && <p role="status" className="text-ink-2"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading your profile from Dash Platform…</p>}
+        {state === 'error' && <p role="alert" className="text-danger">Couldn&apos;t load your profile from Dash Platform, so editing is paused to avoid overwriting it. Reload the page to try again.</p>}
+        <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void save() }}>
+          <KeyNotice />
+          <fieldset disabled={state !== 'ready'} className="space-y-4 disabled:opacity-60">
+          {FIELDS.map((f) => (
+            <label key={f.key} className="block">
+              <span className="text-sm font-medium">{f.label}</span>
+              {'area' in f && f.area ? (
+                <textarea className="field mt-1 min-h-[6rem]" maxLength={f.max} value={draft[f.key]} onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })} />
+              ) : (
+                <input className="field mt-1" maxLength={f.max} value={draft[f.key]} onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })} />
+              )}
+              {'hint' in f && f.hint && <span className="mt-1 block text-xs text-ink-2">{f.hint}</span>}
+            </label>
+          ))}
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="btn btn-primary" disabled={saving || state === 'loading' || keyState !== 'ready'}>{saving ? 'Saving…' : 'Save profile'}</button>
+            <Link href={`/u/${session.identityId}/`} className="link text-sm">View your profile</Link>
+          </div>
+          {message && <p role={message.ok ? 'status' : 'alert'} className={message.ok ? 'text-live' : 'text-danger'}>{message.text}</p>}
+          </fieldset>
+        </form>
+      </section>
+      <section className="panel space-y-2 p-5 text-sm" aria-labelledby="session-h">
+        <h2 id="session-h" className="font-semibold">This browser</h2>
+        <p className="text-ink-2">This tab holds a forum-only key your wallet created. Logging out removes it from this tab. To revoke the key itself, disconnect the forum in your Dash wallet.</p>
+        <button type="button" className="btn btn-quiet" onClick={() => void signOut()}>Log out</button>
+      </section>
+    </div>
   )
-}
-
-function CharCount({ count, max }: { count: number; max: number }) {
-  return <p className="mt-1 text-xs text-[#93a1bd] text-right">{count}/{max}</p>
 }

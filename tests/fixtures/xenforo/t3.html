@@ -1,0 +1,2979 @@
+<!DOCTYPE html>
+<html id="XF" lang="en-US" dir="LTR"
+	data-app="public"
+	data-template="thread_view"
+	data-container-key="node-54"
+	data-content-key="thread-55335"
+	data-logged-in="false"
+	data-cookie-prefix="xf_"
+	data-csrf="1736762959,2bb2b88f359b54864a2fd540b40e4422"
+	class="has-no-js template-thread_view"
+	>
+<head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+	
+	
+	
+
+	<title>Announcing DIP 27 - Dash Core Credit Pool | Dash Forum</title>
+
+	<link rel="manifest" href="/forum/webmanifest.php">
+	
+		<meta name="theme-color" content="#008de4" />
+	
+
+	<meta name="apple-mobile-web-app-title" content="Dash Forum">
+	
+
+	
+		
+		<meta name="description" content="We&#039;re pleased to announce the release of DIP 27! This new proposal describes the mechanism for locking and unlocking Dash in a new store of value on the..." />
+		<meta property="og:description" content="We&#039;re pleased to announce the release of DIP 27! This new proposal describes the mechanism for locking and unlocking Dash in a new store of value on the Core chain. The store of value, called the credit pool, mirrors the credit balance on Dash Platform. New special transactions (asset lock and..." />
+		<meta property="twitter:description" content="We&#039;re pleased to announce the release of DIP 27! This new proposal describes the mechanism for locking and unlocking Dash in a new store of value on the Core chain. The store of value, called the..." />
+	
+	
+		<meta property="og:url" content="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+	
+		<link rel="canonical" href="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+	
+
+	
+		
+	
+	
+	<meta property="og:site_name" content="Dash Forum" />
+
+
+	
+	
+		
+	
+	
+	<meta property="og:type" content="website" />
+
+
+	
+	
+		
+	
+	
+	
+		<meta property="og:title" content="Announcing DIP 27 - Dash Core Credit Pool" />
+		<meta property="twitter:title" content="Announcing DIP 27 - Dash Core Credit Pool" />
+	
+
+
+	
+	
+	
+	
+
+	
+	
+
+	
+
+
+	<link rel="preload" href="/forum/styles/fonts/fa/fa-regular-400.woff2?_v=5.15.3" as="font" type="font/woff2" crossorigin="anonymous" />
+
+
+	<link rel="preload" href="/forum/styles/fonts/fa/fa-solid-900.woff2?_v=5.15.3" as="font" type="font/woff2" crossorigin="anonymous" />
+
+
+<link rel="preload" href="/forum/styles/fonts/fa/fa-brands-400.woff2?_v=5.15.3" as="font" type="font/woff2" crossorigin="anonymous" />
+
+	<link rel="stylesheet" href="/forum/css.php?css=public%3Anormalize.css%2Cpublic%3Afa.css%2Cpublic%3Acore.less%2Cpublic%3Aapp.less&amp;s=1&amp;l=1&amp;d=1735815695&amp;k=63ac87b38e7b347ba0a1b834957bfdf9ac643dea" />
+
+	<link rel="stylesheet" href="/forum/css.php?css=public%3Abb_code.less%2Cpublic%3Alightbox.less%2Cpublic%3Amessage.less%2Cpublic%3Ashare_controls.less%2Cpublic%3Aextra.less&amp;s=1&amp;l=1&amp;d=1735815695&amp;k=7d863bab97b4b3c6573c4f6ecac4d5b86a7b3f8f" />
+
+	
+		<script src="/forum/js/xf/preamble.min.js?_v=67acfccc"></script>
+	
+
+
+	
+		<link rel="icon" type="image/png" href="https://www.dash.org/forum/data/assets/logo/favicon-32x32.png" sizes="32x32" />
+	
+	
+	
+		<script async src="/forum/jc/gtm.js?_v=67acfccc"></script>
+	
+	<script>
+		window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date);gtag('config','G-F6J6TW9S3N',{'style_id':1,'node_id':54,'node_title':'Official Announcements','thread_id':55335,'thread_title':'Announcing DIP 27 - Dash Core Credit Pool','thread_author':'thephez',});
+!function(b,c){"object"==typeof console&&"function"==typeof console.error&&(console.error_old=console.error,console.error=function(){console.error_old.apply(this,arguments);b.gtag("event","exception",{error_type:"console",error_message:arguments[0],fatal:!1})});b.onerror=function(a,d,e){b.gtag("event","exception",{error_type:"javascript",error_message:a,error_location:d,error_line_number:e,fatal:!1})};b.onload=function(){c.querySelectorAll("img").forEach(a=>{a.complete&&0===a.naturalWidth&&b.gtag("event",
+"exception",{error_type:"image",error_message:"not_loaded",error_location:a.src,fatal:!1})})}}(window,document);
+	</script>
+
+</head>
+<body data-template="thread_view">
+
+<div class="p-pageWrapper" id="top">
+
+
+
+
+
+<header class="p-header" id="header">
+	<div class="p-header-inner">
+		<div class="p-header-content">
+
+			<div class="p-header-logo p-header-logo--image">
+				<a href="/forum/">
+					<img src="/forum/data/assets/logo/dash_logo_2018_white-128.png" srcset="" alt="Dash Forum"
+						width="" height="" />
+				</a>
+			</div>
+
+			
+		</div>
+	</div>
+</header>
+
+
+
+
+
+	<div class="p-navSticky p-navSticky--primary" data-xf-init="sticky-header">
+		
+	<nav class="p-nav">
+		<div class="p-nav-inner">
+			<button type="button" class="button--plain p-nav-menuTrigger button" data-xf-click="off-canvas" data-menu=".js-headerOffCanvasMenu" tabindex="0" aria-label="Menu"><span class="button-text">
+				<i aria-hidden="true"></i>
+			</span></button>
+
+			<div class="p-nav-smallLogo">
+				<a href="/forum/">
+					<img src="/forum/data/assets/logo/dash_logo_2018_white-128.png" srcset="" alt="Dash Forum"
+						width="" height="" />
+				</a>
+			</div>
+
+			<div class="p-nav-scroller hScroller" data-xf-init="h-scroller" data-auto-scroll=".p-navEl.is-selected">
+				<div class="hScroller-scroll">
+					<ul class="p-nav-list js-offCanvasNavSource">
+					
+						<li>
+							
+	<div class="p-navEl is-selected" data-has-children="true">
+		
+
+			
+	
+	<a href="/forum/"
+		class="p-navEl-link p-navEl-link--splitMenu "
+		
+		
+		data-nav-id="forums">Forums</a>
+
+
+			<a data-xf-key="1"
+				data-xf-click="menu"
+				data-menu-pos-ref="< .p-navEl"
+				class="p-navEl-splitTrigger"
+				role="button"
+				tabindex="0"
+				aria-label="Toggle expanded"
+				aria-expanded="false"
+				aria-haspopup="true"></a>
+
+		
+		
+			<div class="menu menu--structural" data-menu="menu" aria-hidden="true">
+				<div class="menu-content">
+					
+						
+	
+	
+	<a href="/forum/whats-new/posts/"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="newPosts">New posts</a>
+
+	
+
+					
+						
+	
+	
+	<a href="/forum/search/?type=post"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="searchForums">Search forums</a>
+
+	
+
+					
+				</div>
+			</div>
+		
+	</div>
+
+						</li>
+					
+						<li>
+							
+	<div class="p-navEl " data-has-children="true">
+		
+
+			
+	
+	<a href="/forum/whats-new/"
+		class="p-navEl-link p-navEl-link--splitMenu "
+		
+		
+		data-nav-id="whatsNew">What's new</a>
+
+
+			<a data-xf-key="2"
+				data-xf-click="menu"
+				data-menu-pos-ref="< .p-navEl"
+				class="p-navEl-splitTrigger"
+				role="button"
+				tabindex="0"
+				aria-label="Toggle expanded"
+				aria-expanded="false"
+				aria-haspopup="true"></a>
+
+		
+		
+			<div class="menu menu--structural" data-menu="menu" aria-hidden="true">
+				<div class="menu-content">
+					
+						
+	
+	
+	<a href="/forum/whats-new/posts/"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		 rel="nofollow"
+		
+		data-nav-id="whatsNewPosts">New posts</a>
+
+	
+
+					
+						
+	
+	
+	<a href="/forum/whats-new/latest-activity"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		 rel="nofollow"
+		
+		data-nav-id="latestActivity">Latest activity</a>
+
+	
+
+					
+				</div>
+			</div>
+		
+	</div>
+
+						</li>
+					
+						<li>
+							
+	<div class="p-navEl " data-has-children="true">
+		
+
+			
+	
+	<a href="/forum/members/"
+		class="p-navEl-link p-navEl-link--splitMenu "
+		
+		
+		data-nav-id="members">Members</a>
+
+
+			<a data-xf-key="3"
+				data-xf-click="menu"
+				data-menu-pos-ref="< .p-navEl"
+				class="p-navEl-splitTrigger"
+				role="button"
+				tabindex="0"
+				aria-label="Toggle expanded"
+				aria-expanded="false"
+				aria-haspopup="true"></a>
+
+		
+		
+			<div class="menu menu--structural" data-menu="menu" aria-hidden="true">
+				<div class="menu-content">
+					
+						
+	
+	
+	<a href="/forum/online/"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="currentVisitors">Current visitors</a>
+
+	
+
+					
+				</div>
+			</div>
+		
+	</div>
+
+						</li>
+					
+						<li>
+							
+	<div class="p-navEl " data-has-children="true">
+		
+
+			
+				<a data-xf-key="4"
+					data-xf-click="menu"
+					data-menu-pos-ref="< .p-navEl"
+					class="p-navEl-linkHolder"
+					role="button"
+					tabindex="0"
+					aria-expanded="false"
+					aria-haspopup="true">
+					
+	
+	<span 
+		class="p-navEl-link p-navEl-link--menuTrigger "
+		
+		
+		data-nav-id="dashLinks">Dash links</span>
+
+				</a>
+			
+
+		
+		
+			<div class="menu menu--structural" data-menu="menu" aria-hidden="true">
+				<div class="menu-content">
+					
+						
+	
+	
+	<a href="https://dash.org"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="dashWebsite">Main website</a>
+
+	
+
+					
+						
+	
+	
+	<a href="https://www.dash.org/downloads/"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="dashWallets">Wallets</a>
+
+	
+
+					
+						
+	
+	
+	<a href="https://www.dash.org/where-to-buy/"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="dashExchanges">Exchanges</a>
+
+	
+
+					
+						
+	
+	
+	<a href="https://www.dash.org/connect-with-us/"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="dashSocialMedia">Social media</a>
+
+	
+
+					
+						
+	
+	
+	<a href="https://www.dash.org/documentation/"
+		class="menu-linkRow u-indentDepth0 js-offCanvasCopy "
+		
+		
+		data-nav-id="dashDocumentation">Documentation</a>
+
+	
+
+					
+				</div>
+			</div>
+		
+	</div>
+
+						</li>
+					
+					</ul>
+				</div>
+			</div>
+
+			<div class="p-nav-opposite">
+				<div class="p-navgroup p-account p-navgroup--guest">
+					
+						<a href="/forum/login/" class="p-navgroup-link p-navgroup-link--textual p-navgroup-link--logIn"
+							data-xf-click="overlay" data-follow-redirects="on">
+							<span class="p-navgroup-linkText">Log in</span>
+						</a>
+						
+							<a href="/forum/register/" class="p-navgroup-link p-navgroup-link--textual p-navgroup-link--register"
+								data-xf-click="overlay" data-follow-redirects="on">
+								<span class="p-navgroup-linkText">Register</span>
+							</a>
+						
+					
+				</div>
+
+				<div class="p-navgroup p-discovery">
+					<a href="/forum/whats-new/"
+						class="p-navgroup-link p-navgroup-link--iconic p-navgroup-link--whatsnew"
+						aria-label="What&#039;s new"
+						title="What&#039;s new">
+						<i aria-hidden="true"></i>
+						<span class="p-navgroup-linkText">What's new</span>
+					</a>
+
+					
+						<a href="/forum/search/"
+							class="p-navgroup-link p-navgroup-link--iconic p-navgroup-link--search"
+							data-xf-click="menu"
+							data-xf-key="/"
+							aria-label="Search"
+							aria-expanded="false"
+							aria-haspopup="true"
+							title="Search">
+							<i aria-hidden="true"></i>
+							<span class="p-navgroup-linkText">Search</span>
+						</a>
+						<div class="menu menu--structural menu--wide" data-menu="menu" aria-hidden="true">
+							<form action="/forum/search/search" method="post"
+								class="menu-content"
+								data-xf-init="quick-search">
+
+								<h3 class="menu-header">Search</h3>
+								
+								<div class="menu-row">
+									
+										<div class="inputGroup inputGroup--joined">
+											<input type="text" class="input" name="keywords" placeholder="Search…" aria-label="Search" data-menu-autofocus="true" />
+											
+			<select name="constraints" class="js-quickSearch-constraint input" aria-label="Search within">
+				<option value="">Everywhere</option>
+<option value="{&quot;search_type&quot;:&quot;post&quot;}">Threads</option>
+<option value="{&quot;search_type&quot;:&quot;post&quot;,&quot;c&quot;:{&quot;nodes&quot;:[54],&quot;child_nodes&quot;:1}}">This forum</option>
+<option value="{&quot;search_type&quot;:&quot;post&quot;,&quot;c&quot;:{&quot;thread&quot;:55335}}">This thread</option>
+
+			</select>
+		
+										</div>
+									
+								</div>
+
+								
+								<div class="menu-row">
+									<label class="iconic"><input type="checkbox"  name="c[title_only]" value="1" /><i aria-hidden="true"></i><span class="iconic-label">Search titles only</span></label>
+
+								</div>
+								
+								<div class="menu-row">
+									<div class="inputGroup">
+										<span class="inputGroup-text" id="ctrl_search_menu_by_member">By:</span>
+										<input type="text" class="input" name="c[users]" data-xf-init="auto-complete" placeholder="Member" aria-labelledby="ctrl_search_menu_by_member" />
+									</div>
+								</div>
+								<div class="menu-footer">
+									<span class="menu-footer-controls">
+										<button type="submit" class="button--primary button button--icon button--icon--search"><span class="button-text">Search</span></button>
+										<a href="/forum/search/" class="button"><span class="button-text">Advanced search…</span></a>
+									</span>
+								</div>
+
+								<input type="hidden" name="_xfToken" value="1736762959,2bb2b88f359b54864a2fd540b40e4422" />
+							</form>
+						</div>
+					
+				</div>
+			</div>
+		</div>
+	</nav>
+
+	</div>
+	
+	
+		<div class="p-sectionLinks">
+			<div class="p-sectionLinks-inner hScroller" data-xf-init="h-scroller">
+				<div class="hScroller-scroll">
+					<ul class="p-sectionLinks-list">
+					
+						<li>
+							
+	<div class="p-navEl " >
+		
+
+			
+	
+	<a href="/forum/whats-new/posts/"
+		class="p-navEl-link "
+		
+		data-xf-key="alt+1"
+		data-nav-id="newPosts">New posts</a>
+
+
+			
+
+		
+		
+	</div>
+
+						</li>
+					
+						<li>
+							
+	<div class="p-navEl " >
+		
+
+			
+	
+	<a href="/forum/search/?type=post"
+		class="p-navEl-link "
+		
+		data-xf-key="alt+2"
+		data-nav-id="searchForums">Search forums</a>
+
+
+			
+
+		
+		
+	</div>
+
+						</li>
+					
+					</ul>
+				</div>
+			</div>
+		</div>
+	
+
+
+
+<div class="offCanvasMenu offCanvasMenu--nav js-headerOffCanvasMenu" data-menu="menu" aria-hidden="true" data-ocm-builder="navigation">
+	<div class="offCanvasMenu-backdrop" data-menu-close="true"></div>
+	<div class="offCanvasMenu-content">
+		<div class="offCanvasMenu-header">
+			Menu
+			<a class="offCanvasMenu-closer" data-menu-close="true" role="button" tabindex="0" aria-label="Close"></a>
+		</div>
+		
+			<div class="p-offCanvasRegisterLink">
+				<div class="offCanvasMenu-linkHolder">
+					<a href="/forum/login/" class="offCanvasMenu-link" data-xf-click="overlay" data-menu-close="true">
+						Log in
+					</a>
+				</div>
+				<hr class="offCanvasMenu-separator" />
+				
+					<div class="offCanvasMenu-linkHolder">
+						<a href="/forum/register/" class="offCanvasMenu-link" data-xf-click="overlay" data-menu-close="true">
+							Register
+						</a>
+					</div>
+					<hr class="offCanvasMenu-separator" />
+				
+			</div>
+		
+		<div class="js-offCanvasNavTarget"></div>
+		<div class="offCanvasMenu-installBanner js-installPromptContainer" style="display: none;" data-xf-init="install-prompt">
+			<div class="offCanvasMenu-installBanner-header">Install the app</div>
+			<button type="button" class="js-installPromptButton button"><span class="button-text">Install</span></button>
+			<template class="js-installTemplateIOS">
+				<div class="overlay-title">How to install the app on iOS</div>
+				<div class="block-body">
+					<div class="block-row">
+						<p>
+							Follow along with the video below to see how to install our site as a web app on your home screen.
+						</p>
+						<p style="text-align: center">
+							<video src="/forum/styles/default/xenforo/add_to_home.mp4"
+								width="280" height="480" autoplay loop muted playsinline></video>
+						</p>
+						<p>
+							<small><strong>Note:</strong> This feature may not be available in some browsers.</small>
+						</p>
+					</div>
+				</div>
+			</template>
+		</div>
+	</div>
+</div>
+
+<div class="p-body">
+	<div class="p-body-inner">
+		<!--XF:EXTRA_OUTPUT-->
+
+		
+
+		
+
+		
+		
+	
+		<ul class="p-breadcrumbs "
+			itemscope itemtype="https://schema.org/BreadcrumbList">
+		
+			
+
+			
+			
+
+			
+
+			
+				
+				
+	<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+		<a href="/forum/" itemprop="item">
+			<span itemprop="name">Forums</span>
+		</a>
+		<meta itemprop="position" content="1" />
+	</li>
+
+			
+			
+				
+				
+	<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+		<a href="/forum/#official-development-news-and-information.55" itemprop="item">
+			<span itemprop="name">Official Development News and Information.</span>
+		</a>
+		<meta itemprop="position" content="2" />
+	</li>
+
+			
+				
+				
+	<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+		<a href="/forum/forums/official-announcements.54/" itemprop="item">
+			<span itemprop="name">Official Announcements</span>
+		</a>
+		<meta itemprop="position" content="3" />
+	</li>
+
+			
+
+		
+		</ul>
+	
+
+		
+
+		
+	<noscript class="js-jsWarning"><div class="blockMessage blockMessage--important blockMessage--iconic u-noJsOnly">JavaScript is disabled. For a better experience, please enable JavaScript in your browser before proceeding.</div></noscript>
+
+		
+	<div class="blockMessage blockMessage--important blockMessage--iconic js-browserWarning" style="display: none">You are using an out of date browser. It  may not display this or other websites correctly.<br />You should upgrade or use an <a href="https://www.google.com/chrome/" target="_blank" rel="noopener">alternative browser</a>.</div>
+
+
+		
+			<div class="p-body-header">
+			
+				
+					<div class="p-title ">
+					
+						
+							<h1 class="p-title-value">Announcing DIP 27 - Dash Core Credit Pool</h1>
+						
+						
+					
+					</div>
+				
+
+				
+					<div class="p-description">
+	<ul class="listInline listInline--bullet">
+		<li>
+			<i class="fa--xf far fa-user" aria-hidden="true" title="Thread starter"></i>
+			<span class="u-srOnly">Thread starter</span>
+
+			<a href="/forum/members/thephez.4665/" class="username  u-concealed" dir="auto" data-user-id="4665" data-xf-init="member-tooltip">thephez</a>
+		</li>
+		<li>
+			<i class="fa--xf far fa-clock" aria-hidden="true" title="Start date"></i>
+			<span class="u-srOnly">Start date</span>
+
+			<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" class="u-concealed"><time  class="u-dt" dir="auto" datetime="2024-09-25T20:02:12+0100" data-time="1727290932" data-date-string="Sep 25, 2024" data-time-string="8:02 PM" title="Sep 25, 2024 at 8:02 PM">Sep 25, 2024</time></a>
+		</li>
+		
+	</ul>
+</div>
+				
+			
+			</div>
+		
+
+		<div class="p-body-main  ">
+			
+			<div class="p-body-contentCol"></div>
+			
+
+			
+
+			<div class="p-body-content">
+				
+				<div class="p-body-pageContent">
+
+
+
+
+
+
+
+
+
+
+	
+	
+	
+		
+	
+	
+	
+
+
+	
+	
+	
+		
+	
+	
+	
+
+
+	
+	
+		
+	
+	
+	
+
+
+	
+	
+
+
+
+
+
+
+
+
+
+
+
+
+	
+
+	
+		
+		
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="block block--messages" data-xf-init="" data-type="post" data-href="/forum/inline-mod/" data-search-target="*">
+
+	<span class="u-anchorTarget" id="posts"></span>
+
+	
+		
+	
+
+	
+
+	<div class="block-outer"></div>
+
+	
+
+	
+		
+	<div class="block-outer js-threadStatusField"></div>
+
+	
+
+	<div class="block-container lbContainer"
+		data-xf-init="lightbox select-to-quote"
+		data-message-selector=".js-post"
+		data-lb-id="thread-55335"
+		data-lb-universal="0">
+
+		<div class="block-body js-replyNewMessageContainer">
+			
+				
+
+					
+
+					
+						
+
+	
+	
+
+	
+
+	
+	<article class="message message--post js-post js-inlineModContainer  "
+		data-author="thephez"
+		data-content="post-239646"
+		id="js-post-239646"
+		>
+
+		
+
+		<span class="u-anchorTarget" id="post-239646"></span>
+
+		
+			<div class="message-inner">
+				
+					<div class="message-cell message-cell--user">
+						
+
+	<section class="message-user"
+		>
+
+		
+
+		<div class="message-avatar ">
+			<div class="message-avatar-wrapper">
+				<a href="/forum/members/thephez.4665/" class="avatar avatar--m" data-user-id="4665" data-xf-init="member-tooltip">
+			<img src="/forum/data/avatars/m/4/4665.jpg?1516025736" srcset="/forum/data/avatars/l/4/4665.jpg?1516025736 2x" alt="thephez" class="avatar-u4665-m" width="96" height="96" loading="lazy" /> 
+		</a>
+				
+			</div>
+		</div>
+		<div class="message-userDetails">
+			<h4 class="message-name"><a href="/forum/members/thephez.4665/" class="username " dir="auto" data-user-id="4665" data-xf-init="member-tooltip">thephez</a></h4>
+			<h5 class="userTitle message-userTitle" dir="auto">Active member</h5>
+			<div class="userBanner userBanner userBanner--blue message-userBanner"><span class="userBanner-before"></span><strong>Dash Core Group</strong><span class="userBanner-after"></span></div>
+		</div>
+		
+			
+			
+		
+		<span class="message-userArrow"></span>
+	</section>
+
+					</div>
+				
+
+				
+					<div class="message-cell message-cell--main">
+					
+						<div class="message-main js-quickEditTarget">
+
+							
+								
+
+	
+
+	<header class="message-attribution message-attribution--split">
+		<ul class="message-attribution-main listInline ">
+			
+			
+			<li class="u-concealed">
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239646" rel="nofollow" >
+					<time  class="u-dt" dir="auto" datetime="2024-09-25T20:02:12+0100" data-time="1727290932" data-date-string="Sep 25, 2024" data-time-string="8:02 PM" title="Sep 25, 2024 at 8:02 PM">Sep 25, 2024</time>
+				</a>
+			</li>
+			
+		</ul>
+
+		<ul class="message-attribution-opposite message-attribution-opposite--list ">
+			
+			<li>
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239646"
+					class="message-attribution-gadget"
+					data-xf-init="share-tooltip"
+					data-href="/forum/posts/239646/share"
+					aria-label="Share"
+					rel="nofollow">
+					<i class="fa--xf far fa-share-alt" aria-hidden="true"></i>
+				</a>
+			</li>
+			
+			
+				<li>
+					<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239646" rel="nofollow">
+						#1
+					</a>
+				</li>
+			
+		</ul>
+	</header>
+
+							
+
+							<div class="message-content js-messageContent">
+							
+
+								
+									
+	
+	
+	
+
+								
+
+								
+									
+	
+
+	<div class="message-userContent lbContainer js-lbContainer "
+		data-lb-id="post-239646"
+		data-lb-caption-desc="thephez &middot; Sep 25, 2024 at 8:02 PM">
+
+		
+			
+
+	
+
+		
+
+		<article class="message-body js-selectToQuote">
+			
+				
+			
+
+			<div >
+				
+					<div class="bbWrapper">We&#039;re pleased to announce the release of <a href="https://github.com/dashpay/dips/blob/master/dip-0027.md" target="_blank" class="link link--external" rel="nofollow ugc noopener">DIP 27</a>! This new proposal describes the mechanism for locking and unlocking Dash in a new store of value on the Core chain. The store of value, called the credit pool, mirrors the credit balance on Dash Platform. New special transactions (asset lock and unlock) enable locking Dash in the credit pool for use on Platform and unlocking it to withdraw back to Dash on the Core chain.<br />
+<br />
+You can read all the <a href="https://github.com/dashpay/dips/blob/master/dip-0027.md" target="_blank" class="link link--external" rel="nofollow ugc noopener">details about DIP 27 on GitHub</a>. Thanks to the authors that assisted in creating this DIP, and special thanks to everyone who contributed to writing and reviewing it.</div>
+				
+			</div>
+
+			<div class="js-selectToQuoteEnd">&nbsp;</div>
+			
+				
+			
+		</article>
+
+		
+			
+
+	
+
+		
+
+		
+	</div>
+
+								
+
+								
+									
+	
+
+	
+
+								
+
+								
+									
+	
+
+								
+
+							
+							</div>
+
+							
+								
+	
+
+	<footer class="message-footer">
+		
+
+		
+
+		<div class="reactionsBar js-reactionsList is-active">
+			
+	
+	
+		<ul class="reactionSummary">
+		
+			<li><span class="reaction reaction--small reaction--1" data-reaction-id="1"><i aria-hidden="true"></i><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="reaction-sprite js-reaction" alt="Like" title="Like" /></span></li><li><span class="reaction reaction--small reaction--6" data-reaction-id="6"><i aria-hidden="true"></i><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="reaction-sprite js-reaction" alt="Angry" title="Angry" /></span></li>
+		
+		</ul>
+	
+
+
+<span class="u-srOnly">Reactions:</span>
+<a class="reactionsBar-link" href="/forum/posts/239646/reactions" data-xf-click="overlay" data-cache="false" rel="nofollow"><bdi>Darren</bdi>, <bdi>xkcd</bdi>, <bdi>vazaki3</bdi> and 1 other person</a>
+		</div>
+
+		<div class="js-historyTarget message-historyTarget toggleTarget" data-href="trigger-href"></div>
+	</footer>
+
+							
+						</div>
+
+					
+					</div>
+				
+			</div>
+		
+	</article>
+
+	
+	
+
+					
+
+					
+
+				
+
+					
+
+					
+						
+
+	
+	
+
+	
+
+	
+	<article class="message message--post js-post js-inlineModContainer  "
+		data-author="vazaki3"
+		data-content="post-239647"
+		id="js-post-239647"
+		itemscope itemtype="https://schema.org/Comment" itemid="https://www.dash.org/forum/posts/239647/">
+
+		
+			<meta itemprop="parentItem" itemscope itemid="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+		
+
+		<span class="u-anchorTarget" id="post-239647"></span>
+
+		
+			<div class="message-inner">
+				
+					<div class="message-cell message-cell--user">
+						
+
+	<section class="message-user"
+		itemprop="author" itemscope itemtype="https://schema.org/Person" itemid="https://www.dash.org/forum/members/vazaki3.39264/">
+
+		
+			<meta itemprop="url" content="https://www.dash.org/forum/members/vazaki3.39264/" />
+		
+
+		<div class="message-avatar ">
+			<div class="message-avatar-wrapper">
+				<a href="/forum/members/vazaki3.39264/" class="avatar avatar--m" data-user-id="39264" data-xf-init="member-tooltip">
+			<img src="/forum/data/avatars/m/39/39264.jpg?1567553285"  alt="vazaki3" class="avatar-u39264-m" width="96" height="96" loading="lazy" itemprop="image" /> 
+		</a>
+				
+			</div>
+		</div>
+		<div class="message-userDetails">
+			<h4 class="message-name"><a href="/forum/members/vazaki3.39264/" class="username " dir="auto" data-user-id="39264" data-xf-init="member-tooltip"><span itemprop="name">vazaki3</span></a></h4>
+			<h5 class="userTitle message-userTitle" dir="auto" itemprop="jobTitle">Well-known member</h5>
+			
+		</div>
+		
+			
+			
+		
+		<span class="message-userArrow"></span>
+	</section>
+
+					</div>
+				
+
+				
+					<div class="message-cell message-cell--main">
+					
+						<div class="message-main js-quickEditTarget">
+
+							
+								
+
+	
+
+	<header class="message-attribution message-attribution--split">
+		<ul class="message-attribution-main listInline ">
+			
+			
+			<li class="u-concealed">
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239647" rel="nofollow" itemprop="url">
+					<time  class="u-dt" dir="auto" datetime="2024-09-25T22:47:57+0100" data-time="1727300877" data-date-string="Sep 25, 2024" data-time-string="10:47 PM" title="Sep 25, 2024 at 10:47 PM" itemprop="datePublished">Sep 25, 2024</time>
+				</a>
+			</li>
+			
+		</ul>
+
+		<ul class="message-attribution-opposite message-attribution-opposite--list ">
+			
+			<li>
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239647"
+					class="message-attribution-gadget"
+					data-xf-init="share-tooltip"
+					data-href="/forum/posts/239647/share"
+					aria-label="Share"
+					rel="nofollow">
+					<i class="fa--xf far fa-share-alt" aria-hidden="true"></i>
+				</a>
+			</li>
+			
+			
+				<li>
+					<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239647" rel="nofollow">
+						#2
+					</a>
+				</li>
+			
+		</ul>
+	</header>
+
+							
+
+							<div class="message-content js-messageContent">
+							
+
+								
+									
+	
+	
+	
+
+								
+
+								
+									
+	
+
+	<div class="message-userContent lbContainer js-lbContainer "
+		data-lb-id="post-239647"
+		data-lb-caption-desc="vazaki3 &middot; Sep 25, 2024 at 10:47 PM">
+
+		
+
+		<article class="message-body js-selectToQuote">
+			
+				
+			
+
+			<div itemprop="text">
+				
+					<div class="bbWrapper">Once again the deamon possessed DCG deals with bullshit.<br />
+<br />
+There are one billion ways to die, one way to live.<br />
+<br />
+You are spending your time to meaningless things, and you are going straight to hell.<br />
+<br />
+<b>How the market reacted to the release of the EVO bullshit?</b><br />
+<br />
+
+	
+
+	<div class="bbCodeBlock bbCodeBlock--unfurl    js-unfurl fauxBlockLink"
+		data-unfurl="true" data-result-id="2604" data-url="https://www.coingecko.com/en/coins/dash" data-host="www.coingecko.com" data-pending="false">
+		<div class="contentRow">
+			
+				<div class="contentRow-figure contentRow-figure--fixedSmall js-unfurl-figure">
+					
+						<img src="https://assets.coingecko.com/coins/images/19/large/dash-logo.png?1696501423" alt="www.coingecko.com" data-onerror="hide-parent"/>
+					
+				</div>
+			
+			<div class="contentRow-main">
+				<h3 class="contentRow-header js-unfurl-title">
+					<a href="https://www.coingecko.com/en/coins/dash"
+						class="link link--external fauxBlockLink-blockLink"
+						target="_blank"
+						rel="nofollow ugc noopener"
+						data-proxy-href="">
+						Dash Price: DASH Live Price Chart, Market Cap &amp; News Today | CoinGecko
+					</a>
+				</h3>
+
+				<div class="contentRow-snippet js-unfurl-desc">Track the latest Dash price, market cap, trading volume, news and more with CoinGecko&#039;s live DASH price chart and popular cryptocurrency price tracker.</div>
+
+				<div class="contentRow-minor contentRow-minor--hideLinks">
+					<span class="js-unfurl-favicon">
+						
+							<img src="https://www.coingecko.com/favicon-96x96.png" alt="www.coingecko.com" class="bbCodeBlockUnfurl-icon"
+								data-onerror="hide-parent"/>
+						
+					</span>
+					www.coingecko.com
+				</div>
+			</div>
+		</div>
+	</div>
+Dash, the pulse of the Dead....<br />
+<br />
+<script class="js-extraPhrases" type="application/json">
+			{
+				"lightbox_close": "Close",
+				"lightbox_next": "Next",
+				"lightbox_previous": "Previous",
+				"lightbox_error": "The requested content cannot be loaded. Please try again later.",
+				"lightbox_start_slideshow": "Start slideshow",
+				"lightbox_stop_slideshow": "Stop slideshow",
+				"lightbox_full_screen": "Full screen",
+				"lightbox_thumbnails": "Thumbnails",
+				"lightbox_download": "Download",
+				"lightbox_share": "Share",
+				"lightbox_zoom": "Zoom",
+				"lightbox_new_window": "New window",
+				"lightbox_toggle_sidebar": "Toggle sidebar"
+			}
+			</script>
+		
+		
+	
+
+
+	<div class="bbImageWrapper  js-lbImage" title="beat-dead-on-white-background-260nw-641535904.jpg"
+		data-src="https://www.shutterstock.com/image-vector/beat-dead-on-white-background-260nw-641535904.jpg" data-lb-sidebar-href="" data-lb-caption-extra-html="" data-single-image="1">
+		<img src="https://www.shutterstock.com/image-vector/beat-dead-on-white-background-260nw-641535904.jpg"
+			data-url="https://www.shutterstock.com/image-vector/beat-dead-on-white-background-260nw-641535904.jpg"
+			class="bbImage"
+			data-zoom-target="1"
+			style=""
+			alt="beat-dead-on-white-background-260nw-641535904.jpg"
+			title=""
+			width="" height="" loading="lazy" />
+	</div><br />
+<div class="bbMediaWrapper" data-media-site-id="youtube" data-media-key="qJquBaLtHmk">
+	<div class="bbMediaWrapper-inner">
+		<iframe src="https://www.youtube.com/embed/qJquBaLtHmk?wmode=opaque"
+				width="560" height="315"
+				frameborder="0" allowfullscreen="true"></iframe>
+	</div>
+</div><br />
+<br />
+Vote the numbers, stupid!<br />
+<span style="font-size: 26px">Vote the numbers!</span></div>
+				
+			</div>
+
+			<div class="js-selectToQuoteEnd">&nbsp;</div>
+			
+				
+			
+		</article>
+
+		
+
+		
+	</div>
+
+								
+
+								
+									
+	
+
+	
+		<div class="message-lastEdit">
+			
+				Last edited: <time  class="u-dt" dir="auto" datetime="2024-09-26T00:00:35+0100" data-time="1727305235" data-date-string="Sep 26, 2024" data-time-string="12:00 AM" title="Sep 26, 2024 at 12:00 AM" itemprop="dateModified">Sep 26, 2024</time>
+			
+		</div>
+	
+
+								
+
+								
+									
+	
+
+								
+
+							
+							</div>
+
+							
+								
+	
+
+	<footer class="message-footer">
+		
+			<div class="message-microdata" itemprop="interactionStatistic" itemtype="https://schema.org/InteractionCounter" itemscope>
+				<meta itemprop="userInteractionCount" content="0" />
+				<meta itemprop="interactionType" content="https://schema.org/LikeAction" />
+			</div>
+		
+
+		
+
+		<div class="reactionsBar js-reactionsList ">
+			
+		</div>
+
+		<div class="js-historyTarget message-historyTarget toggleTarget" data-href="trigger-href"></div>
+	</footer>
+
+							
+						</div>
+
+					
+					</div>
+				
+			</div>
+		
+	</article>
+
+	
+	
+
+					
+
+					
+
+				
+
+					
+
+					
+						
+
+	
+	
+
+	
+
+	
+	<article class="message message--post js-post js-inlineModContainer  "
+		data-author="GrandMasterDash"
+		data-content="post-239649"
+		id="js-post-239649"
+		itemscope itemtype="https://schema.org/Comment" itemid="https://www.dash.org/forum/posts/239649/">
+
+		
+			<meta itemprop="parentItem" itemscope itemid="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+		
+
+		<span class="u-anchorTarget" id="post-239649"></span>
+
+		
+			<div class="message-inner">
+				
+					<div class="message-cell message-cell--user">
+						
+
+	<section class="message-user"
+		itemprop="author" itemscope itemtype="https://schema.org/Person" itemid="https://www.dash.org/forum/members/grandmasterdash.3780/">
+
+		
+			<meta itemprop="url" content="https://www.dash.org/forum/members/grandmasterdash.3780/" />
+		
+
+		<div class="message-avatar ">
+			<div class="message-avatar-wrapper">
+				<a href="/forum/members/grandmasterdash.3780/" class="avatar avatar--m" data-user-id="3780" data-xf-init="member-tooltip">
+			<img src="/forum/data/avatars/m/3/3780.jpg?1680276973" srcset="/forum/data/avatars/l/3/3780.jpg?1680276973 2x" alt="GrandMasterDash" class="avatar-u3780-m" width="96" height="96" loading="lazy" itemprop="image" /> 
+		</a>
+				
+			</div>
+		</div>
+		<div class="message-userDetails">
+			<h4 class="message-name"><a href="/forum/members/grandmasterdash.3780/" class="username " dir="auto" data-user-id="3780" data-xf-init="member-tooltip"><span itemprop="name">GrandMasterDash</span></a></h4>
+			<h5 class="userTitle message-userTitle" dir="auto" itemprop="jobTitle">Well-known member</h5>
+			<div class="userBanner userBanner userBanner--green message-userBanner" itemprop="jobTitle"><span class="userBanner-before"></span><strong>Masternode Owner/Operator</strong><span class="userBanner-after"></span></div>
+		</div>
+		
+			
+			
+		
+		<span class="message-userArrow"></span>
+	</section>
+
+					</div>
+				
+
+				
+					<div class="message-cell message-cell--main">
+					
+						<div class="message-main js-quickEditTarget">
+
+							
+								
+
+	
+
+	<header class="message-attribution message-attribution--split">
+		<ul class="message-attribution-main listInline ">
+			
+			
+			<li class="u-concealed">
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239649" rel="nofollow" itemprop="url">
+					<time  class="u-dt" dir="auto" datetime="2024-09-26T01:44:24+0100" data-time="1727311464" data-date-string="Sep 26, 2024" data-time-string="1:44 AM" title="Sep 26, 2024 at 1:44 AM" itemprop="datePublished">Sep 26, 2024</time>
+				</a>
+			</li>
+			
+		</ul>
+
+		<ul class="message-attribution-opposite message-attribution-opposite--list ">
+			
+			<li>
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239649"
+					class="message-attribution-gadget"
+					data-xf-init="share-tooltip"
+					data-href="/forum/posts/239649/share"
+					aria-label="Share"
+					rel="nofollow">
+					<i class="fa--xf far fa-share-alt" aria-hidden="true"></i>
+				</a>
+			</li>
+			
+			
+				<li>
+					<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239649" rel="nofollow">
+						#3
+					</a>
+				</li>
+			
+		</ul>
+	</header>
+
+							
+
+							<div class="message-content js-messageContent">
+							
+
+								
+									
+	
+	
+	
+
+								
+
+								
+									
+	
+
+	<div class="message-userContent lbContainer js-lbContainer "
+		data-lb-id="post-239649"
+		data-lb-caption-desc="GrandMasterDash &middot; Sep 26, 2024 at 1:44 AM">
+
+		
+
+		<article class="message-body js-selectToQuote">
+			
+				
+			
+
+			<div itemprop="text">
+				
+					<div class="bbWrapper">I wouldn&#039;t say it&#039;s meaningless. My understanding, this is basically the equivalent of payment channels on lightning. From a macro point of view though, this does nor help with future scaling i.e  it discourages alternatives to the masternode network and, random guess, opens up an attack vector to clog up the Platform chain, which should be faster e.g. deposit, withdraw, repeat. Some classification would be helpful.</div>
+				
+			</div>
+
+			<div class="js-selectToQuoteEnd">&nbsp;</div>
+			
+				
+			
+		</article>
+
+		
+
+		
+	</div>
+
+								
+
+								
+									
+	
+
+	
+
+								
+
+								
+									
+	
+
+								
+
+							
+							</div>
+
+							
+								
+	
+
+	<footer class="message-footer">
+		
+			<div class="message-microdata" itemprop="interactionStatistic" itemtype="https://schema.org/InteractionCounter" itemscope>
+				<meta itemprop="userInteractionCount" content="0" />
+				<meta itemprop="interactionType" content="https://schema.org/LikeAction" />
+			</div>
+		
+
+		
+
+		<div class="reactionsBar js-reactionsList ">
+			
+		</div>
+
+		<div class="js-historyTarget message-historyTarget toggleTarget" data-href="trigger-href"></div>
+	</footer>
+
+							
+						</div>
+
+					
+					</div>
+				
+			</div>
+		
+	</article>
+
+	
+	
+
+					
+
+					
+
+				
+
+					
+
+					
+						
+
+	
+	
+
+	
+
+	
+	<article class="message message--post js-post js-inlineModContainer  "
+		data-author="thephez"
+		data-content="post-239651"
+		id="js-post-239651"
+		itemscope itemtype="https://schema.org/Comment" itemid="https://www.dash.org/forum/posts/239651/">
+
+		
+			<meta itemprop="parentItem" itemscope itemid="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+		
+
+		<span class="u-anchorTarget" id="post-239651"></span>
+
+		
+			<div class="message-inner">
+				
+					<div class="message-cell message-cell--user">
+						
+
+	<section class="message-user"
+		itemprop="author" itemscope itemtype="https://schema.org/Person" itemid="https://www.dash.org/forum/members/thephez.4665/">
+
+		
+			<meta itemprop="url" content="https://www.dash.org/forum/members/thephez.4665/" />
+		
+
+		<div class="message-avatar ">
+			<div class="message-avatar-wrapper">
+				<a href="/forum/members/thephez.4665/" class="avatar avatar--m" data-user-id="4665" data-xf-init="member-tooltip">
+			<img src="/forum/data/avatars/m/4/4665.jpg?1516025736" srcset="/forum/data/avatars/l/4/4665.jpg?1516025736 2x" alt="thephez" class="avatar-u4665-m" width="96" height="96" loading="lazy" itemprop="image" /> 
+		</a>
+				
+			</div>
+		</div>
+		<div class="message-userDetails">
+			<h4 class="message-name"><a href="/forum/members/thephez.4665/" class="username " dir="auto" data-user-id="4665" data-xf-init="member-tooltip"><span itemprop="name">thephez</span></a></h4>
+			<h5 class="userTitle message-userTitle" dir="auto" itemprop="jobTitle">Active member</h5>
+			<div class="userBanner userBanner userBanner--blue message-userBanner" itemprop="jobTitle"><span class="userBanner-before"></span><strong>Dash Core Group</strong><span class="userBanner-after"></span></div>
+		</div>
+		
+			
+			
+		
+		<span class="message-userArrow"></span>
+	</section>
+
+					</div>
+				
+
+				
+					<div class="message-cell message-cell--main">
+					
+						<div class="message-main js-quickEditTarget">
+
+							
+								
+
+	
+
+	<header class="message-attribution message-attribution--split">
+		<ul class="message-attribution-main listInline ">
+			
+			
+			<li class="u-concealed">
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239651" rel="nofollow" itemprop="url">
+					<time  class="u-dt" dir="auto" datetime="2024-09-26T13:58:25+0100" data-time="1727355505" data-date-string="Sep 26, 2024" data-time-string="1:58 PM" title="Sep 26, 2024 at 1:58 PM" itemprop="datePublished">Sep 26, 2024</time>
+				</a>
+			</li>
+			
+		</ul>
+
+		<ul class="message-attribution-opposite message-attribution-opposite--list ">
+			
+			<li>
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239651"
+					class="message-attribution-gadget"
+					data-xf-init="share-tooltip"
+					data-href="/forum/posts/239651/share"
+					aria-label="Share"
+					rel="nofollow">
+					<i class="fa--xf far fa-share-alt" aria-hidden="true"></i>
+				</a>
+			</li>
+			
+			
+				<li>
+					<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239651" rel="nofollow">
+						#4
+					</a>
+				</li>
+			
+		</ul>
+	</header>
+
+							
+
+							<div class="message-content js-messageContent">
+							
+
+								
+									
+	
+	
+	
+
+								
+
+								
+									
+	
+
+	<div class="message-userContent lbContainer js-lbContainer "
+		data-lb-id="post-239651"
+		data-lb-caption-desc="thephez &middot; Sep 26, 2024 at 1:58 PM">
+
+		
+
+		<article class="message-body js-selectToQuote">
+			
+				
+			
+
+			<div itemprop="text">
+				
+					<div class="bbWrapper"><blockquote data-attributes="member: 3780" data-quote="GrandMasterDash" data-source="post: 239649"
+	class="bbCodeBlock bbCodeBlock--expandable bbCodeBlock--quote js-expandWatch">
+	
+		<div class="bbCodeBlock-title">
+			
+				<a href="/forum/goto/post?id=239649"
+					class="bbCodeBlock-sourceJump"
+					rel="nofollow"
+					data-xf-click="attribution"
+					data-content-selector="#post-239649">GrandMasterDash said:</a>
+			
+		</div>
+	
+	<div class="bbCodeBlock-content">
+		
+		<div class="bbCodeBlock-expandContent js-expandContent ">
+			I wouldn&#039;t say it&#039;s meaningless. My understanding, this is basically the equivalent of payment channels on lightning. From a macro point of view though, this does nor help with future scaling i.e  it discourages alternatives to the masternode network and, random guess, opens up an attack vector to clog up the Platform chain, which should be faster e.g. deposit, withdraw, repeat. Some classification would be helpful.
+		</div>
+		<div class="bbCodeBlock-expandLink js-expandLink"><a role="button" tabindex="0">Click to expand...</a></div>
+	</div>
+</blockquote>This DIP is just describing the way Dash is converted to credits (and vice versa) from the Core perspective. You send an asset lock to put Dash in the credit pool and use proof of that transaction to get credits on Platform. When you want to go from Platform credits back to Dash, you send an asset unlock transaction with a signature from Platform approving the release of Dash to you from the credit pool.<br />
+<br />
+Or, summarized a different way...<br />
+DIP-27 allows users to securely lock Dash on the Core blockchain and convert it into credits for use on the Dash Platform. This system simplifies the conversion process by pooling locked Dash, which helps manage fees and ensures predictable costs when converting back to Dash.<br />
+<br />
+To lock Dash, users create an Asset Lock transaction. On the Platform, users can spend these credits for various activities. When they want to withdraw Dash, they request an Asset Unlock transaction, which is validated and signed by a group of Platform validators.<br />
+<br />
+This design addresses the challenges of using small UTXOs (unspent transaction outputs) by allowing withdrawals to come directly from the pooled balance, rather than individual inputs. It also includes safeguards, like withdrawal limits and finality checks, to ensure the system remains secure and reliable.</div>
+				
+			</div>
+
+			<div class="js-selectToQuoteEnd">&nbsp;</div>
+			
+				
+			
+		</article>
+
+		
+
+		
+	</div>
+
+								
+
+								
+									
+	
+
+	
+
+								
+
+								
+									
+	
+
+								
+
+							
+							</div>
+
+							
+								
+	
+
+	<footer class="message-footer">
+		
+			<div class="message-microdata" itemprop="interactionStatistic" itemtype="https://schema.org/InteractionCounter" itemscope>
+				<meta itemprop="userInteractionCount" content="3" />
+				<meta itemprop="interactionType" content="https://schema.org/LikeAction" />
+			</div>
+		
+
+		
+
+		<div class="reactionsBar js-reactionsList is-active">
+			
+	
+	
+		<ul class="reactionSummary">
+		
+			<li><span class="reaction reaction--small reaction--1" data-reaction-id="1"><i aria-hidden="true"></i><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="reaction-sprite js-reaction" alt="Like" title="Like" /></span></li>
+		
+		</ul>
+	
+
+
+<span class="u-srOnly">Reactions:</span>
+<a class="reactionsBar-link" href="/forum/posts/239651/reactions" data-xf-click="overlay" data-cache="false" rel="nofollow"><bdi>Dans</bdi>, <bdi>GrandMasterDash</bdi> and <bdi>xkcd</bdi></a>
+		</div>
+
+		<div class="js-historyTarget message-historyTarget toggleTarget" data-href="trigger-href"></div>
+	</footer>
+
+							
+						</div>
+
+					
+					</div>
+				
+			</div>
+		
+	</article>
+
+	
+	
+
+					
+
+					
+
+				
+
+					
+
+					
+						
+
+	
+	
+
+	
+
+	
+	<article class="message message--post js-post js-inlineModContainer  "
+		data-author="GrandMasterDash"
+		data-content="post-239652"
+		id="js-post-239652"
+		itemscope itemtype="https://schema.org/Comment" itemid="https://www.dash.org/forum/posts/239652/">
+
+		
+			<meta itemprop="parentItem" itemscope itemid="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+		
+
+		<span class="u-anchorTarget" id="post-239652"></span>
+
+		
+			<div class="message-inner">
+				
+					<div class="message-cell message-cell--user">
+						
+
+	<section class="message-user"
+		itemprop="author" itemscope itemtype="https://schema.org/Person" itemid="https://www.dash.org/forum/members/grandmasterdash.3780/">
+
+		
+			<meta itemprop="url" content="https://www.dash.org/forum/members/grandmasterdash.3780/" />
+		
+
+		<div class="message-avatar ">
+			<div class="message-avatar-wrapper">
+				<a href="/forum/members/grandmasterdash.3780/" class="avatar avatar--m" data-user-id="3780" data-xf-init="member-tooltip">
+			<img src="/forum/data/avatars/m/3/3780.jpg?1680276973" srcset="/forum/data/avatars/l/3/3780.jpg?1680276973 2x" alt="GrandMasterDash" class="avatar-u3780-m" width="96" height="96" loading="lazy" itemprop="image" /> 
+		</a>
+				
+			</div>
+		</div>
+		<div class="message-userDetails">
+			<h4 class="message-name"><a href="/forum/members/grandmasterdash.3780/" class="username " dir="auto" data-user-id="3780" data-xf-init="member-tooltip"><span itemprop="name">GrandMasterDash</span></a></h4>
+			<h5 class="userTitle message-userTitle" dir="auto" itemprop="jobTitle">Well-known member</h5>
+			<div class="userBanner userBanner userBanner--green message-userBanner" itemprop="jobTitle"><span class="userBanner-before"></span><strong>Masternode Owner/Operator</strong><span class="userBanner-after"></span></div>
+		</div>
+		
+			
+			
+		
+		<span class="message-userArrow"></span>
+	</section>
+
+					</div>
+				
+
+				
+					<div class="message-cell message-cell--main">
+					
+						<div class="message-main js-quickEditTarget">
+
+							
+								
+
+	
+
+	<header class="message-attribution message-attribution--split">
+		<ul class="message-attribution-main listInline ">
+			
+			
+			<li class="u-concealed">
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239652" rel="nofollow" itemprop="url">
+					<time  class="u-dt" dir="auto" datetime="2024-09-26T15:43:56+0100" data-time="1727361836" data-date-string="Sep 26, 2024" data-time-string="3:43 PM" title="Sep 26, 2024 at 3:43 PM" itemprop="datePublished">Sep 26, 2024</time>
+				</a>
+			</li>
+			
+		</ul>
+
+		<ul class="message-attribution-opposite message-attribution-opposite--list ">
+			
+			<li>
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239652"
+					class="message-attribution-gadget"
+					data-xf-init="share-tooltip"
+					data-href="/forum/posts/239652/share"
+					aria-label="Share"
+					rel="nofollow">
+					<i class="fa--xf far fa-share-alt" aria-hidden="true"></i>
+				</a>
+			</li>
+			
+			
+				<li>
+					<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239652" rel="nofollow">
+						#5
+					</a>
+				</li>
+			
+		</ul>
+	</header>
+
+							
+
+							<div class="message-content js-messageContent">
+							
+
+								
+									
+	
+	
+	
+
+								
+
+								
+									
+	
+
+	<div class="message-userContent lbContainer js-lbContainer "
+		data-lb-id="post-239652"
+		data-lb-caption-desc="GrandMasterDash &middot; Sep 26, 2024 at 3:43 PM">
+
+		
+
+		<article class="message-body js-selectToQuote">
+			
+				
+			
+
+			<div itemprop="text">
+				
+					<div class="bbWrapper">Thanks for the explanation.</div>
+				
+			</div>
+
+			<div class="js-selectToQuoteEnd">&nbsp;</div>
+			
+				
+			
+		</article>
+
+		
+
+		
+	</div>
+
+								
+
+								
+									
+	
+
+	
+
+								
+
+								
+									
+	
+
+								
+
+							
+							</div>
+
+							
+								
+	
+
+	<footer class="message-footer">
+		
+			<div class="message-microdata" itemprop="interactionStatistic" itemtype="https://schema.org/InteractionCounter" itemscope>
+				<meta itemprop="userInteractionCount" content="0" />
+				<meta itemprop="interactionType" content="https://schema.org/LikeAction" />
+			</div>
+		
+
+		
+
+		<div class="reactionsBar js-reactionsList ">
+			
+		</div>
+
+		<div class="js-historyTarget message-historyTarget toggleTarget" data-href="trigger-href"></div>
+	</footer>
+
+							
+						</div>
+
+					
+					</div>
+				
+			</div>
+		
+	</article>
+
+	
+	
+
+					
+
+					
+
+				
+
+					
+
+					
+						
+
+	
+	
+
+	
+
+	
+	<article class="message message--post js-post js-inlineModContainer  "
+		data-author="vazaki3"
+		data-content="post-239653"
+		id="js-post-239653"
+		itemscope itemtype="https://schema.org/Comment" itemid="https://www.dash.org/forum/posts/239653/">
+
+		
+			<meta itemprop="parentItem" itemscope itemid="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+		
+
+		<span class="u-anchorTarget" id="post-239653"></span>
+
+		
+			<div class="message-inner">
+				
+					<div class="message-cell message-cell--user">
+						
+
+	<section class="message-user"
+		itemprop="author" itemscope itemtype="https://schema.org/Person" itemid="https://www.dash.org/forum/members/vazaki3.39264/">
+
+		
+			<meta itemprop="url" content="https://www.dash.org/forum/members/vazaki3.39264/" />
+		
+
+		<div class="message-avatar ">
+			<div class="message-avatar-wrapper">
+				<a href="/forum/members/vazaki3.39264/" class="avatar avatar--m" data-user-id="39264" data-xf-init="member-tooltip">
+			<img src="/forum/data/avatars/m/39/39264.jpg?1567553285"  alt="vazaki3" class="avatar-u39264-m" width="96" height="96" loading="lazy" itemprop="image" /> 
+		</a>
+				
+			</div>
+		</div>
+		<div class="message-userDetails">
+			<h4 class="message-name"><a href="/forum/members/vazaki3.39264/" class="username " dir="auto" data-user-id="39264" data-xf-init="member-tooltip"><span itemprop="name">vazaki3</span></a></h4>
+			<h5 class="userTitle message-userTitle" dir="auto" itemprop="jobTitle">Well-known member</h5>
+			
+		</div>
+		
+			
+			
+		
+		<span class="message-userArrow"></span>
+	</section>
+
+					</div>
+				
+
+				
+					<div class="message-cell message-cell--main">
+					
+						<div class="message-main js-quickEditTarget">
+
+							
+								
+
+	
+
+	<header class="message-attribution message-attribution--split">
+		<ul class="message-attribution-main listInline ">
+			
+			
+			<li class="u-concealed">
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239653" rel="nofollow" itemprop="url">
+					<time  class="u-dt" dir="auto" datetime="2024-09-26T18:08:10+0100" data-time="1727370490" data-date-string="Sep 26, 2024" data-time-string="6:08 PM" title="Sep 26, 2024 at 6:08 PM" itemprop="datePublished">Sep 26, 2024</time>
+				</a>
+			</li>
+			
+		</ul>
+
+		<ul class="message-attribution-opposite message-attribution-opposite--list ">
+			
+			<li>
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239653"
+					class="message-attribution-gadget"
+					data-xf-init="share-tooltip"
+					data-href="/forum/posts/239653/share"
+					aria-label="Share"
+					rel="nofollow">
+					<i class="fa--xf far fa-share-alt" aria-hidden="true"></i>
+				</a>
+			</li>
+			
+			
+				<li>
+					<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239653" rel="nofollow">
+						#6
+					</a>
+				</li>
+			
+		</ul>
+	</header>
+
+							
+
+							<div class="message-content js-messageContent">
+							
+
+								
+									
+	
+	
+	
+
+								
+
+								
+									
+	
+
+	<div class="message-userContent lbContainer js-lbContainer "
+		data-lb-id="post-239653"
+		data-lb-caption-desc="vazaki3 &middot; Sep 26, 2024 at 6:08 PM">
+
+		
+
+		<article class="message-body js-selectToQuote">
+			
+				
+			
+
+			<div itemprop="text">
+				
+					<div class="bbWrapper"><blockquote data-attributes="member: 4665" data-quote="thephez" data-source="post: 239651"
+	class="bbCodeBlock bbCodeBlock--expandable bbCodeBlock--quote js-expandWatch">
+	
+		<div class="bbCodeBlock-title">
+			
+				<a href="/forum/goto/post?id=239651"
+					class="bbCodeBlock-sourceJump"
+					rel="nofollow"
+					data-xf-click="attribution"
+					data-content-selector="#post-239651">thephez said:</a>
+			
+		</div>
+	
+	<div class="bbCodeBlock-content">
+		
+		<div class="bbCodeBlock-expandContent js-expandContent ">
+			DIP-27 allows users to securely<b> lock Dash on the Core blockchain and convert it into credits </b>for use on the Dash Platform. This system simplifies the conversion process by pooling locked Dash, which helps manage fees and ensures predictable costs when converting back to Dash.
+		</div>
+		<div class="bbCodeBlock-expandLink js-expandLink"><a role="button" tabindex="0">Click to expand...</a></div>
+	</div>
+</blockquote><br />
+The filthy plan of the demonical DCG is revealed.<br />
+<br />
+They want to lock most of the Dash, and convert it into EVO credits.<br />
+<br />
+The EVO platform is used as a parasite, that will devour Dash cryptocurrency.<br />
+<br />
+<div class="bbMediaWrapper" data-media-site-id="youtube" data-media-key="SGv_0pTQaKI">
+	<div class="bbMediaWrapper-inner">
+		<iframe src="https://www.youtube.com/embed/SGv_0pTQaKI?wmode=opaque"
+				width="560" height="315"
+				frameborder="0" allowfullscreen="true"></iframe>
+	</div>
+</div><br />
+Finally I am the last one in the dark.<br />
+In the dark.<br />
+The 1.5 Dash I hold, will never be locked!<br />
+<a href="https://www.dash.org/forum/index.php?threads/pre-proposal-would-you-like-this-proof-of-individuality-to-be-implemented-in-dash.15946/page-10#post-239624" class="link link--internal"><b>Dash will remain real pure money, because this is what the government agents are afraid to.</b></a></div>
+				
+			</div>
+
+			<div class="js-selectToQuoteEnd">&nbsp;</div>
+			
+				
+			
+		</article>
+
+		
+
+		
+	</div>
+
+								
+
+								
+									
+	
+
+	
+		<div class="message-lastEdit">
+			
+				Last edited: <time  class="u-dt" dir="auto" datetime="2024-09-26T18:28:58+0100" data-time="1727371738" data-date-string="Sep 26, 2024" data-time-string="6:28 PM" title="Sep 26, 2024 at 6:28 PM" itemprop="dateModified">Sep 26, 2024</time>
+			
+		</div>
+	
+
+								
+
+								
+									
+	
+
+								
+
+							
+							</div>
+
+							
+								
+	
+
+	<footer class="message-footer">
+		
+			<div class="message-microdata" itemprop="interactionStatistic" itemtype="https://schema.org/InteractionCounter" itemscope>
+				<meta itemprop="userInteractionCount" content="2" />
+				<meta itemprop="interactionType" content="https://schema.org/LikeAction" />
+			</div>
+		
+
+		
+
+		<div class="reactionsBar js-reactionsList is-active">
+			
+	
+	
+		<ul class="reactionSummary">
+		
+			<li><span class="reaction reaction--small reaction--1" data-reaction-id="1"><i aria-hidden="true"></i><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="reaction-sprite js-reaction" alt="Like" title="Like" /></span></li><li><span class="reaction reaction--small reaction--3" data-reaction-id="3"><i aria-hidden="true"></i><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="reaction-sprite js-reaction" alt="Haha" title="Haha" /></span></li>
+		
+		</ul>
+	
+
+
+<span class="u-srOnly">Reactions:</span>
+<a class="reactionsBar-link" href="/forum/posts/239653/reactions" data-xf-click="overlay" data-cache="false" rel="nofollow"><bdi>xkcd</bdi> and <bdi>AgnewPickens</bdi></a>
+		</div>
+
+		<div class="js-historyTarget message-historyTarget toggleTarget" data-href="trigger-href"></div>
+	</footer>
+
+							
+						</div>
+
+					
+					</div>
+				
+			</div>
+		
+	</article>
+
+	
+	
+
+					
+
+					
+
+				
+
+					
+
+					
+						
+
+	
+	
+
+	
+
+	
+	<article class="message message--post js-post js-inlineModContainer  "
+		data-author="andreeoren"
+		data-content="post-239683"
+		id="js-post-239683"
+		itemscope itemtype="https://schema.org/Comment" itemid="https://www.dash.org/forum/posts/239683/">
+
+		
+			<meta itemprop="parentItem" itemscope itemid="https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/" />
+		
+
+		<span class="u-anchorTarget" id="post-239683"></span>
+
+		
+			<div class="message-inner">
+				
+					<div class="message-cell message-cell--user">
+						
+
+	<section class="message-user"
+		itemprop="author" itemscope itemtype="https://schema.org/Person" itemid="https://www.dash.org/forum/members/andreeoren.87533/">
+
+		
+			<meta itemprop="url" content="https://www.dash.org/forum/members/andreeoren.87533/" />
+		
+
+		<div class="message-avatar ">
+			<div class="message-avatar-wrapper">
+				<a href="/forum/members/andreeoren.87533/" class="avatar avatar--m avatar--default avatar--default--dynamic" data-user-id="87533" data-xf-init="member-tooltip" style="background-color: #9933cc; color: #e0c2f0">
+			<span class="avatar-u87533-m" role="img" aria-label="andreeoren">A</span> 
+		</a>
+				
+			</div>
+		</div>
+		<div class="message-userDetails">
+			<h4 class="message-name"><a href="/forum/members/andreeoren.87533/" class="username " dir="auto" data-user-id="87533" data-xf-init="member-tooltip"><span itemprop="name">andreeoren</span></a></h4>
+			<h5 class="userTitle message-userTitle" dir="auto" itemprop="jobTitle">New member</h5>
+			
+		</div>
+		
+			
+			
+		
+		<span class="message-userArrow"></span>
+	</section>
+
+					</div>
+				
+
+				
+					<div class="message-cell message-cell--main">
+					
+						<div class="message-main js-quickEditTarget">
+
+							
+								
+
+	
+
+	<header class="message-attribution message-attribution--split">
+		<ul class="message-attribution-main listInline ">
+			
+			
+			<li class="u-concealed">
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239683" rel="nofollow" itemprop="url">
+					<time  class="u-dt" dir="auto" datetime="2024-10-03T10:56:57+0100" data-time="1727949417" data-date-string="Oct 3, 2024" data-time-string="10:56 AM" title="Oct 3, 2024 at 10:56 AM" itemprop="datePublished">Oct 3, 2024</time>
+				</a>
+			</li>
+			
+		</ul>
+
+		<ul class="message-attribution-opposite message-attribution-opposite--list ">
+			
+			<li>
+				<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239683"
+					class="message-attribution-gadget"
+					data-xf-init="share-tooltip"
+					data-href="/forum/posts/239683/share"
+					aria-label="Share"
+					rel="nofollow">
+					<i class="fa--xf far fa-share-alt" aria-hidden="true"></i>
+				</a>
+			</li>
+			
+			
+				<li>
+					<a href="/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/post-239683" rel="nofollow">
+						#7
+					</a>
+				</li>
+			
+		</ul>
+	</header>
+
+							
+
+							<div class="message-content js-messageContent">
+							
+
+								
+									
+	
+	
+	
+
+								
+
+								
+									
+	
+
+	<div class="message-userContent lbContainer js-lbContainer "
+		data-lb-id="post-239683"
+		data-lb-caption-desc="andreeoren &middot; Oct 3, 2024 at 10:56 AM">
+
+		
+
+		<article class="message-body js-selectToQuote">
+			
+				
+			
+
+			<div itemprop="text">
+				
+					<div class="bbWrapper">In your scenario, EVO is depicted as a parasite, gradually consuming Dash&#039;s value and power, with the ultimate goal being to lock up users&#039; holdings. Holding onto your 1.5 Dash without locking it symbolizes your resistance against this perceived plot. <br />
+<div style="text-align: right"><a href="https://fnf-online.io" target="_blank" class="link link--external" rel="nofollow ugc noopener"><span style="color: rgb(255, 255, 255)">fnf</span></a>&#8203;</div></div>
+				
+			</div>
+
+			<div class="js-selectToQuoteEnd">&nbsp;</div>
+			
+				
+			
+		</article>
+
+		
+
+		
+	</div>
+
+								
+
+								
+									
+	
+
+	
+
+								
+
+								
+									
+	
+
+								
+
+							
+							</div>
+
+							
+								
+	
+
+	<footer class="message-footer">
+		
+			<div class="message-microdata" itemprop="interactionStatistic" itemtype="https://schema.org/InteractionCounter" itemscope>
+				<meta itemprop="userInteractionCount" content="1" />
+				<meta itemprop="interactionType" content="https://schema.org/LikeAction" />
+			</div>
+		
+
+		
+
+		<div class="reactionsBar js-reactionsList is-active">
+			
+	
+	
+		<ul class="reactionSummary">
+		
+			<li><span class="reaction reaction--small reaction--3" data-reaction-id="3"><i aria-hidden="true"></i><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="reaction-sprite js-reaction" alt="Haha" title="Haha" /></span></li>
+		
+		</ul>
+	
+
+
+<span class="u-srOnly">Reactions:</span>
+<a class="reactionsBar-link" href="/forum/posts/239683/reactions" data-xf-click="overlay" data-cache="false" rel="nofollow"><bdi>vazaki3</bdi></a>
+		</div>
+
+		<div class="js-historyTarget message-historyTarget toggleTarget" data-href="trigger-href"></div>
+	</footer>
+
+							
+						</div>
+
+					
+					</div>
+				
+			</div>
+		
+	</article>
+
+	
+	
+
+					
+
+					
+
+				
+			
+		</div>
+	</div>
+
+	
+		<div class="block-outer block-outer--after">
+			
+				
+
+				
+				
+					<div class="block-outer-opposite">
+						
+							<a href="/forum/login/" class="button--link button--wrap button" data-xf-click="overlay"><span class="button-text">
+								You must log in or register to reply here.
+							</span></a>
+						
+					</div>
+				
+			
+		</div>
+	
+
+	
+	
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+<div class="blockMessage blockMessage--none">
+	
+
+	
+		
+
+		<div class="shareButtons shareButtons--iconic" data-xf-init="share-buttons" data-page-url="" data-page-title="" data-page-desc="" data-page-image="">
+			
+				<span class="shareButtons-label">Share:</span>
+			
+
+			<div class="shareButtons-buttons">
+				
+					
+						<a class="shareButtons-button shareButtons-button--brand shareButtons-button--facebook" data-href="https://www.facebook.com/sharer.php?u={url}">
+							<i aria-hidden="true"></i>
+							<span>Facebook</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--brand shareButtons-button--twitter" data-href="https://twitter.com/intent/tweet?url={url}&amp;text={title}">
+							<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 512 512" class=""><!--! Font Awesome Free 6.4.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d="M389.2 48h70.6L305.6 224.2 487 464H345L233.7 318.6 106.5 464H35.8L200.7 275.5 26.8 48H172.4L272.9 180.9 389.2 48zM364.4 421.8h39.1L151.1 88h-42L364.4 421.8z"/></svg> <span>X (Twitter)</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--brand shareButtons-button--reddit" data-href="https://reddit.com/submit?url={url}&amp;title={title}">
+							<i aria-hidden="true"></i>
+							<span>Reddit</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--brand shareButtons-button--pinterest" data-href="https://pinterest.com/pin/create/bookmarklet/?url={url}&amp;description={title}&amp;media={image}">
+							<i aria-hidden="true"></i>
+							<span>Pinterest</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--brand shareButtons-button--tumblr" data-href="https://www.tumblr.com/widgets/share/tool?canonicalUrl={url}&amp;title={title}">
+							<i aria-hidden="true"></i>
+							<span>Tumblr</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--brand shareButtons-button--whatsApp" data-href="https://api.whatsapp.com/send?text={title}&nbsp;{url}">
+							<i aria-hidden="true"></i>
+							<span>WhatsApp</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--email" data-href="mailto:?subject={title}&amp;body={url}">
+							<i aria-hidden="true"></i>
+							<span>Email</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--share is-hidden"
+							data-xf-init="web-share"
+							data-title="" data-text="" data-url=""
+							data-hide=".shareButtons-button:not(.shareButtons-button--share)">
+
+							<i aria-hidden="true"></i>
+							<span>Share</span>
+						</a>
+					
+
+					
+						<a class="shareButtons-button shareButtons-button--link is-hidden" data-clipboard="{url}">
+							<i aria-hidden="true"></i>
+							<span>Link</span>
+						</a>
+					
+				
+			</div>
+		</div>
+	
+
+</div>
+
+
+
+
+
+
+
+</div>
+				
+			</div>
+
+			
+		</div>
+
+		
+		
+	
+		<ul class="p-breadcrumbs p-breadcrumbs--bottom"
+			itemscope itemtype="https://schema.org/BreadcrumbList">
+		
+			
+
+			
+			
+
+			
+
+			
+				
+				
+	<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+		<a href="/forum/" itemprop="item">
+			<span itemprop="name">Forums</span>
+		</a>
+		<meta itemprop="position" content="1" />
+	</li>
+
+			
+			
+				
+				
+	<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+		<a href="/forum/#official-development-news-and-information.55" itemprop="item">
+			<span itemprop="name">Official Development News and Information.</span>
+		</a>
+		<meta itemprop="position" content="2" />
+	</li>
+
+			
+				
+				
+	<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+		<a href="/forum/forums/official-announcements.54/" itemprop="item">
+			<span itemprop="name">Official Announcements</span>
+		</a>
+		<meta itemprop="position" content="3" />
+	</li>
+
+			
+
+		
+		</ul>
+	
+
+		
+	</div>
+</div>
+
+<footer class="p-footer" id="footer">
+	<div class="p-footer-inner">
+
+		<div class="p-footer-row">
+			
+			<div class="p-footer-row-opposite">
+				<ul class="p-footer-linkList">
+					
+
+					
+						<li><a href="/forum/help/terms/">Terms and rules</a></li>
+					
+
+					
+						<li><a href="/forum/help/privacy-policy/">Privacy policy</a></li>
+					
+
+					
+						<li><a href="/forum/help/">Help</a></li>
+					
+
+					
+
+					<li><a href="/forum/forums/-/index.rss" target="_blank" class="p-footer-rssLink" title="RSS"><span aria-hidden="true"><i class="fa--xf far fa-rss" aria-hidden="true"></i><span class="u-srOnly">RSS</span></span></a></li>
+				</ul>
+			</div>
+		</div>
+
+		
+			<div class="p-footer-copyright">
+			
+				<a href="https://xenforo.com" class="u-concealed" dir="ltr" target="_blank" rel="sponsored noopener">Community platform by XenForo<sup>&reg;</sup> <span class="copyright">&copy; 2010-2024 XenForo Ltd.</span></a>
+				
+			
+			</div>
+		
+
+		
+	</div>
+</footer>
+
+</div> <!-- closing p-pageWrapper -->
+
+<div class="u-bottomFixer js-bottomFixTarget">
+	
+	
+</div>
+
+<div class="u-navButtons js-navButtons" data-trigger-type="up">
+	<a href="javascript:" class="button--scroll button"><span class="button-text"><i class="fa--xf far fa-arrow-left" aria-hidden="true"></i><span class="u-srOnly">Back</span></span></a>
+</div>
+
+
+	<div class="u-scrollButtons js-scrollButtons" data-trigger-type="up">
+		<a href="#top" class="button--scroll button" data-xf-click="scroll-to"><span class="button-text"><i class="fa--xf far fa-arrow-up" aria-hidden="true"></i><span class="u-srOnly">Top</span></span></a>
+		
+	</div>
+
+
+
+	<script src="/forum/js/vendor/jquery/jquery-3.5.1.min.js?_v=67acfccc"></script>
+	<script src="/forum/js/vendor/vendor-compiled.js?_v=67acfccc"></script>
+	<script src="/forum/js/xf/core-compiled.js?_v=67acfccc"></script>
+	<script src="/forum/js/xf/lightbox-compiled.js?_v=67acfccc"></script>
+
+	<script>
+		$(".file-preview").on("click",function(){gtag('event','file_download',{link_url:(new URL($(this).attr("href"),window.location.origin)).href,file_name:$(this).parent().find('.file-name').text()})});$('.shareButtons-button').on('click',function(){gtag('event','share',{method:$(this).attr('class').match(/.*shareButtons-button--(.*?)$|\s/)[1]});});$('.bookmarkLink:not(.is-bookmarked)').on('click',function(){gtag('event','bookmark');});
+		jQuery.extend(true, XF.config, {
+			// 
+			userId: 0,
+			enablePush: false,
+			pushAppServerKey: '',
+			url: {
+				fullBase: 'https://www.dash.org/forum/',
+				basePath: '/forum/',
+				css: '/forum/css.php?css=__SENTINEL__&s=1&l=1&d=1735815695',
+				keepAlive: '/forum/login/keep-alive'
+			},
+			cookie: {
+				path: '/',
+				domain: '',
+				prefix: 'xf_',
+				secure: true,
+				consentMode: 'disabled',
+				consented: ["optional","_third_party"]
+			},
+			cacheKey: '615ddeceb8a0518d72fc136e60505ca6',
+			csrf: '1736762959,2bb2b88f359b54864a2fd540b40e4422',
+			js: {"\/forum\/js\/xf\/lightbox-compiled.js?_v=67acfccc":true},
+			css: {"public:bb_code.less":true,"public:lightbox.less":true,"public:message.less":true,"public:share_controls.less":true,"public:extra.less":true},
+			time: {
+				now: 1736762959,
+				today: 1736726400,
+				todayDow: 1,
+				tomorrow: 1736812800,
+				yesterday: 1736640000,
+				week: 1736208000
+			},
+			borderSizeFeature: '3px',
+			fontAwesomeWeight: 'r',
+			enableRtnProtect: true,
+			
+			enableFormSubmitSticky: true,
+			uploadMaxFilesize: 41943040,
+			allowedVideoExtensions: ["m4v","mov","mp4","mp4v","mpeg","mpg","ogv","webm"],
+			allowedAudioExtensions: ["mp3","opus","ogg","wav"],
+			shortcodeToEmoji: true,
+			visitorCounts: {
+				conversations_unread: '0',
+				alerts_unviewed: '0',
+				total_unread: '0',
+				title_count: true,
+				icon_indicator: true
+			},
+			jsState: {},
+			publicMetadataLogoUrl: '',
+			publicPushBadgeUrl: 'https://www.dash.org/forum/styles/default/xenforo/bell.png'
+		});
+
+		jQuery.extend(XF.phrases, {
+			// 
+			date_x_at_time_y: "{date} at {time}",
+			day_x_at_time_y:  "{day} at {time}",
+			yesterday_at_x:   "Yesterday at {time}",
+			x_minutes_ago:    "{minutes} minutes ago",
+			one_minute_ago:   "1 minute ago",
+			a_moment_ago:     "A moment ago",
+			today_at_x:       "Today at {time}",
+			in_a_moment:      "In a moment",
+			in_a_minute:      "In a minute",
+			in_x_minutes:     "In {minutes} minutes",
+			later_today_at_x: "Later today at {time}",
+			tomorrow_at_x:    "Tomorrow at {time}",
+
+			day0: "Sunday",
+			day1: "Monday",
+			day2: "Tuesday",
+			day3: "Wednesday",
+			day4: "Thursday",
+			day5: "Friday",
+			day6: "Saturday",
+
+			dayShort0: "Sun",
+			dayShort1: "Mon",
+			dayShort2: "Tue",
+			dayShort3: "Wed",
+			dayShort4: "Thu",
+			dayShort5: "Fri",
+			dayShort6: "Sat",
+
+			month0: "January",
+			month1: "February",
+			month2: "March",
+			month3: "April",
+			month4: "May",
+			month5: "June",
+			month6: "July",
+			month7: "August",
+			month8: "September",
+			month9: "October",
+			month10: "November",
+			month11: "December",
+
+			active_user_changed_reload_page: "The active user has changed. Reload the page for the latest version.",
+			server_did_not_respond_in_time_try_again: "The server did not respond in time. Please try again.",
+			oops_we_ran_into_some_problems: "Oops! We ran into some problems.",
+			oops_we_ran_into_some_problems_more_details_console: "Oops! We ran into some problems. Please try again later. More error details may be in the browser console.",
+			file_too_large_to_upload: "The file is too large to be uploaded.",
+			uploaded_file_is_too_large_for_server_to_process: "The uploaded file is too large for the server to process.",
+			files_being_uploaded_are_you_sure: "Files are still being uploaded. Are you sure you want to submit this form?",
+			attach: "Attach files",
+			rich_text_box: "Rich text box",
+			close: "Close",
+			link_copied_to_clipboard: "Link copied to clipboard.",
+			text_copied_to_clipboard: "Text copied to clipboard.",
+			loading: "Loading…",
+			you_have_exceeded_maximum_number_of_selectable_items: "You have exceeded the maximum number of selectable items.",
+
+			processing: "Processing",
+			'processing...': "Processing…",
+
+			showing_x_of_y_items: "Showing {count} of {total} items",
+			showing_all_items: "Showing all items",
+			no_items_to_display: "No items to display",
+
+			number_button_up: "Increase",
+			number_button_down: "Decrease",
+
+			push_enable_notification_title: "Push notifications enabled successfully at Dash Forum",
+			push_enable_notification_body: "Thank you for enabling push notifications!",
+
+			pull_down_to_refresh: "Pull down to refresh",
+			release_to_refresh: "Release to refresh",
+			refreshing: "Refreshing…"
+		});
+	</script>
+
+	<form style="display:none" hidden="hidden">
+		<input type="text" name="_xfClientLoadTime" value="" id="_xfClientLoadTime" title="_xfClientLoadTime" tabindex="-1" />
+	</form>
+
+	
+
+
+
+
+
+	
+	
+		
+		
+			<script type="application/ld+json">
+				{
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "url": "https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/",
+    "mainEntity": {
+        "@type": "DiscussionForumPosting",
+        "@id": "https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/",
+        "headline": "Announcing DIP 27 - Dash Core Credit Pool",
+        "datePublished": "2024-09-25T19:02:12+00:00",
+        "url": "https://www.dash.org/forum/threads/announcing-dip-27-dash-core-credit-pool.55335/",
+        "articleSection": "Official Announcements",
+        "author": {
+            "@type": "Person",
+            "@id": "https://www.dash.org/forum/members/thephez.4665/",
+            "name": "thephez",
+            "url": "https://www.dash.org/forum/members/thephez.4665/"
+        },
+        "interactionStatistic": [
+            {
+                "@type": "InteractionCounter",
+                "interactionType": "https://schema.org/ViewAction",
+                "userInteractionCount": 723
+            },
+            {
+                "@type": "InteractionCounter",
+                "interactionType": "https://schema.org/CommentAction",
+                "userInteractionCount": 6
+            },
+            {
+                "@type": "InteractionCounter",
+                "interactionType": "https://schema.org/LikeAction",
+                "userInteractionCount": 3
+            }
+        ],
+        "articleBody": "We're pleased to announce the release of DIP 27! This new proposal describes the mechanism for locking and unlocking Dash in a new store of value on the Core chain. The store of value, called the credit pool, mirrors the credit balance on Dash Platform. New special transactions (asset lock and unlock) enable locking Dash in the credit pool for use on Platform and unlocking it to withdraw back to Dash on the Core chain.\n\nYou can read all the details about DIP 27 on GitHub. Thanks to the authors that assisted in creating this DIP, and special thanks to everyone who contributed to writing and reviewing it."
+    },
+    "publisher": {
+        "@type": "Organization",
+        "name": "Dash Forum",
+        "alternateName": "Dash Forum",
+        "description": "Dash Digital Cash",
+        "url": "https://www.dash.org/forum"
+    }
+}
+			</script>
+		
+	
+
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+

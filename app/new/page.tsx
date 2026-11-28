@@ -1,9 +1,7 @@
-import NewThreadClient from '@/components/NewThreadClient'
-import { loadSnapshot } from '@/lib/services/snapshot-server'
-
-// Title stays in the route layout; no canonical (signed-in surface).
+import { site } from '@/lib/server/site-data'
+import { NewThread } from '@/components/thread/NewThread'
 
 export default function NewThreadPage() {
-  const snap = loadSnapshot()
-  return <NewThreadClient snapshot={snap} />
+  const s = site()
+  return <NewThread categories={s.categories} forums={s.forums.map(({ lastPost: _l, ...f }) => f as typeof s.forums[number])} />
 }

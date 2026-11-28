@@ -1,0 +1,26 @@
+{
+  "settings": {
+    "key": "main",
+    "name": "Dash Forum",
+    "tagline": "The Dash community forum, stored on Dash Platform.",
+    "description": "Discussion about Dash: development, governance, Platform apps, mining and the wider community. Every thread, post and profile is a document on Dash Platform, written by the member's own Dash identity.",
+    "rules": "1. Be civil. Attack ideas, not people.\n2. No spam, scams, referral links or impersonation.\n3. Post in the forum that fits your topic; moderators may move threads.\n4. Governance proposals: one thread per proposal, include the proposal hash.\n5. No illegal content or doxxing.\n\nModerators can hide posts, lock or move threads, and ban identities from writing to this forum. Moderation actions are recorded on chain.",
+    "announcement": "This is the **testnet** build of the Dash Forum on Dash Platform. Log in with a testnet DashPay wallet. History from dash.org/forum is being imported into the archive forums.",
+    "archiveOwnerIndex": 5,
+    "archiveSourceName": "dash.org/forum",
+    "archiveSourceUrl": "https://www.dash.org/forum/"
+  },
+  "categories": [
+    { "slug": "community", "title": "Community", "description": "Start here.", "sort": 10,
+      "forums": [
+        { "slug": "announcements", "title": "Announcements", "description": "News from the forum team and the Dash projects.", "sort": 10 },
+        { "slug": "introductions", "title": "Introductions", "description": "New here? Say hello.", "sort": 20 },
+        { "slug": "forum-feedback", "title": "Forum feedback", "description": "Bugs, ideas and questions about this forum.", "sort": 30 }
+      ]
+    }
+  ],
+  "team": [
+    { "index": 0, "role": "Administrator", "sort": 1 },
+    { "index": 3, "role": "Moderator", "sort": 2 }
+  ]
+}

@@ -10,15 +10,89 @@
   },
   "contracts": {
     "team": {
+      "contractId": "xYdwEvUCcKiPfhZMpjvUptReYR34DDgGNP9Ti4AFtHq",
+      "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
+      "mode": "team",
+      "version": 1,
+      "identityNonce": "4",
+      "registeredAt": "2026-11-28T10:25:23.309Z",
+      "costCredits": "84815577790",
+      "sizeBytes": 9618,
+      "transitionSha256": "3a2e1c03ff56c09e0d51b3b5e14700edc74a579b84936df16b1cca4334f28981",
+      "registrationTxHash": "3a2e1c03ff56c09e0d51b3b5e14700edc74a579b84936df16b1cca4334f28981"
+    }
+  },
+  "retired": {
+    "teamV1": {
       "contractId": "ozZNp21WNWLx79aJXFo2ScEaMtBc9vvfUonqmzADM16",
       "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
       "mode": "team",
       "version": 1,
       "identityNonce": "1",
-      "registeredAt": "2026-11-26T07:06:00Z",
+      "registeredAt": "2026-11-26T07:23:31Z",
       "costCredits": "84722365420",
       "sizeBytes": 7587,
-      "note": "registered via scripts/register-contract.mjs; wait phase failed on the discovered testnet nodes but the broadcast landed (nonce 1 consumed, balance dropped exactly the computed cost, contract fetches with version 1)"
+      "note": "v1 schema; superseded by the v2 registration (contracts.team)",
+      "broadcastAt": "2026-11-26T07:06:00Z",
+      "registrationTxHash": "C1EA4532D42B19C54E0E43F13BC58E1F76ED87D2C0283DF5ABFB5574173D9297",
+      "retiredAt": "2026-11-28"
+    },
+    "teamV2": {
+      "contractId": "85NE7sDLE6UEmPu7GXFwTKUZZudXxLZM6WwVkTTQDKEX",
+      "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
+      "mode": "team",
+      "version": 1,
+      "identityNonce": "2",
+      "registeredAt": "2026-11-28T07:44:45.214Z",
+      "costCredits": "90809183230",
+      "sizeBytes": 9198,
+      "registrationTxHash": "1867906166cf6f0810e1420cb59d249f5dc3b33d00eaf0d51f7c4e12a16ae832",
+      "note": "v2 schema; superseded by v3 (consensus-enforced locks and archived forums)",
+      "retiredAt": "2026-11-28"
+    },
+    "teamV3": {
+      "contractId": "9e34k5BMLbEwmTz69aiihHec8VMZy7RuE4BmR935LoWC",
+      "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
+      "mode": "team",
+      "version": 2,
+      "identityNonce": "3",
+      "registeredAt": "2026-11-28T09:38:00Z",
+      "costCredits": "84786346210",
+      "note": "v3 schema; superseded by v4 (locks freeze edits and reactions, archive provenance immutable, no self-reactions)",
+      "retiredAt": "2026-11-28"
     }
-  }
+  },
+  "personas": [
+    {
+      "index": 1,
+      "name": "alice",
+      "id": "BHDMfa8MYiS2NsVY6pfbGfdsALBR9SvVFWNwGxPjJ3k5",
+      "role": "member",
+      "status": "not created: identity create timed out repeatedly; asset lock 52f1daa5\u20263f20 (height 1599940) still unclaimed"
+    },
+    {
+      "index": 2,
+      "name": "bob",
+      "id": "EDoZfJsavmP14Z5Pxv3GBf8pcRuKwC8QjADY8JMWhVkP",
+      "role": "member"
+    },
+    {
+      "index": 3,
+      "name": "carol",
+      "id": "HjcLR3HK3ruGCbEMJUy9ycdBDtRhWAYAifMoYxYti2L",
+      "role": "moderator"
+    },
+    {
+      "index": 4,
+      "name": "mallory",
+      "id": "5T9NKrPoBWrEDgyGfSHqaqDSKeTkHMr3otusqaxGmbyP",
+      "role": "spammer (ban target)"
+    },
+    {
+      "index": 5,
+      "name": "archivist",
+      "id": "99hojzpvB5hAt5Dy7vsJPbWGUcHgWDHeF1L78VW7nKxH",
+      "role": "archive importer (forumSettings.archiveOwnerId)"
+    }
+  ]
 }

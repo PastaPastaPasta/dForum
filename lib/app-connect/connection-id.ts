@@ -2,10 +2,14 @@
  * The connection id: 16 random bytes per (browser install, network), kept
  * across logouts so a re-login supersedes the earlier grant (the wallet
  * disables the old keys for the same (identity, appId, CONNECTION_ID))
- * instead of accreting a fresh grant on every sign-in.
+ * instead of accreting a fresh grant on every sign-in. Scoped by network —
+ * the wallet keeps one (identity, appId, connectionId) record per network,
+ * and a shared id would make the grant record ambiguous across networks.
  */
 
-const STORAGE_KEY = 'dforum:app-connect:connection-id'
+import { NETWORK } from '@/lib/constants'
+
+const STORAGE_KEY = `dforum:app-connect:connection-id:${NETWORK}`
 
 export function getConnectionId(): string | null {
   if (typeof window === 'undefined') return null

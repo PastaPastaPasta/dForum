@@ -26,15 +26,3 @@ export const CONTRACT_ID =
  * Every same-origin page can read sessionStorage, so the host gate (lib/host.ts)
  * is what protects the key material, not this prefix. */
 export const STORAGE_KEY_PREFIX = process.env.NEXT_PUBLIC_STORAGE_SCOPE || 'dforum'
-
-/** App chrome + content limits mirrored from contracts/build.mjs. */
-export const LIMITS = {
-  title: 150,
-  body: 4000,
-  bodyMaxBytes: 5120,
-  bio: 1000,
-  displayName: 40,
-  signature: 300,
-  website: 200,
-  maxTags: 5,
-} as const

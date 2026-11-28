@@ -21,7 +21,7 @@ function toBase64OfBytes(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function toBytes(value: unknown): Uint8Array | null {
+export function toBytes(value: unknown): Uint8Array | null {
   if (value instanceof Uint8Array) return value
   if (Array.isArray(value) && value.every((n) => typeof n === 'number')) return new Uint8Array(value)
   if (typeof value === 'string') {
@@ -49,7 +49,7 @@ function toBytes(value: unknown): Uint8Array | null {
 }
 
 /** Identifier-like fields arrive as base58 strings or bytes; normalize to a base58 id. */
-function idToBase58(value: unknown): string | null {
+export function idToBase58(value: unknown): string | null {
   if (!value) return null
   if (typeof value === 'string') {
     if (/^[0-9a-fA-F]{64}$/.test(value)) {

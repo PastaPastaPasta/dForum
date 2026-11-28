@@ -10,17 +10,9 @@
  * the same byte layout the unbound legacy path produces, just wrapped in a
  * batch.
  */
-import {
-  BatchedTransition,
-  BatchTransition,
-  DocumentCreateTransition,
-  DocumentReplaceTransition,
-  PrivateKey,
-  type Document,
-  type IdentityPublicKey,
-  type StateTransition,
-} from '@dashevo/wasm-sdk'
+import type { Document, IdentityPublicKey, StateTransition } from '@dashevo/wasm-sdk'
 import { getSdk } from '@/lib/services/evo-sdk-service'
+import { CONTRACT_ID } from '@/lib/constants'
 
 export type BatchWriteKind = 'create' | 'replace'
 
@@ -33,7 +25,14 @@ export interface BatchWriteArgs {
   nonce: bigint
   authKeyWif: string
   identityKey: IdentityPublicKey
+  /** After an ambiguous failure: did the write land anyway? */
+  landed?: (documentId: string) => Promise<boolean>
 }
+
+export const STALE_NONCE = /invalid identity nonce|nonce already present|code 40204/i
+const TRANSIENT = /Tenderdash is not available|\(code 14\)|UNAVAILABLE|Deadline expired|timed out|no available (addresses|nodes)|connection (refused|reset)|transport error/i
+const ALREADY_SEEN = /already (in|exists|received|been)|duplicate state transition|in (the )?mempool|state transition .*already/i
+const errText = (e: unknown) => String((e as { message?: unknown })?.message ?? e)
 
 /**
  * Builds, signs and broadcasts the batched write, waiting for the proof.
@@ -42,10 +41,29 @@ export interface BatchWriteArgs {
  * already on the document.
  */
 export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
-  const transition =
-    args.kind === 'create'
-      ? new DocumentCreateTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()
-      : new DocumentReplaceTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()
+  // Defence in depth on the signing path — the chain's key bounds already
+  // enforce both, but a caller bug should refuse before signing, not after.
+  if (!args.ownerId) throw new Error('Batched write requires an owner id')
+  const documentContractId = args.document.dataContractId?.toBase58?.() ?? null
+  if (documentContractId && documentContractId !== CONTRACT_ID) {
+    throw new Error(`Refusing to sign a write for contract ${documentContractId} — dForum contract is ${CONTRACT_ID}`)
+  }
+  const documentOwnerId = args.document.ownerId?.toBase58?.() ?? null
+  if (documentOwnerId && documentOwnerId !== args.ownerId) {
+    throw new Error('Batched write owner does not match the document owner')
+  }
+  const { BatchedTransition, BatchTransition, DocumentCreateTransition, DocumentReplaceTransition, PrivateKey } = await import('@dashevo/evo-sdk')
+  let transition
+  if (args.kind === 'create') {
+    transition = new DocumentCreateTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()
+  } else {
+    // The document carries the new revision; some SDK builds bump it again inside the
+    // transition constructor, so pin it to what the chain expects (current + 1).
+    const replace = new DocumentReplaceTransition({ document: args.document, identityContractNonce: args.nonce })
+    const wanted = args.document.revision
+    if (wanted !== undefined && replace.revision !== wanted) replace.revision = wanted
+    transition = replace.toDocumentTransition()
+  }
   const batched = new BatchedTransition(transition)
   const stateTransition: StateTransition = BatchTransition.fromBatchedTransitions([batched], args.ownerId, 0).toStateTransition()
   stateTransition.setIdentityContractNonce(args.nonce)
@@ -58,8 +76,45 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
   }
 
   const sdk = await getSdk()
-  await sdk.stateTransitions.broadcastAndWait(stateTransition)
-  stateTransition.free()
+  const documentId = args.document.id?.toBase58?.() ?? ''
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await sdk.stateTransitions.broadcastAndWait(stateTransition)
+        break
+      } catch (e) {
+        const landed = () => (documentId && args.landed ? args.landed(documentId).catch(() => false) : Promise.resolve(false))
+        if (await landed()) break
+        // The network already has this exact transition: it will land (or expire); wait for it
+        // rather than failing into a user retry that would sign a second write.
+        if (ALREADY_SEEN.test(errText(e))) {
+          let ok = false
+          for (let i = 0; i < 12 && !ok; i++) {
+            await new Promise((r) => setTimeout(r, 5000))
+            ok = await landed()
+          }
+          if (ok) break
+          throw new Error('The network received this write but has not confirmed it yet. Reload the page in a minute before trying again.')
+        }
+        // A stale nonce can mean an earlier send of this same transition landed (the SDK and this
+        // loop both resend). Give a lagging node time to show it before reporting a refusal, so the
+        // caller never signs a second copy of a write that went through.
+        if (STALE_NONCE.test(errText(e)) && !/too far in (the )?future/i.test(errText(e))) {
+          let ok = false
+          for (let i = 0; i < 12 && !ok; i++) {
+            await new Promise((r) => setTimeout(r, 2500))
+            ok = await landed()
+          }
+          if (ok) break
+          throw e
+        }
+        if (attempt >= 3 || !TRANSIENT.test(errText(e))) throw e
+        await new Promise((r) => setTimeout(r, 1500 * attempt))
+      }
+    }
+  } finally {
+    stateTransition.free()
+  }
 
   // After construction the create transition writes the derived id back onto
   // the document; the replace keeps its existing id. Either way it is the id

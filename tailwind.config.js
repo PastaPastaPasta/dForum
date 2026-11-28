@@ -1,33 +1,33 @@
 /** @type {import('tailwindcss').Config} */
+const token = (name) => `rgb(var(--${name}) / <alpha-value>)`
+
 module.exports = {
-  darkMode: 'class',
-  content: [
-    './app/**/*.{ts,tsx}',
-    './components/**/*.{ts,tsx}',
-    './lib/**/*.{ts,tsx}',
-  ],
+  darkMode: ['selector', '[data-theme="dark"]'],
+  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}'],
   theme: {
     extend: {
       fontFamily: {
-        sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-serif)', 'Georgia', 'serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
       colors: {
-        dash: {
-          DEFAULT: '#008CE7',
-          dark: '#006bb3',
-          light: '#33a0f0',
-          400: '#75d0ff',
-          500: '#3aacff',
-        },
-        // Design tokens — use these instead of raw hex utilities going forward.
-        base: '#0b1220',        // page background
-        surface: '#111a2e',     // cards / panels
-        surface2: '#18233c',    // subtle fills / chips
-        line: '#22304e',        // borders / dividers
-        text: '#e8edf7',        // primary text
-        muted: '#93a1bd',       // secondary text
-        input: 'var(--input-border)', // input borders (--input-border = #62749b)
+        paper: token('paper'),
+        sheet: token('sheet'),
+        sunk: token('sunk'),
+        rule: token('rule'),
+        ink: token('ink'),
+        'ink-2': token('ink-2'),
+        dash: token('dash'),
+        'dash-ink': token('dash-ink'),
+        live: token('live'),
+        archive: token('archive'),
+        'archive-wash': token('archive-wash'),
+        danger: token('danger'),
+        'danger-ink': token('danger-ink'),
+        field: token('field'),
       },
+      maxWidth: { page: '76rem', read: '44rem' },
     },
   },
   plugins: [],

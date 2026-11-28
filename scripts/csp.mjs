@@ -33,6 +33,8 @@ const META_RE = /<meta\s+http-equiv="Content-Security-Policy"[^>]*\/?>/i
 // Insert right after the charset meta (or right after <head>) so the policy
 // governs every external script and all content below — a meta placed late in
 // <head> would arrive after the scripts it is meant to allow.
+// No whitespace around the insert: React hydrates <head>, and a stray text node there fails
+// hydration on every page (React #418), forcing a full client re-render.
 const CHARSET_RE = /<meta\s+charset=[^>]*>/i
 const HEAD_OPEN_RE = /<head>/i
 
@@ -51,20 +53,31 @@ for (const file of files) {
   const csp =
     "default-src 'self'; script-src 'self'" +
     (hashes.length ? ' ' + hashes.join(' ') : '') +
-    " 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; base-uri 'self'; form-action 'self'"
+    " 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; base-uri 'self'; form-action 'self'"
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`
   // Drop any existing meta (the layout used to emit one) — we re-insert it in
   // the right position so the policy governs every external script below it.
-  html = html.replace(META_RE, '')
+  html = html.replace(/\n?<meta\s+http-equiv="Content-Security-Policy"[^>]*\/?>/i, '')
   if (CHARSET_RE.test(html)) {
-    html = html.replace(CHARSET_RE, (m) => `${m}\n${meta}`)
+    html = html.replace(CHARSET_RE, (m) => `${m}${meta}`)
   } else if (HEAD_OPEN_RE.test(html)) {
-    html = html.replace(HEAD_OPEN_RE, (m) => `${m}\n${meta}`)
+    html = html.replace(HEAD_OPEN_RE, (m) => `${m}${meta}`)
   } else {
     // No insertion point — leaving it unchanged would ship an unprotected page.
-    console.warn(`WARN: no <head> in ${file} — leaving it unchanged`)
+    console.error(`FAIL: no <head> in ${file}`)
+    process.exitCode = 1
     continue
   }
   writeFileSync(file, html)
+}
+// Final gate: every emitted page must carry the policy — a page that lost its
+// meta would be an unprotected leak of whatever inline scripts it holds.
+for (const file of files) {
+  if (process.exitCode) break
+  const html = readFileSync(file, 'utf8')
+  if (!META_RE.test(html)) {
+    console.error(`FAIL: no CSP meta in ${file}`)
+    process.exitCode = 1
+  }
 }
 console.log(`csp: ${files.length} pages processed, ${inlineScripts} inline script payloads hashed`)
