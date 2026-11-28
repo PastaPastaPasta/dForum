@@ -56,10 +56,14 @@ export function ThreadRoute({ id, n = 1 }: { id: string; n?: number }) {
   const posts = tf.posts.slice((n - 1) * POSTS_PER_PAGE, n * POSTS_PER_PAGE)
   const { crumbs, archived } = forumCrumbs(tf.forumId)
   const reactions = Object.fromEntries(posts.filter((p) => tf.reactions[p.id]).map((p) => [p.id, tf.reactions[p.id]]))
+  const forumTitle = crumbs.at(-1)?.label ?? ''
   return (
-    <ThreadPage threadId={id} thread={tf.thread} crumbs={crumbs} forumArchived={archived} posts={posts} firstNumber={(n - 1) * POSTS_PER_PAGE + 1}
+    <div data-pagefind-body>
+      <span hidden data-pagefind-filter="forum">{forumTitle}</span>
+      <ThreadPage threadId={id} thread={tf.thread} crumbs={crumbs} forumArchived={archived} posts={posts} firstNumber={(n - 1) * POSTS_PER_PAGE + 1}
       page={n} pages={pages} postIndex={tf.posts.map((p) => p.id.slice(0, 12))} reactions={reactions}
       members={memberCards(posts.map((p) => p.ownerId).concat(tf.thread.ownerId))} roles={rolesFor()} snapshotAt={s.snapshotAt}
       archive={s.settings.archiveOwnerId} sourceUrl={s.settings.archiveSourceUrl} />
+    </div>
   )
 }

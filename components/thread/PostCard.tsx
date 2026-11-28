@@ -82,15 +82,15 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
       <div className="flex min-w-0 flex-col">
         <header className="flex items-center gap-2 px-4 pt-3 text-sm text-ink-2 md:px-5">
           <Link href={`/t/${threadId}/#post-${post.id}`} className="hover:text-dash"><Time at={at} /></Link>
+          {imported && (
+            <span className="rounded bg-archive-wash px-1.5 text-xs text-archive">
+              Archive{sourceUrl && origPostId ? <>{' '}<a className="underline" href={`${sourceUrl.replace(/\/?$/, '/')}posts/${origPostId}/`} rel="nofollow noopener" aria-label={`Original post by ${imported}`}>original</a></> : null}
+            </span>
+          )}
           {isEdited(post) && !retracted && !imported && <span className="flex items-center gap-1" title={`Edited ${new Date(post.updatedAt).toUTCString()}`}><History className="h-3.5 w-3.5" />edited</span>}
           <a href={`#post-${post.id}`} className="ml-auto tabnum hover:text-dash" aria-label={`Permalink to post ${n}`}>#{n}</a>
         </header>
-        {imported && (
-          <p className="mx-4 mt-2 rounded-md bg-archive-wash px-3 py-1.5 text-sm text-archive md:mx-5">
-            Imported from the archive. Originally posted by {imported}
-            {sourceUrl && origPostId ? <> (<a className="underline" href={`${sourceUrl.replace(/\/?$/, '/')}posts/${origPostId}/`} rel="nofollow noopener">source</a>)</> : null}.
-          </p>
-        )}
+
         <div className="flex-1 px-4 py-3 md:px-5">
           {hidden ? (
             <p className="flex items-center gap-2 text-ink-2"><EyeOff className="h-4 w-4" />This post was hidden by a moderator.</p>
@@ -108,7 +108,7 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
           )}
         </div>
         {!hidden && !retracted && !editing && (
-          <footer className="flex flex-wrap items-center gap-1 border-t border-rule px-2 py-1.5 md:px-3">
+          <footer data-pagefind-ignore className="flex flex-wrap items-center gap-1 border-t border-rule px-2 py-1.5 md:px-3">
             <Reactions counts={reactions} mine={mine} canReact={actions.canWrite && !own} busy={busy} onReact={(k) => actions.onReact(post, k)} />
             <div className="ml-auto flex flex-wrap items-center">
               <button type="button" className="btn-ghost text-sm" onClick={() => void navigator.clipboard?.writeText(`${location.origin}/t/${threadId}/#post-${post.id}`)}>

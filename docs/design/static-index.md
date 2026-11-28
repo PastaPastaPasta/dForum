@@ -1,51 +1,48 @@
-# Static index (SEO / AI indexing)
+# Static index and live overlay
 
-Two stages, never a separate `/index/` tree. Both stages read only what the
-snapshot holds — the build never touches the network.
+## Snapshot (`scripts/snapshot.mjs`)
 
-1. `scripts/snapshot.mjs` — a full rebuild, not an incremental delta. Queries
-   the platform for every category (≤50), every forum (≤50), the latest
-   threads (up to 60 listed; the scan paginates via a `startAfter` cursor,
-   never a timestamp, so orphan-spam cannot push real threads out of the
-   window), and the per-type proved counts (categories/forums/threads/posts/
-   reactions). Moderated content (any non-null `modState`) is excluded, as are
-   threads whose opening post is hidden or absent (the orphan rule — see
-   `docs/design/data-model.md`). Writes `data/snapshot.json` (forums/categories/
-   threads, never post bodies — the bundle is imported by every client page)
-   and `data/posts/<threadId>.json` for each listed thread (the first 5 visible
-   posts at/after the opening post — the static thread page renders these).
-   Both files are gitignored, regenerated hourly by the workflow — never a git
-   branch: git keeps taken-down content forever.
-2. `next build` — prerenders every route from the snapshot. New content made
-   since the snapshot renders live through the `404.html` SPA fallback.
+- **Watermark.** Each run starts by reading the platform block time (`queryWithProof` metadata). That time becomes the watermark.
+- **Small types are read in full:** forumSettings, category, forum and teamMember. The contract is read for the owner and roster.
+- **Incremental reads.** thread, post, reaction and profile are read by `$updatedAt >=` the last watermark minus 10 minutes, plus `$moderatedAt >=` for moderated types. Results merge into the raw-document cache (`.cache/snapshot-state.json`), where the higher revision wins.
+- **`--full`** (and any missing cache or contract change) rescans everything. CI runs a full scan daily at 03:00 UTC and on manual dispatch. A full scan is the only way a moderator *delete* drops out; hides, edits and author deletes arrive incrementally.
+- **Outputs**, through the same rules as the browser (lib/forum/model.ts):
+  - `data/site.json`: settings, roster, categories, forums with rolled-up counts and last post, stats, latest threads and posts, tags.
+  - `data/forum/<id>.json`: thread summaries, pinned first, then latest activity.
+  - `data/thread/<id>.json`: the thread, every post in order (hidden and retracted posts as empty placeholders), and reaction counts.
+  - `data/user/<id>.json` and `data/members.json`.
+  - `data/archive-members.json`.
+- Any read error fails the run. CI then fails, and the last good deploy keeps serving.
 
-## Routes (canonical, self-static HTML)
-- `/` — home (latest threads, forums, categories, live-fills from the platform after hydration)
-- `/f/{slug}/` — forum listing (path route; prerendered from the snapshot)
-- `/t/{id}/` — thread (path route; prerendered from the snapshot)
-- `/u/{identityId}/` — member profile (path route; prerendered for owners listed in the snapshot)
-- `/login`, `/search`, `/new`, `/settings`, `/moderation` — static shell routes
-- `/sitemap.xml`, `/robots.txt`, `/llms.txt`, `/data/v1/manifest.json` — written by `scripts/generate-static-seo.mjs` (sitemap: threads + forums, path routes, trailing slash, moderated content excluded)
+## Build
 
-The build reads only the snapshot — never the network. `generateStaticParams`
-is fed from the snapshot; a broken snapshot fails the build and the last good
-deploy keeps serving.
+Next.js 14 static export.
 
-## Gates
-- Completeness: any fetch/count error throws — the build then fails and the
-  last good deploy keeps serving. An honest empty answer (zero listable
-  threads) does NOT fail the build — the SPA fallback covers the gap.
-- Threads are listed only when the opening post exists AND is itself
-  visible (the orphan rule, applied identically to the snapshot and the live
-  clients). Hidden or ownerless threads are excluded from the snapshot, the
-  sitemap, llms.txt, the manifest and the prerendered pages.
-- Index-window overflow (forums/categories filled their 50-doc window) fails
-  the build loudly — silently truncated indexes would lie about the site.
-- Moderated content is never published on the static index (site map,
-  prerendered pages, llms.txt, manifest) — it stays on-chain and renders only
-  live.
+- **Routes:**
+  - `/`
+  - `/f/<slug>/` and `/f/<slug>/page/<n>/` (30 threads per page)
+  - `/t/<id>/` and `/t/<id>/page/<n>/` (20 posts per page)
+  - `/u/<id>/`, `/members/`, `/whats-new/`, `/tags/<tag>/`, `/rules/`, `/search/`
+  - `/new/`, `/settings/`, `/alerts/`, `/login/`, `/moderation/`
+- **Network:** the build reads only `data/` and never the network.
+- **Post-build** (`npm run index:site`, after `postbuild` writes the hashed CSP):
+  - `sitemap.xml`, `robots.txt`, `llms.txt`
+  - RSS: `feed.xml` and `f/<slug>/feed.xml`
+  - the public static API: `data/v2/site.json`, `data/v2/forum/<id>.json`, `data/v2/thread/<id>.json`
+  - a Pagefind full-text index over the thread pages (`data-pagefind-body`; composer and reaction controls excluded)
 
-## Incremental / freshness
-- Hourly: full snapshot (bounded window: latest 60 threads, ≤50 forums/categories) then a rebuild. No incremental delta pipeline: a bounded window plus an honest 404-fallback covers the gap, and a full rebuild is simple and reproducible.
-- New threads/forums/posts not yet in the snapshot: SPA fallback via GH Pages `404.html` (404 status; `/t/`, `/f/`, `/u/` URLs render the live client components for that path; anything else shows the plain 404) until the next build runs — the hourly cron keeps the gap small.
-- Hydration: static renders first; the SDK loads after first paint; the live layer re-queries the platform and fills in everything newer (and the moderated-state of what was prerendered is re-checked against the live query).
+## Live overlay (lib/live/overlay.ts)
+
+- **Delta queries.** After hydration each page subscribes to one shared store. It runs the same delta queries as the snapshot (byUpdated and moderated, from `snapshotAt` minus 10 minutes) and polls every 45 s while the tab is visible. Pages fold the delta into their static data with `lib/forum/live-merge.ts`:
+  - new threads (once their opening post is visible)
+  - new replies, which bump counts, last post and "What's new"
+  - edits, hides, moves, locks and pins
+  - profile changes
+- **Reactions.** Thread pages also load all of the thread's reactions (`reaction.byThread`) for exact counts and the member's own reaction.
+- **Newer content.** Threads and members newer than the snapshot have no prerendered page. GitHub Pages serves `404.html`, which renders them live from the chain (`components/site/LiveFallback.tsx`).
+- **Own writes** show immediately (`injectLocal`), before the next poll.
+- The SDK (about 30 MB of WASM) loads lazily. First Load JS is about 140 KB.
+
+## Hosting
+
+GitHub Pages (`forum.dashhq.org`), via `.github/workflows/pages.yml`: hourly cron, push to `main`, and dispatch. The build job has read-only permissions; a separate deploy job publishes. The snapshot cache lives in the Actions cache, never in git, so taken-down content is not kept forever. At full dash.org scale (about 18k thread pages) the export is a few hundred MB, inside Pages limits; Cloudflare R2 behind the same workflow is the fallback if it outgrows them.

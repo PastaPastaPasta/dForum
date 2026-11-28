@@ -3,15 +3,16 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, EyeOff, Lock, Pin, Pencil } from 'lucide-react'
+import { Archive, Eye, EyeOff, Lock, Pin, Pencil } from 'lucide-react'
 import type { MemberView, RawDoc, ReactionCounts } from '@/lib/forum/types'
 import { POSTS_PER_PAGE } from '@/lib/forum/types'
 import {
-  archiveAuthor, byEffective, countReactions, effectiveAt, isHidden, mergeDocs, num, postBody, str, threadLockedAt, threadPosts, threadTags,
+  archiveAuthor, byEffective, countReactions, effectiveAt, isHidden, mergeDocs, num, postBody, str, threadForumId, threadLockedAt, threadPosts, threadTags,
 } from '@/lib/forum/model'
 import { editPost, editThread, react, reply, report, retractPost } from '@/lib/forum/actions'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
+import { useWatch } from '@/lib/watch'
 import { getDoc, queryAll } from '@/lib/live/platform'
 import { useSession } from '@/lib/session'
 import { LOGIN_AVAILABLE } from '@/lib/host'
@@ -38,6 +39,8 @@ export interface ThreadPageProps {
   snapshotAt: number
   archive?: string
   sourceUrl?: string
+  /** For threads newer than the snapshot: lets the page build its breadcrumbs. */
+  forums?: Array<{ id: string; slug: string; title: string; parentForumId?: string; archived: boolean }>
 }
 
 const ID_PREFIX = 12
@@ -116,6 +119,10 @@ export function ThreadPage(props: ThreadPageProps) {
     return out
   }, [reactionDocs, session])
 
+  const totalPosts = props.thread ? props.postIndex.length + (page === pages ? posts.length - props.posts.length : 0) : posts.length
+  const watch = useWatch(threadId, str(thread ?? undefined, 'title') ?? '', totalPosts)
+  const markSeen = watch.markSeen
+  useEffect(() => { if (thread && page === pages) markSeen() }, [thread, page, pages, markSeen])
   const nameOf = useNames(
     Object.fromEntries(Object.values(props.members).filter((m) => m.name).map((m) => [m.id, m.name])),
     posts.map((p) => p.ownerId).concat(thread ? [thread.ownerId] : []),
@@ -184,17 +191,27 @@ export function ThreadPage(props: ThreadPageProps) {
     )
   }
 
+  let crumbs = props.crumbs
+  let forumArchived = props.forumArchived
+  if (!props.thread && props.forums) {
+    const byId = new Map(props.forums.map((f) => [f.id, f]))
+    const chain = []
+    let f = byId.get(threadForumId(thread))
+    forumArchived = f?.archived ?? false
+    while (f && chain.length < 6) { chain.unshift(f); f = f.parentForumId ? byId.get(f.parentForumId) : undefined }
+    crumbs = [{ href: '/', label: 'Forums' }, ...chain.map((x) => ({ href: `/f/${x.slug}/`, label: x.title }))]
+  }
   const title = str(thread, 'title') ?? '(untitled)'
   const locked = threadLockedAt(thread) !== undefined
   const imported = archiveAuthor(thread, archive)
   const opener = imported ?? nameOf(thread.ownerId)
   const ownThread = session?.identityId === thread.ownerId && !imported
-  const canReply = canWrite && !locked && !props.forumArchived && !isHidden(thread)
+  const canReply = canWrite && !locked && !forumArchived && !isHidden(thread)
   const hrefFor = (n: number) => (n === 1 ? `/t/${threadId}/` : `/t/${threadId}/page/${n}/`)
 
   return (
     <div className="space-y-5">
-      <Breadcrumbs items={props.crumbs} />
+      <Breadcrumbs items={crumbs} />
       <header className="space-y-2">
         {editingTitle ? (
           <form className="flex flex-wrap gap-2" onSubmit={(e) => {
@@ -209,7 +226,7 @@ export function ThreadPage(props: ThreadPageProps) {
           <h1 className="flex items-start gap-2 text-2xl font-semibold leading-tight tracking-tight">
             {thread.p.sticky === true && <Pin aria-label="Pinned" className="mt-1.5 h-5 w-5 shrink-0 text-dash" />}
             {locked && <Lock aria-label="Locked" className="mt-1.5 h-5 w-5 shrink-0 text-ink-2" />}
-            <span>{title}</span>
+            <span data-pagefind-meta="title">{title}</span>
             {ownThread && canWrite && (
               <button type="button" className="btn-ghost ml-1 mt-0.5" aria-label="Edit title" onClick={() => { setTitleDraft(title); setEditingTitle(true) }}>
                 <Pencil className="h-4 w-4" />
@@ -218,6 +235,9 @@ export function ThreadPage(props: ThreadPageProps) {
           </h1>
         )}
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-2">
+          <button type="button" onClick={watch.toggle} aria-pressed={watch.watching} className="btn btn-quiet order-last ml-auto py-1 text-xs" data-pagefind-ignore>
+            {watch.watching ? <><EyeOff className="h-3.5 w-3.5" />Unwatch</> : <><Eye className="h-3.5 w-3.5" />Watch</>}
+          </button>
           <span>Started by {imported ? <span className="text-archive">{imported}</span> : <Link className="font-medium text-ink hover:text-dash" href={`/u/${thread.ownerId}/`}>{opener}</Link>}</span>
           <Time at={effectiveAt(thread, archive)} />
           {threadTags(thread).map((t) => <Link key={t} href={`/tags/${t}/`} className="rounded bg-sunk px-1.5 py-0.5 text-xs hover:text-dash">{t}</Link>)}
@@ -245,14 +265,14 @@ export function ThreadPage(props: ThreadPageProps) {
       )}
       <Pagination page={page} pages={pages} href={hrefFor} label="Thread pages" />
 
-      <section id="reply" aria-label="Reply" className="scroll-mt-24">
+      <section id="reply" aria-label="Reply" className="scroll-mt-24" data-pagefind-ignore>
         {locked ? (
           <p className="panel flex items-center gap-2 px-4 py-3 text-ink-2"><Lock className="h-4 w-4" />This thread is locked. New replies are not shown.</p>
-        ) : props.forumArchived ? (
+        ) : forumArchived ? (
           <p className="panel flex items-center gap-2 px-4 py-3 text-ink-2"><Archive className="h-4 w-4" />This forum is archived and read only.</p>
         ) : canReply ? (
           <Composer ref={composer} value={draft} onChange={setDraft} busy={busy === 'reply'} submitLabel="Post reply" label="Write a reply"
-            placeholder="Write a reply…" error={busy === null ? error : null}
+            placeholder="Write a reply…"
             onSubmit={() => void run('reply', async () => {
               await reply(signer(), thread, draft, replyTo)
               setDraft('')
@@ -265,8 +285,13 @@ export function ThreadPage(props: ThreadPageProps) {
             <Link href={`/login/?next=${encodeURIComponent(hrefFor(page))}`} className="btn btn-primary">Log in with Dash</Link>
           </div>
         ) : null}
-        {error && busy === null && !canReply && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
       </section>
+      {error && busy === null && (
+        <div role="alert" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-xl items-start gap-3 rounded-lg border border-danger/40 bg-sheet px-4 py-3 text-sm shadow-lg">
+          <p className="flex-1 text-danger">{error}</p>
+          <button type="button" className="btn-ghost" onClick={() => setError(null)} aria-label="Dismiss">Dismiss</button>
+        </div>
+      )}
     </div>
   )
 }

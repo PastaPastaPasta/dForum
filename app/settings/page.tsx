@@ -44,7 +44,7 @@ export default function SettingsPage() {
       .then(({ docs }) => {
         if (!alive) return
         const p = docs[0]
-        if (p) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, str(p, f.key) ?? ''])) as Draft)
+        if (p) setDraft((cur) => (cur === EMPTY ? (Object.fromEntries(FIELDS.map((f) => [f.key, str(p, f.key) ?? ''])) as Draft) : cur))
         setState('ready')
       })
       .catch(() => alive && setState('error'))
@@ -94,6 +94,7 @@ export default function SettingsPage() {
         {state === 'loading' && <p role="status" className="text-ink-2"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading your profile from Dash Platform…</p>}
         {state === 'error' && <p role="alert" className="text-danger">Couldn&apos;t load your profile. Saving creates a new one only if none exists.</p>}
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void save() }}>
+          <fieldset disabled={state === 'loading'} className="space-y-4 disabled:opacity-60">
           {FIELDS.map((f) => (
             <label key={f.key} className="block">
               <span className="text-sm font-medium">{f.label}</span>
@@ -110,6 +111,7 @@ export default function SettingsPage() {
             <Link href={`/u/${session.identityId}/`} className="link text-sm">View your profile</Link>
           </div>
           {message && <p role={message.ok ? 'status' : 'alert'} className={message.ok ? 'text-live' : 'text-danger'}>{message.text}</p>}
+          </fieldset>
         </form>
       </section>
       <section className="panel space-y-2 p-5 text-sm" aria-labelledby="session-h">

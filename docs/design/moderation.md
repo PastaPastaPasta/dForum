@@ -1,40 +1,55 @@
 # Moderation
 
-Native Dash Platform contract moderation (protocol 14), per contract. Deployer picks the mode; read it at runtime from the fetched contract, never from a document.
+## Modes (`node contracts/build.mjs --moderation …`)
 
-## Modes (contracts/build.mjs `--moderation`)
+| mode | `config.moderation` | use |
+| --- | --- | --- |
+| `team` (default) | banlist, suspensions, warnings, `appointedModerators` | Centralized ownership, non-elected team. This is what forum.dashhq.org runs. |
+| `none` | absent | Nothing can be removed or banned at consensus, ever. Posts become permanent documents. |
+| `network` | `elected` with an interim appointed set | Masternode-elected moderators. Testnet only: a seated team cannot be challenged in protocol 14. |
 
-| mode | `config.moderation` |
-|---|---|
-| none | no `moderation` block (frozen: nothing removable or bannable at consensus, ever) |
-| team (default) | `{banlist: true, suspensions: true, warnings: true, moderators: {$type: "appointedModerators", identities: [...]}}` |
-| network | `{banlist: true, suspensions: true, warnings: true, moderators: {$type: "elected", ...}}` (generator-supported, testnet only) |
+The app reads the mode and roster from the live contract (`getRoster`), never from a document.
 
-- `team` mode is the brief's primary mode: centralized ownership + team-based non-elected moderation.
-- Roster lives in the on-chain contract config (up to 16 named identities, owner always moderates) — managed by the deployer (contract owner) only, via contract update. Moderators cannot add moderators (consensus makes this the only option anyway).
-- `teamMember` documents hold display metadata (role label, order) only, never authority. Badge shown only if identity is owner or in the config's moderator roster.
-- `network` mode contradicts "non-elected" and (in protocol 14, guest: no challenges shipped) leaves a seated team permanent while the deployer loses moderation. Generator supports it for testnet; do not use for forum.dashhq.org.
+## Roster
 
-## What moderation can do (team mode)
+The owner sets the appointed moderators with a contract update:
 
-- ban/unban (banlist) — content from banned identities stops being written to the contract (the banlist stops new writes; it is NOT enforced in the render path — `hideBannedContent` is declared in the contract but is INERT in this build: the app never reads it, and the SDK cannot read the banlist (`sdk.contracts.moderationEntries` throws a WASM binding error in the pinned 5.1.0-rc.1 build), so neither the client nor the snapshot can honor it today — pending an SDK fix. Do not expect banned content to be hidden from the site).
-- suspend/unsuspend (suspensions) — until a block time.
-- warn/clearWarnings (warnings).
-- delete a document (thread/post/profile) — the removal record is kept on-chain (no contents; restore is possible via the SDK/chain within a week, but the app offers no restore action yet — the console honestly warns that deletions cannot be undone); `deleteKeepsFields` [forumId] (thread), [threadId, forumId] (post). `report` is deletable at the contract level but the app neither creates nor moderates reports today — see the next-registration note.
-- change fields (changeFields): `sticky`, `lockedAt`, `modState`, `modNote` (thread); `modState`, `modNote` (post); `status`, `resolution` (report); `customTitle`, `modState` (profile).
-- Moderator-only fields are never set by the author (create refuses: 41124) and never listed in a unique index, nor referenced by another property.
+```bash
+node scripts/set-moderators.mjs --add <identityId> [--remove <identityId>]
+```
 
-## Signing (S1 — decided)
+This signs with the owner's CRITICAL key (`DFORUM_OWNER_WIF` and `DFORUM_OWNER_KEY_ID`; testnet derives it from the deployer seed). The owner always stays on the roster, and the roster holds at most 16 identities. `teamMember` documents only label people (role, order) on the rules and members pages. A badge appears only when the identity is actually on the roster.
 
-Moderation transitions need a CRITICAL authentication key. The App Connect session key is HIGH-level and cannot sign moderation — the moderator console (`/moderation`) pastes the operator's CRITICAL WIF and signs in-tab (freed on wipe: pagehide, tab-hide, in-app navigation, 10-minute idle, unmount). The owner keeps the owner CRITICAL key offline for contract updates; the console refuses the owner key off localhost (the roster is fetched fresh and fail-closed). Design note: the session key (App Connect v2) is contract-bound — it only signs document writes on dForum's contract. The moderation CRITICAL key is still identity-level: the operator pastes it in-tab and the console does not request a bound key, because the roster and moderation config are owner-level authority, not a per-document action.
+## What moderators can do
 
-## Behavior rules
+| action | how | effect |
+| --- | --- | --- |
+| Hide / unhide a thread, post or profile | changeFields `modState` | Hidden everywhere; the post keeps a placeholder. Reversible. |
+| Pin / unpin a thread | changeFields `sticky` | Sorted first in its forum |
+| Lock / unlock a thread | changeFields `lockedAt` | The composer closes; later posts are ignored by every reader |
+| Move a thread | changeFields `movedToForumId` | Listed in the new forum |
+| Delete | `moderatorDeleteDocument` | Removed, leaving a removal record (thread keeps forumId; post keeps threadId and forumId). The console recommends hiding instead. |
+| Resolve a report | changeFields `status` (2 actioned, 3 dismissed) + `resolution` | Leaves the open queue |
+| Ban / unban, suspend / unsuspend, warn / clear warnings | contract moderation lists | The network refuses writes from banned or suspended identities (consensus 41107) |
+| Custom member title | changeFields `customTitle` on the profile | Shown on posts and the profile |
 
-- Hidden content (modState non-null = 1=hidden): snapshot drops the document entirely (not listed, not prerendered); the client suppresses bodies and listings and badges it "hidden". Console writes 1 for hide; any non-null value is treated as hidden everywhere. Note: an owner can hide nothing about a post except by deleting it — hidden posts render as a placeholder in threads.
-- `banned` is never written on profiles — bans live in the ban list (moderation config), not in profile modState.
-- Deleted docs: the removal record is kept on-chain (restore is possible via the SDK/chain within a week, but the app offers no restore action yet); stores just threadId/forumId.
-- Locked threads (lockedAt set): clients ignore posts with $createdAt > lockedAt; the snapshot drops those posts from the static index and the thread is listed too (URL still renders live). The network never enforces the lock (S3).
-- Hide/unhide pairing asymmetry (intentional): hiding an OPENING post hides the thread too (a hidden opening post must not leave the thread re-listable with a different opening post). Unhiding the opening post does NOT auto-unhide the thread — the thread is a separate document with its own modState, and the console mirrors that: unhide is a single-document action and the moderator unhides the thread explicitly. Hide is NOT symmetric with delete either — hide is reversible (modState → 1 → null), delete is not.
-- Reports are public on-chain, reporter included (UI says so).
-- Moderation semantics (settled 2026-11-26): every render path (client, snapshot, sitemap) treats a non-null modState as hidden. Snapshot exclusion happens at both thread and post level; orphan-filtered threads are also excluded from the static index.
-- Orphan rule (settled 2026-11-26, amended 2026-11-26): the opening post is the earliest post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`) — regardless of its moderation state. A thread is listed only when that opening post exists AND is itself visible (not hidden, not past the lock). A hidden opening post means the thread is hidden — shown nowhere. Posts (by anyone) created before the opening post are dropped for listing. The snapshot and the client both apply the rule.
+The network refuses moderation of documents owned by the moderator, the owner or other moderators (41102). The archivist identity therefore must not be on the roster.
+
+## Console (`/moderation`) and CLI
+
+- The console runs only on the canonical host or localhost, never inside a frame (JS frame-buster), and is not indexed.
+- The moderator pastes their own CRITICAL key. It is checked against the identity's keys and the live roster. The owner key is refused anywhere but localhost; keep it offline for contract updates.
+- The key stays in this tab only. It is wiped (signer freed, WIF dropped) on lock, when the tab is hidden, on page hide, after 10 idle minutes, and on unmount. Nothing is persisted.
+- Sections:
+  - **Reports**: the open queue, with hide-and-resolve or dismiss.
+  - **Content**: find by link; hide, pin, lock, move or delete; the latest 25 posts.
+  - **Members**: status, ban, suspend and warn. Ban, suspend and warn need a reason, which is stored on chain.
+  - **Audit log**: documents by `$moderatedAt`.
+- Starting a new lookup clears the previous target before any action buttons render.
+- `scripts/moderate.mjs` performs the same document actions from a terminal: `hide|unhide|pin|unpin|lock|unlock|move|unmove|delete <type> <id>`.
+
+## Known limits
+
+- **Banned users' old content stays visible.** A ban stops new writes but does not hide old content; moderators hide what needs hiding. The SDK build in use cannot list the banlist.
+- **Reports are public on chain,** including the reporter. The report form says so.
+- **Locks are not enforced at consensus** (spike S3). Every reader drops posts created after `lockedAt`.

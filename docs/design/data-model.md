@@ -1,183 +1,91 @@
-# Data model
+# Data model (contract v2)
 
-> The contract schema is written in `contracts/build.mjs` — there is no separate schema file; CI regenerates and diffs the committed outputs against it.
+The schema lives in `contracts/build.mjs`. CI regenerates `contracts/generated/dforum.{none,team,network}.json`, diffs them against the committed files, and validates them with `DataContract.fromJSON(json, true, <protocol>)`. The live testnet registration is recorded in `contracts/deployments/testnet.json`.
 
-One contract per deployment (bans/suspensions apply to a single contract; one deployment, one ban surface). Owner-only types: `forumSettings`, `category`, `forum`, `teamMember`. Public types: `thread`, `post`, `reaction`, `report`, `profile`.
+## Types
 
-## Types and fields (advisor-settled)
+Positions follow declaration order. `?` marks an optional field. *mod* marks a moderator-only field (`moderatorAbilities.changeFields`): an author can never set it, and an author replace must carry it unchanged.
 
-### forumSettings — creationRestrictionMode 1, one doc per deployment
-| field | type | notes |
-|---|---|---|
-| key | string, pattern `^[a-z0-9-]{1,16}$` | unique index byKey (app uses "main") |
-| name | string ≤80 | |
-| tagline | string ≤160 | optional |
-| description | string ≤1000 | optional |
-| rules | string ≤1000 (maxBytes 8192) | optional, markdown |
-| announcement | string ≤500 | optional |
-| hideBannedContent | boolean | optional, default false — declared in the contract; NOT honored by the client or snapshot today (see moderation.md) |
+| type | who creates | mutable / deletable | fields |
+| --- | --- | --- | --- |
+| forumSettings | owner | yes / no | key (`main`), name, tagline?, description?, rules? (≤4000 chars, ≤5120 bytes), announcement?, archiveOwnerId? (identifier), archiveSourceName?, archiveSourceUrl? (https) |
+| category | owner | yes / no | slug (immutable, unique), title, description?, sort |
+| forum | owner | yes / no | categoryId (identifier), parentForumId? (identifier), slug (immutable, unique), title, description?, sort, archived?, origId? |
+| teamMember | owner | yes / yes | memberId (unique), role, sort. Display metadata only; authority comes from the contract roster |
+| thread | anyone | yes / moderator delete keeps forumId | forumId (refersTo forum, immutable), title (3–150), tags? (≤5, `^[a-z0-9-]{1,32}$`), origId?, origAuthor?, origAuthorId?, origCreatedAt?, sticky? *mod*, lockedAt? *mod*, modState? *mod*, modNote? *mod*, movedToForumId? *mod*, modFlags? *mod* |
+| post | anyone | yes / moderator delete keeps threadId and forumId | threadId (refersTo thread where forumId matches, immutable), forumId (refersTo forum, immutable), body (≤5120 bytes), body2? (≤5120 bytes), replyToId?, retracted?, origId?, origAuthor?, origAuthorId?, origCreatedAt?, modState? *mod*, modNote? *mod* |
+| reaction | anyone | yes / no | postId (refersTo post where $ownerId = postOwnerId and threadId matches), postOwnerId, threadId (all immutable), kind (0 = cleared, 1–8) |
+| report | anyone | no / reporter may withdraw | postId (refersTo post where threadId matches), threadId, reason (1–8), note? (≤280), status? *mod* (2 actioned, 3 dismissed), resolution? *mod* |
+| profile | anyone (one per identity) | yes / moderator delete only | displayName, bio?, signature?, avatarUrl? (https), website? (http/https), location?, customTitle? *mod*, modState? *mod* |
 
-### category — creationRestrictionMode 1, canBeDeleted false
-| field | type | notes |
-|---|---|---|
-| slug | string, ^[a-z0-9-]{1,48}$ | unique index bySlug |
-| title | string ≤80 | |
-| description | string ≤300 | optional |
-| sort | integer 0..65535 | index bySort |
+`refersTo` kinds are checked by `validateReferences` in the builder. `post` is a `moderatedDocument` in moderated modes and a `permanentDocument` in `none` mode.
 
-### forum — creationRestrictionMode 1, canBeDeleted false
-| field | type | notes |
-|---|---|---|
-| categoryId | identifier, refersTo category permanentDocument, immutable | |
-| slug | string, ^[a-z0-9-]{1,48}$ | unique index bySlug |
-| title | string ≤80 | |
-| description | string ≤500 | optional |
-| sort | integer 0..65535 | index byCategory (categoryId, sort) |
-| archived | boolean | optional |
-
-### teamMember — creationRestrictionMode 1 (display metadata only, never authority)
-| field | type | notes |
-|---|---|---|
-| memberId | identifier (plain, no refersTo — display metadata) | unique index byMember |
-| role | string ≤40 | e.g. "moderator", "owner" |
-| sort | integer 0..65535 | |
-
-### thread — public, documentsMutable true, canBeDeleted false, moderator delete (keeps record, keeps forumId) + changeFields
-| field | type | notes |
-|---|---|---|
-| forumId | identifier, refersTo forum permanentDocument, immutable | kept for removal record |
-| title | string 3..150 | author-editable |
-| tags | typed array, ≤5, ^[a-z0-9-]{1,32}$ | uniqueItems |
-| sticky | boolean | changeFields, optional, moderator-only |
-| lockedAt | integer (ms) | changeFields, optional, moderator-only |
-| modState | integer 1..3 | changeFields, optional, moderator-only (1=hidden) |
-| modNote | string ≤200 | changeFields, optional |
-
-### post — public, documentsMutable true, canBeDeleted true, moderator delete (keeps record, keeps threadId+forumId) + changeFields
-| field | type | notes |
-|---|---|---|
-| threadId | identifier, refersTo thread moderatedDocument (where forumId==forumId), immutable | kept for removal record |
-| forumId | identifier, refersTo forum permanentDocument, immutable | kept for removal record |
-| body | string ≤4000 (maxBytes 5120) | author-editable |
-| replyToId | identifier (plain, no refersTo) | optional, not enforced |
-| modState | integer 1..3 | changeFields, optional, moderator-only (1=hidden) |
-| modNote | string ≤200 | changeFields, optional |
-
-Every message is a `post` including the opening post. The opening post of a thread is the earliest post whose `$ownerId` equals the thread's `$ownerId`, ordered by (`$createdAt`, `$id`) — regardless of its moderation state. A thread is listed only when that opening post exists AND is itself visible (not moderated, and not past the lock). Posts by anyone created before the opening post are dropped for listing (they may exist as pre-opening noise).
-
-"Edited" is `$updatedAt > $createdAt` (not `$revision > 1`): moderator changeFields bumps `$revision` without moving `$updatedAt`.
-
-### reaction — public, documentsMutable false, canBeDeleted true
-| field | type | notes |
-|---|---|---|
-| postId | identifier, refersTo post deletableDocument (where $ownerId==postOwnerId, threadId==threadId) | |
-| postOwnerId | identifier | cached; unique index byPostOwner (postId, $ownerId) |
-| threadId | identifier | cached |
-| kind | integer 1..8 | index byPostKind (postId, kind) countable |
-
-### report — public, documentsMutable false, canBeDeleted true, changeFields [status, resolution]
-| field | type | notes |
-|---|---|---|
-| postId | identifier, refersTo post deletableDocument | |
-| threadId | identifier | cached |
-| reason | integer 1..8 | |
-| note | string ≤280 | optional |
-| status | integer 1..3 | changeFields, optional |
-| resolution | string ≤200 | changeFields, optional |
-
-### profile — public, documentsMutable true, canBeDeleted true, moderator delete + changeFields [customTitle, modState]
-| field | type | notes |
-|---|---|---|
-| displayName | string ≤40 | index byOwner ($ownerId, unique) |
-| bio | string ≤1000 | optional |
-| signature | string ≤300 | optional |
-| avatarUrl | string ≤300, https pattern | optional |
-| website | string ≤200 | optional — no pattern in the registered contract (`string(0,200)`); app-side http(s) check on write/display; `^(https?://\S+)?$` pattern to add at next registration only (indexes are frozen) |
-| customTitle | string ≤40 | changeFields, optional |
-| modState | integer 1..3 | changeFields, optional (1=hidden) |
-
-## Indices (frozen at creation — do not add later)
+## Indexes
 
 | type | index | properties | flags |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | forumSettings | byKey | key | unique |
 | category | bySlug | slug | unique |
-| category | bySort | sort | |
+| category | bySort | sort |  |
 | forum | bySlug | slug | unique |
-| forum | byCategory | categoryId, sort | |
+| forum | byCategory | categoryId, sort |  |
 | teamMember | byMember | memberId | unique |
 | thread | byForum | forumId, $createdAt | rangeCountable |
-| thread | byForumSticky | forumId, sticky | skipIfAbsent [sticky] |
-| thread | byAuthor | $ownerId, $createdAt | rangeCountable |
-| thread | recent | $createdAt | |
-| thread | byUpdated | $updatedAt | |
-| thread | moderated | $moderatedAt | nullSearchable: false |
-| thread | byTag | tags, $createdAt | |
+| thread | byAuthor | $ownerId, $createdAt |  |
+| thread | recent | $createdAt |  |
+| thread | byUpdated | $updatedAt |  |
+| thread | byTag | tags, $createdAt |  |
+| thread | byOrigin | $ownerId, origId | unique; skipIfAbsent origId |
+| thread | byForumSticky | forumId, sticky | skipIfAbsent sticky |
+| thread | byMovedTo | movedToForumId, $createdAt | skipIfAbsent movedToForumId |
+| thread | moderated | $moderatedAt | nullSearchable false |
 | post | byThread | threadId, $createdAt | rangeCountable |
 | post | byForum | forumId, $createdAt | rangeCountable |
 | post | byAuthor | $ownerId, $createdAt | rangeCountable |
-| post | recent | $createdAt | |
-| post | byUpdated | $updatedAt | |
-| post | moderated | $moderatedAt | nullSearchable: false |
+| post | recent | $createdAt |  |
+| post | byUpdated | $updatedAt |  |
+| post | byOrigin | $ownerId, origId | unique; skipIfAbsent origId |
+| post | byOrigAuthor | $ownerId, origAuthorId, $createdAt | skipIfAbsent origAuthorId |
+| post | moderated | $moderatedAt | nullSearchable false |
 | reaction | byPostOwner | postId, $ownerId | unique |
-| reaction | byPostKind | postId, kind | countable |
-| reaction | byRecipient | postOwnerId | countable |
-| reaction | byThreadOwner | threadId, $ownerId | |
+| reaction | byThread | threadId, $createdAt |  |
+| reaction | byRecipient | postOwnerId, $createdAt |  |
+| reaction | byUpdated | $updatedAt |  |
 | report | byPostReporter | postId, $ownerId | unique |
-| report | recent | $createdAt | |
+| report | recent | $createdAt |  |
 | profile | byOwner | $ownerId | unique |
+| profile | byUpdated | $updatedAt |  |
+| profile | moderated | $moderatedAt | nullSearchable false |
 
-documentsCountable: thread, post, reaction, profile.
+Why each index exists:
 
-- Reactions are NOT moderated — they carry no moderation fields, no indexes beyond byPostKind/byRecipient/byThreadOwner, and no deletion of related content. A reaction to a hidden post still counts publicly.
-- `byRecipient` / `byThreadOwner` / `byUpdated` / `moderated` (thread+post) are registered but unused by this app (documented in the pending-at-next-registration list). Do not query over them in bulk.
-- `byForumSticky` is moderated-only by design: no sticky index exists in the `none` contract (there is no sticky property).
+- **byUpdated** (thread, post, reaction, profile) and **moderated** (`$moderatedAt`; thread, post, profile): drive the incremental snapshot and the browser's live overlay. A moderator change bumps `$revision` and `$moderatedAt` but not `$updatedAt`, so both are needed.
+- **byForum**, **byThread**, **byAuthor**: listings and live fallbacks. They are range-countable where a count is read.
+- **byOrigin** (`$ownerId`, origId; unique, skipIfAbsent): the importer's idempotency. Document ids include the create nonce, so a retried create would otherwise duplicate. Live documents have no origId and are skipped.
+- **byOrigAuthor**: archive member pages. Only archive posts pay for it.
+- **byMovedTo**: threads a moderator moved into a forum.
+- **reaction.byThread**: one paged query loads a thread's reactions. **byRecipient** feeds alerts.
+- **report.recent**: the moderation queue. **byPostReporter** (unique): one report per member per post.
 
-## Moderation semantics (settled 2026-11-26)
-- `modState` non-null = hidden (console writes 1; every renderer — client, snapshot, sitemap — treats any non-null modState as hidden: body suppressed, listing suppressed, snapshot-excluded). `banned` never appears on profiles; bans live in the ban list.
-- Moderator changeFields on a thread/post bumps `$revision` but NOT `$updatedAt` — display edited badges from `$updatedAt > $createdAt`.
-- Locked threads: client ignores posts with `$createdAt > lockedAt`; the snapshot drops posts created after lockedAt (S3: never consensus-enforced).
-- Orphan rule: the opening post is the earliest post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`) — regardless of that post's moderation state. A thread is listed only when that opening post exists AND is itself visible (not moderated, not past the lock). A hidden opening post means the thread is hidden — shown nowhere (snapshot, sitemap, llms.txt, live listings, thread page). Snapshot and client both apply it.
+## Reader rules (lib/forum/model.ts)
 
-## Unused indexes in this deployment (documented — do not query over them)
+Readers are the snapshot, the build and the browser. They all use the same functions.
 
-The indexes below are registered but deliberately unused by this app — the
-queries that matter are `recent` ($createdAt), `byAuthor` (thread/post,
-$ownerId+$createdAt), `byThread` (post, threadId+$createdAt), `byOwner`
-(profile), `bySlug` (forum/category), and `moderated` (audit view only).
+- **Trust:** `orig*` fields count only on documents owned by `forumSettings.archiveOwnerId`. The effective date is `origCreatedAt` (ms) for those documents and `$createdAt` otherwise. Changing `archiveOwnerId` later withdraws trust from every existing archive document, by design.
+- **Opening post:** the owner's earliest post by effective date, then `$createdAt`, then `$id` bytes. A thread is listed when that post exists, is not hidden and is not retracted, and the thread itself is not hidden.
+- **Hidden** means `modState` is set. Hidden posts stay in the thread as placeholders, so numbering and permalinks are stable. Hidden threads and profiles drop out of every listing, page and feed.
+- **Locked** means `lockedAt` is set. Posts created on chain after it are ignored. The chain cannot enforce a lock (spike S3), so the app refuses replies and readers drop late posts.
+- **Moved:** a thread's forum is `movedToForumId` when set, otherwise `forumId`.
+- **Edited** means `$updatedAt > $createdAt`. A moderator change does not mark a post edited.
+- **Sub-forums:** a parent is honored only if it exists, is in the same category and forms no cycle.
 
-- `thread.byTag` (tags, $createdAt) — the app filters threads by tag client-side; no query uses it.
-- `post.byForum` (forumId, $createdAt) — posts are listed via `byThread`/`byAuthor`; the forum page shows threads, not posts.
-- `forum.byCategory` (categoryId, sort) — forums are listed via the snapshot/live window, not by category index.
-- `reaction.byPostKind` (postId, kind) — reaction UI is unbuilt; flagged for the next registration (see below).
-- `reaction.byRecipient` (postOwnerId) — recipient counts are not built.
-- `reaction.byThreadOwner` (threadId, $ownerId) — unused.
-- `report.recent` ($createdAt) — the moderation queue scans `recent` client-side today; an audit listing could use this.
-- `thread.byUpdated` ($updatedAt) and `post.byUpdated` ($updatedAt) — listing order uses `$createdAt` desc.
-- `thread.moderated` / `post.moderated` ($moderatedAt) — audit view only, not used in the live listing.
-- `rangeCountable` flags on `post.byThread` are intentional (post counts); `reaction.byPostKind`'s non-rangeCountable flag is a next-registration item.
+## Costs (testnet, measured)
 
-## Pending at next registration (indexes are frozen in this deployment)
-- `thread`/`post`: the `moderated` index (`$moderatedAt`) is registered and available for an audit view, but the moderation console currently scans `recent`/`byForum`/`byAuthor` and filters by `modState` client-side — a server-side moderated-audit listing is a next-registration improvement (query `moderated` only for types where `$moderatedAt` is set — only changeFields writes it). Do not query `moderated` for docs where the field is absent; an empty-set read is fine but an over-broad scan is not.
-- `thread`/`post`: `byUpdated` is registered but unused by the app — listing order uses `$createdAt` desc; the profile page reads `byAuthor`. No change this deployment.
-- `profile.canBeDeleted`: currently `true` — a moderator-hidden profile would be deletable/reappearable by its owner at the consensus layer. The app pairs profile hide with ban/suspend (soft-hide) today; at next registration set `profile.canBeDeleted: false` + `deleteKeepsFields` so a hidden profile cannot be erased and re-created into a fresh identity.
-- `reaction.byPostKind`: in a fresh registration, use `rangeCountable: true` so per-post counts can be served without `kind in [...]` group-by. The current contract uses `countable` — per-post totals need `postId == X, kind in [1..8]` with groupBy [kind] (one request per post); spike before building the reaction UI.
-- `profile`: no `moderated` index (`$moderatedAt`) — hidden profiles must be found by full scan; `profile.byOwner` is the only index.
-- `report`: no status index (`byStatus`) — the moderation queue scans `recent` and filters client-side; also add `where: { threadId: 'threadId' }` on `report.postId` so the cached threadId is validated.
-- `teamMember.canBeDeleted`: `false` today — a former moderator's display row can be edited but never deleted; set `true` at next registration (nothing refers to `teamMember`).
-- `website` field: add `^(https?://\S+)?$` pattern (app-side check in the meantime).
-- `forumSettings.rules`: `maxBytes: 8192` is a no-op (maxLength 1000 caps the value below the 5120-byte platform cap). In a fresh registration use maxLength 4000 + maxBytes 5120.
-- `reaction.byPostKind` and others: nothing here changes this deployment; schema edits require a new contract.
+| write | DASH |
+| --- | --- |
+| contract v2 registration (9.2 KB) | 0.908 |
+| thread | about 0.0017 |
+| post, reply or import | about 0.0015 |
+| reaction or profile | about 0.001 |
 
-- `$moderatedAt` is set only by `changeFields` (and moderator-applied changes); owner deletes and owner replace do NOT set it. Owner deletions are tracked via `documentRemovals`.
-
-## Invariants
-
-- No running counters on threads (nobody can edit another's document) — count indexes instead.
-- No global uniqueness on usernames — DPNS identity; display name is not unique.
-- Every post is a post; thread is title/meta only. No edit history (documentsKeepHistory incompatible with moderator delete) — "edited" when `$updatedAt > $createdAt`.
-- No thread moves in v1 (forumId immutable, verified against thread by reference).
-- No sequence numbers (moderator deletion breaks dense numbering); pagination is a client-side bounded window (threads/forums show the latest N with a truncation note), not server-side page routes yet.
-- Opening post = the earliest post whose owner equals the thread owner, ordered by (`$createdAt`, `$id`), regardless of moderation state; the thread is listed iff that opening post exists AND is visible (orphan rule; see Moderation semantics).
-- Reports are public on-chain, reporter included (UI says so). Only moderators set status/resolution.
-- Body limit: maxLength 4000, maxBytes 5120 (platform hard cap 5120/value).
+An import averages 0.0015 DASH per document. A full dash.org/forum backfill (about 18k threads and 180k posts) would cost roughly 300 DASH on mainnet; see importer.md.

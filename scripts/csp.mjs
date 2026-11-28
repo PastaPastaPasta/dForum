@@ -51,7 +51,7 @@ for (const file of files) {
   const csp =
     "default-src 'self'; script-src 'self'" +
     (hashes.length ? ' ' + hashes.join(' ') : '') +
-    " 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; base-uri 'self'; form-action 'self'"
+    " 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; base-uri 'self'; form-action 'self'"
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`
   // Drop any existing meta (the layout used to emit one) — we re-insert it in
   // the right position so the policy governs every external script below it.

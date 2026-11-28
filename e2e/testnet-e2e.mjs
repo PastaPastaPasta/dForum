@@ -58,6 +58,7 @@ try {
   await step('bob logs in with Dash (App Connect v2 via test wallet)', () => login(bob.page, 92, { shots: `${SHOTS}/00-bob` }))
   await step('bob saves a profile', async () => {
     await bob.page.goto(`${SITE}/settings/`)
+    await bob.page.locator('fieldset:not([disabled])').waitFor({ timeout: 60_000 })
     await bob.page.getByLabel('Display name').fill(`Bob ${RUN}`)
     await bob.page.getByLabel('Location').fill('Testnet')
     await bob.page.getByLabel('About you').fill('I test **dForum** on testnet.')

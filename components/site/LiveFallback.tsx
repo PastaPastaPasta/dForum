@@ -33,7 +33,8 @@ export function LiveFallback({ snapshotAt, archive, sourceUrl, forums }: {
   if (route.kind === 'thread') {
     return (
       <ThreadPage threadId={route.id} thread={null} crumbs={[{ href: '/', label: 'Forums' }]} forumArchived={false} posts={[]} firstNumber={1}
-        page={1} pages={1} postIndex={[]} reactions={{}} members={{}} roles={{}} snapshotAt={snapshotAt} archive={archive} sourceUrl={sourceUrl} />
+        page={1} pages={1} postIndex={[]} reactions={{}} members={{}} roles={{}} snapshotAt={snapshotAt} archive={archive} sourceUrl={sourceUrl}
+        forums={forums} />
     )
   }
   if (route.kind === 'profile') {

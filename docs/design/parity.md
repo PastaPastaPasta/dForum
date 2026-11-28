@@ -1,43 +1,37 @@
-# Feature parity vs dash.org/forum
+# Parity with dash.org/forum
 
-Reference: dash.org/forum (XenForo-style: categories → forums → threads → posts, search, profiles, pins/locks, moderation, login).
+Reference: dash.org/forum runs XenForo 2, with 18,226 threads, 180,544 messages and 9,845 members at its last public snapshot.
 
-Scope is the forum product surface, not the Dash Core protocol. Honest gaps are listed, not papered over.
+| dash.org/forum | dForum v2 | notes |
+| --- | --- | --- |
+| Categories, forums, sub-forums, link nodes | ✅ categories, forums, sub-forums (`parentForumId`), archived (read-only) forums | Link nodes are not imported |
+| Forum index with counts and last post | ✅ rolled up across sub-forums, updated live | |
+| Thread list: pinned first, latest activity, replies, pages, prefixes | ✅ plus reactions count and tags | Prefixes are covered by tags |
+| Thread view: author cards, permalinks, `#n`, pagination | ✅ 20 per page, permalinks redirect to the right page | |
+| Post with BBCode editor, preview, quote | ✅ Markdown toolbar, preview, quote with attribution, drafts kept locally | |
+| Edit / delete own post, edit title | ✅ "edited" marker; delete leaves a tombstone | |
+| Likes / reactions | ✅ six reactions, one per member per post, toggleable | |
+| Report post, moderator queue | ✅ public on-chain reports; queue with hide-and-resolve or dismiss | |
+| Pin, lock, move, hide, delete | ✅ native contract moderation | |
+| Ban, suspend, warn | ✅ enforced by consensus | |
+| Member profiles (about, location, website, signature, avatar, title) | ✅ | Custom title is moderator-set |
+| Members list, staff list | ✅ most active, team, archive authors | |
+| What's new / new posts | ✅ | |
+| Alerts (replies, reactions) | ✅ replies in your threads, reactions to your posts | Mentions and quote alerts would need a `mention` type (planned as a contract update) |
+| Search with forum filter | ✅ full text (Pagefind) over every thread including the archive, plus live title matches | |
+| Tags | ✅ tag pages | |
+| RSS | ✅ site and per forum | |
+| Login / register | ✅ Login with Dash (App Connect v2): no passwords; the account is the Dash identity | |
+| Light and dark themes | ✅ follows the system, with a toggle | |
+| History | ✅ dash.org/forum archive imported with original authors and dates | importer.md |
+| Watched threads with unread counts | ✅ kept in the browser (an on-chain list would be public) | |
+| Private conversations | ❌ not in v2 | Needs an end-to-end encrypted design (App Connect encryption keys); never plaintext on chain |
+| Polls | ❌ not in v2 | `poll` + `pollVote` types can be added in a contract update |
+| View counts, online users | ❌ | Can't be measured without a server; replaced by replies and reactions |
 
-## Covered
+## Better than the baseline
 
-| Surface | dForum |
-|---|---|
-| Categories → forums | `category` + `forum` types (owner-managed; one level of hierarchy) |
-| Threads (start/view) | `thread` type; path route `/t/[id]`, sticky + lockedAt + tags (≤5, contract-validated) |
-| Posts (flat chronology) | `post` type; reply chronology (`replyToId` is recorded on the chain but not rendered as a quote — bodies render as-is), body ≤4000 chars / ≤5120 bytes |
-| Search | title/tag/forum-title search over the latest 25 live threads plus the last static snapshot (live fill refines it) |
-| Profiles | identity-scoped (no global username): threads + posts, custom display name/bio/signature/website |
-| Login / register | App Connect v2 "login with Dash" — QR + wallet; the wallet registers the contract-bound key as part of the approval (the "register" equivalent, no server-side accounts) |
-| Statuses | sticky/pinned, locked, hidden (moderation), orphan drop, pagination ("Load more") |
-| Moderation | team/none/network modes, native protocol 14 moderation, console at `/moderation` |
-| SEO/AI indexing | hourly static rebuild (sitemap/robots/llms/manifest), SPA fallback for fresh content |
-| Deployment | GitHub Pages at `forum.dashhq.org` (custom domain live) — static-first `out/` with live-fill from the platform |
-
-## Deliberately out of scope (v1)
-
-| Surface | Why |
-|---|---|
-| Nested sub-forums | dash.org/forum has 2-level nesting; dForum is one level of forums under a category. Adding nesting changes the orphan/index rules and the contract — revisit at registration time, not in v1. |
-| Reactions (UI) | The reaction type exists in the contract (indexed, keyed one-per-post) but the v1 UI ships no reaction surface — dash.org/forum has none either. The write path is not exposed. |
-| User reports / mod queue | The `report` type exists in the contract (deletable, status/resolution changeable) but the app neither creates nor moderates reports today — there is no public "flag a post" flow and no report triage queue in the console. A proper report queue (public report → moderator triage) is the one deliberate gap — it needs a public report flow plus a triage queue, not just a button (see `docs/design/contract-next-registration.md`). |
-| Poll/vote feature | Reference site mentioned polls historically; not in the current XenForo surface. Not shipped. |
-| RSS / notifications | Not in the v1 scope. The SPA shell is the AI/SEO surface. |
-| Edit history | No history entries; there is no edit control in the UI — "edited" is shown via `$updatedAt` (moderator `changeFields` bump `$revision`). Append-only semantics are documented in the data model. |
-| Thread moves | v1: forumId is immutable (no moves). |
-
-## Honest caveats
-
-- Deployment target is `forum.dashhq.org` (custom domain live). The footer honestly labels the build as "Testnet build" — the contract is testnet today; a mainnet cutover is a pasta-side decision.
-- The GH Pages deploy IS the canonical host (`forum.dashhq.org`, DNS is live): sign-in, posting and moderation run here; the static-first/live-fill pattern is the indexing surface. The login/post/moderate coverage above is the product surface.
-- The contract is a testnet deployment (`contracts/deployments/testnet.json`, `ozZN…ADM16`). A mainnet contract is unregistered by design at this stage — first production deploy needs the deployer CRITICAL key + credits and the testnet→mainnet cutover (network switch + contract registration), a pasta-side decision.
-- App Connect v2 keys are contract-bound (singleContract → dForum's contract, ~0.5 DASH budget, 90-day expiry) — the bounds and budgets are enforced by the chain; the mitigations (host gate, sessionStorage, offline CRITICAL key) layer on top (see the README security notes).
-
-## Parity verdict
-
-The forum surface that defines a forum — browse/search/thread/reply/profile/login/moderate/index — is present and tested at build + screenshot level. The three explicit gaps (sub-forum nesting, reports UI, reactions UI) are documented above as scope, with the likely ordering of the first two for a follow-up. This is not a claim of byte-level parity with XenForo; it is a claim that the product works as a forum and nothing hidden ships silently.
+- Static pages load before any script runs. Every page has a canonical URL, and the sitemap, llms.txt, RSS and a public JSON API are all generated.
+- Moderation is transparent and enforced by the network. Bans can't be bypassed client-side, and the audit log is public.
+- No accounts or passwords to leak: members sign in with their wallet, using a key limited to this forum, a fee budget and an expiry.
+- Readable on phones, with light and dark themes and a serif reading measure for long posts.

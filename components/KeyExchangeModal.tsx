@@ -105,7 +105,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   const showError = login.phase === 'error' || login.phase === 'timeout' || login.phase === 'too-many'
   const errorText =
     login.phase === 'timeout'
-      ? 'Your wallet did not respond in time. Scan the QR again — or open dForum in a browser on the same device your wallet is installed on.'
+      ? 'Your wallet did not respond in time. Scan the code again, or open this page on the device where your wallet is installed.'
       : login.phase === 'too-many'
         ? 'Too many responses to this request — scan the QR again to start fresh.'
         : login.phase === 'error'
@@ -114,12 +114,12 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
   const stepText =
     login.phase === 'preparing' ? 'Preparing wallet sign-in…'
-      : login.phase === 'accepted' ? 'Signing you in…'
-        : login.phase === 'confirm' ? 'Wallet responded — choose which identity to sign in with'
+      : login.phase === 'accepted' ? 'Logging you in…'
+        : login.phase === 'confirm' ? 'Your wallet answered. Choose the identity to log in with.'
           : login.phase === 'waiting' ? 'Waiting for wallet…'
             : login.phase === 'timeout' ? 'Timed out'
               : login.phase === 'too-many' ? 'Too many responses'
-                : 'Signing you in…'
+                : 'Logging you in…'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -140,8 +140,8 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
           <X className="w-4 h-4" />
         </button>
 
-        <h2 id="login-modal-title" className="text-lg font-bold tracking-tight">Login with Dash</h2>
-        <p className="text-sm text-ink-2 mt-1">Sign in to dForum with your Dash identity</p>
+        <h2 id="login-modal-title" className="text-lg font-semibold tracking-tight">Log in with Dash</h2>
+        <p className="text-sm text-ink-2 mt-1">Approve the login in your Dash wallet.</p>
 
         <div aria-live="polite" className="sr-only">{stepText}</div>
         <div aria-live="polite" className="sr-only">{copied ? 'URI copied' : ''}</div>
@@ -214,7 +214,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
             <>
               <div className="flex flex-col items-center gap-3">
                 <ShieldCheck className="w-10 h-10 text-dash" aria-hidden="true" />
-                <p className="text-sm font-medium text-center">Wallet responded — choose which identity to sign in with</p>
+                <p className="text-sm font-medium text-center">Your wallet answered. Choose the identity to log in with.</p>
                 <ul className="w-full space-y-2">
                   {login.candidates.map((candidate) => (
                     <li key={candidate.identityId}>
@@ -225,7 +225,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                       >
                         <UserRound className="w-5 h-5 text-dash shrink-0" aria-hidden="true" />
                         <span className="min-w-0 flex-1">
-                          <span className="block text-sm text-ink truncate">{candidateNames[candidate.identityId] ?? shortId(candidate.identityId, 12)}</span>
+                          {candidateNames[candidate.identityId] && candidateNames[candidate.identityId] !== shortId(candidate.identityId, 12) && <span className="block text-sm text-ink truncate">{candidateNames[candidate.identityId]}</span>}
                           <span className="block text-xs font-mono text-ink-2 truncate" title={candidate.identityId}>{shortId(candidate.identityId, 12)}</span>
                         </span>
                       </button>
@@ -238,7 +238,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   disabled={accepting}
                   className="text-xs text-ink-2 hover:text-ink transition disabled:opacity-50"
                 >
-                  None of these — start again
+                  None of these, start again
                 </button>
               </div>
             </>
@@ -249,7 +249,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
               <div className="flex items-center justify-center w-16 h-16 rounded-full bg-live/15">
                 <ShieldCheck className="w-8 h-8 text-live" aria-hidden="true" />
               </div>
-              <p className="text-sm font-medium text-live">Signing you in…</p>
+              <p className="text-sm font-medium text-live">Logging you in…</p>
             </>
           )}
 
@@ -278,7 +278,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
         <p className="mt-6 text-center text-xs text-ink-2 flex items-center justify-center gap-1.5">
           <KeyRound className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-          Your wallet adds a key to your identity that can only write to dForum&apos;s contract, can spend at most ~0.5 DASH in fees, and expires in 90 days. dForum keeps its copy in this tab only. Signing out forgets it here — to revoke it, disconnect dForum in your wallet.
+          Your wallet adds a key that can only write to this forum, spend at most about 0.5 DASH in fees, and expires after 90 days. This tab keeps its copy until you log out; to revoke the key, disconnect the forum in your wallet.
         </p>
       </div>
     </div>

@@ -2,7 +2,7 @@
   "name": "dforum",
   "version": "0.1.0",
   "private": true,
-  "description": "A decentralized forum on Dash Platform — centralized ownership, team moderation, all data on-chain, login with Dash",
+  "description": "A decentralized forum on Dash Platform \u2014 centralized ownership, team moderation, all data on-chain, login with Dash",
   "license": "MIT",
   "scripts": {
     "dev": "next dev",
@@ -12,7 +12,9 @@
     "index:static": "node scripts/snapshot.mjs",
     "index:full": "node scripts/snapshot.mjs && next build",
     "test": "vitest run",
-    "postbuild": "node scripts/csp.mjs"
+    "postbuild": "node scripts/csp.mjs",
+    "index:site": "node scripts/generate-static-seo.mjs && pagefind --site out --output-subdir pagefind",
+    "serve": "node scripts/serve-static.mjs 8899 out"
   },
   "dependencies": {
     "@dashevo/evo-sdk": "5.1.0-rc.1",

@@ -1,44 +1,28 @@
-# dForum design
+# dForum design (v2)
 
-Status: draft v1. 2026-11-26. Advisor: opus 5.5 (high effort) — decisions below are the advisor's, recorded so the contract stays coherent. Re-read the advisor thread when changing directions.
+v2 status as of 2026-11-28. Contract v2 is live on testnet as `85NE7sDLE6UEmPu7GXFwTKUZZudXxLZM6WwVkTTQDKEX`; v1 (`ozZN…ADM16`) is retired. The decisions below were reviewed with the Opus design advisor.
 
-## What this is
+dForum is a forum whose content, identities and moderation all live on Dash Platform. The site is a static index rebuilt from the chain every hour, with a live layer in the browser. Its baseline is dash.org/forum (XenForo 2): categories, forums, sub-forums, threads, posts, likes, pins, locks, moves, search, profiles, member lists, alerts, moderation and RSS.
 
-A greenfield forum on Dash Platform (Dash Evolution). All content, moderation and identity live on the network; the site is a thin static shell over the platform, rebuilt hourly for SEO/AI indexing. Baseline: dash.org/forum (XenForo-style: categories → forums → threads → posts, likes, pins, locks, search, pagination, profiles, member badges, moderation).
+| Document | What it covers |
+| --- | --- |
+| [data-model.md](data-model.md) | Document types, fields, indexes, and the visibility rules every reader applies |
+| [moderation.md](moderation.md) | Moderation modes, the roster, what moderators can do, and how the console holds keys |
+| [static-index.md](static-index.md) | The incremental snapshot, static routes, the live overlay, search, feeds and the static API |
+| [importer.md](importer.md) | Backfilling dash.org/forum (XenForo) through an archivist identity |
+| [parity.md](parity.md) | Feature comparison with dash.org/forum |
+| [testing.md](testing.md) | Unit tests and the testnet end-to-end scenario |
+| [spike-results.md](spike-results.md) | v1 protocol spikes (history) |
 
 ## Settled decisions
 
-- **One contract per deployment** (`contracts/dforum.json`, generated): bans and suspensions apply to a single contract, so splitting the data would mean banning everyone in several places.
-- **Moderation is the platform's native moderation** (protocol 14): `config.moderation` with `banlist`/`suspensions`/`warnings` + `moderators`.
-  - `none`: no moderation block at all — nothing removable/bannable at consensus, ever (frozen at creation).
-  - `team` (default): `appointedModerators` — owner + up to 16 named identities, non-elected. The roster is on-chain config, managed by the deployer (contract owner) only, through a contract update.
-  - `network`: `elected` (masternode-elected). Not recommended (contradicts "non-elected"; a seated team is permanent since challenges are not shipped) — supported by the generator, testnet-only.
-- **Read the mode at runtime** from the fetched contract, never from a settings document.
-- **Owner-only types** (creationRestrictionMode 1): forumSettings, category, forum, teamMember. **Public types**: thread, post, reaction, report, profile.
-- **Every message is a `post`** — the opening post of a thread is just a post. The thread holds title/forum/tags/editable-meta; threads are listed only when the thread's opening post — the earliest post whose `$ownerId` equals the thread owner, ordered by (`$createdAt`, `$id`), regardless of its moderation state — exists AND is itself visible (orphan rule). No atomic multi-document write, so create = 2 writes; no stored counters (nobody can edit another's document) — use count indexes.
-- **Flat reply chronology** (XenForo-style). Quotes via optional `replyToId` stored as a plain id (no enforced reference).
-- **Body limit**: maxLength 4000 / maxBytes 5120 (platform caps a string at 5120 bytes).
-- **No edit history** (documentsKeepHistory is incompatible with moderator delete); show "edited" when `$updatedAt > $createdAt` (moderator changeFields bump `$revision` without moving `$updatedAt`).
-- **Deletes**: authors hard-delete their own posts (post hard-delete). Threads can't be deleted; the author can blank the opening post. Moderators delete documents (removal record; keeping just threadId/forumId) or hide (changeFields modState, reversible).
-- **Pins/locks are moderator-only fields** (`sticky`, `lockedAt`), set via the moderation transition. Clients ignore posts after `lockedAt`.
-- **Reports are public on-chain**, reporter included (say so in UI). Only moderators set status/resolution.
-- **No global uniqueness on usernames** — DPNS names; profile display name is not unique.
-- **No thread moves in v1** (forumId immutable).
-- **Indexes are frozen at creation** — get them right at registration; do not plan to add.
-- **Static layer**: canonical routes `/`, `/f/{slug}/`, `/t/{threadId}/`, `/u/{identityId}/` (members) are themselves static HTML (not a separate /index/ tree). Two stages: `scripts/snapshot.mjs` (proved counts; full rebuild, no incremental delta) → `data/snapshot.json`; `next build` reads only the snapshot (never the network). Snapshot storage: Actions cache/artifact, NOT a git branch (git keeps taken-down content forever). Completeness gate: any fetch or count error throws — the build fails and the last good deploy keeps serving. An honest empty answer does not fail the build (the SPA fallback covers the gap). Pagination is client-side (bounded windows + truncation notes), not a page-per-N route yet.
-- **Static outputs**: `/data/v1/manifest.json`, `robots.txt`, `llms.txt`, `sitemap.xml` (threads + forums, trailing slash, moderated content excluded). Live layer hydrates post-first-paint via the SDK; posts newer than the snapshot are fetched live. RSS feeds / JSON-LD / sitemap-index sharding are NOT implemented yet — add them at a later registration, not silently.
-- **SDK**: `@dashevo/evo-sdk` 5.1.0-rc.1 (pinned). 5.0.x cannot read this chain (5.0.x SDKs trip the V2 proof decoder); NOT yappr's 3.1.0-dev.8 (too old, no moderation APIs).
-- **Slugs, not ids, for URLs.** The thread id (`$id`) is the canonical key; slugs are derived for humans and kept unique per forum.
-- **Security**: strict markdown (no raw HTML), `rel="ugc nofollow noopener"` on links, remote images load only on click.
-- **Costs**: writes cost the author credits — onboarding needs a funded identity; probe the fee with the chosen indexes before launch (spike S8).
-
-## Spikes (before testnet registration — see docs/design/spikes.md)
-
-S1 moderator signing path (CRITICAL unbound key vs App Connect session key).
-S2 changeFields property in a skip-if-absent index (thread.byForumSticky).
-S3 network-enforced thread lock via post `where` on moderator-written field.
-S4 reference `where` with two keys (reaction: post owner + thread).
-S5 groupBy count with `in` on rangeCountable via evo-sdk 5.0.x.
-S6 platform-auth (App Connect v2) works with evo-sdk 5.0.x; session key bounds.
-S7 confirm testnet version/protocol 14 live at registration time.
-S8 write-fee probe per post with chosen indexes.
+- **One contract per deployment.** Bans and suspensions are per contract.
+- **Native platform moderation.** The default is team mode: appointed moderators, managed by the owner through a contract update. The mode is read from the live contract, never from a document.
+- **Owner-only types**: forumSettings, category, forum, teamMember. **Public types**: thread, post, reaction, report, profile.
+- **Every message is a post.** A thread is listed only when its opening post exists, is visible and has not been retracted. The opening post is the owner's earliest post by effective date, ties broken by `$id` bytes.
+- **Posts are never author-deleted.** "Delete" replaces the body with a tombstone (`retracted: true`), so the change moves `$updatedAt` and every incremental reader sees it. Moderators hide posts (reversible) or delete them (kept as a removal record).
+- **Two-part bodies.** `body` plus `body2`, each at most 5120 bytes (the platform's per-value cap), about 10 KB in total.
+- **Reactions are toggles.** There is one row per post and reactor; un-reacting replaces `kind` with 0, which keeps deltas visible.
+- **Archive provenance.** The `orig*` fields are trusted only on documents owned by `forumSettings.archiveOwnerId`. That archivist identity must not be the owner or a moderator, so moderators can still take archive content down.
+- **Static first, live second.** The build reads only the snapshot. In the browser, global "changed since the snapshot" queries update every page.
+- **SDK:** `@dashevo/evo-sdk` 5.1.0-rc.1, pinned. Writes build documents with `Document.fromObject`, with identifiers as raw bytes; contract-bound keys sign batched transitions only.
