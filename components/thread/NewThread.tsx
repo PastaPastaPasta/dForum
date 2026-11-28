@@ -23,6 +23,7 @@ export function NewThread({ categories, forums }: { categories: CategoryView[]; 
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState<{ threadId: string; forumId: string } | null>(null)
 
   useEffect(() => {
     const slug = new URLSearchParams(location.search).get('forum')
@@ -58,7 +59,9 @@ export function NewThread({ categories, forums }: { categories: CategoryView[]; 
     setBusy(true)
     setError(null)
     try {
-      const { threadId } = await createThread({ identityId: session.identityId, authKeyWif: session.authKeyWif }, { forumId, title, tags: tagList, body })
+      const existingThreadId = pending?.forumId === forumId ? pending.threadId : undefined
+      const { threadId } = await createThread({ identityId: session.identityId, authKeyWif: session.authKeyWif },
+        { forumId, title, tags: tagList, body, existingThreadId }, (id) => setPending({ threadId: id, forumId }))
       try { localStorage.removeItem(DRAFT_KEY) } catch { /* storage blocked */ }
       router.push(`/t/${threadId}/`)
     } catch (e) {
@@ -75,7 +78,7 @@ export function NewThread({ categories, forums }: { categories: CategoryView[]; 
       <div className="grid gap-4 sm:grid-cols-[16rem_1fr]">
         <label className="block">
           <span className="text-sm font-medium">Forum</span>
-          <select className="field mt-1" value={forumId} onChange={(e) => setForumId(e.target.value)}>
+          <select className="field mt-1" value={forumId} disabled={!!pending} onChange={(e) => setForumId(e.target.value)}>
             <option value="">Choose a forum…</option>
             {categories.map((c) => {
               const list = open.filter((f) => f.categoryId === c.id)
@@ -97,8 +100,9 @@ export function NewThread({ categories, forums }: { categories: CategoryView[]; 
         <input className="field mt-1" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="governance, wallet (up to 5)" />
         {tagList.length > 0 && <span className="mt-1 flex flex-wrap gap-1.5">{tagList.map((t) => <span key={t} className="rounded bg-sunk px-1.5 text-xs leading-5">{t}</span>)}</span>}
       </label>
-      <Composer value={body} onChange={setBody} busy={busy} submitLabel="Post thread" label="Opening post" placeholder="Write the opening post…" onSubmit={() => void submit()} error={error} />
-      <p className="text-sm text-ink-2">Posting writes two documents to Dash Platform (the thread and its opening post), paid from your forum key&apos;s budget.</p>
+      {pending && !busy && <p className="text-sm text-ink-2">The thread was created; its opening post still needs to be saved. Posting again finishes it.</p>}
+      <Composer value={body} onChange={setBody} busy={busy} submitLabel={pending ? 'Save opening post' : 'Post thread'} label="Opening post" placeholder="Write the opening post…" onSubmit={() => void submit()} error={error} />
+      <p className="text-sm text-ink-2">Your thread is saved to Dash Platform and shows up for everyone within a few seconds.</p>
     </div>
   )
 }

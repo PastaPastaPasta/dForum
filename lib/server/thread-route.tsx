@@ -1,8 +1,9 @@
+import type { ForumView } from '@/lib/forum/types'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { POSTS_PER_PAGE } from '@/lib/forum/types'
-import { excerpt, postBody, str } from '@/lib/forum/model'
-import { site, threadFile, threadIds, forumById, memberCards } from './site-data'
+import { archiveRef, excerpt, postBody, str } from '@/lib/forum/model'
+import { site, threadFile, threadIds, forumById, memberCards, liveContext } from './site-data'
 import { ThreadPage } from '@/components/thread/ThreadPage'
 
 export function threadParams(withPages: boolean) {
@@ -31,9 +32,11 @@ export function threadMetadata(id: string, n = 1): Metadata {
 export function forumCrumbs(forumId: string) {
   const s = site()
   const crumbs = [{ href: '/', label: 'Forums' }]
-  const chain = []
+  const chain: ForumView[] = []
   let f = forumById(forumId)
   while (f) { chain.unshift(f); f = f.parentForumId ? forumById(f.parentForumId) : undefined }
+  const cat = chain[0] && s.categories.find((c) => c.id === chain[0].categoryId)
+  if (cat) crumbs.push({ href: `/#cat-${cat.id}`, label: cat.title })
   for (const x of chain) crumbs.push({ href: `/f/${x.slug}/`, label: x.title })
   return { crumbs, archived: s.forums.find((x) => x.id === forumId)?.archived ?? false }
 }
@@ -63,7 +66,7 @@ export function ThreadRoute({ id, n = 1 }: { id: string; n?: number }) {
       <ThreadPage threadId={id} thread={tf.thread} crumbs={crumbs} forumArchived={archived} posts={posts} firstNumber={(n - 1) * POSTS_PER_PAGE + 1}
       page={n} pages={pages} postIndex={tf.posts.map((p) => p.id.slice(0, 12))} reactions={reactions}
       members={memberCards(posts.map((p) => p.ownerId).concat(tf.thread.ownerId))} roles={rolesFor()} snapshotAt={s.snapshotAt}
-      archive={s.settings.archiveOwnerId} sourceUrl={s.settings.archiveSourceUrl} />
+      archive={archiveRef(s.settings)} sourceUrl={s.settings.archiveSourceUrl} sourceName={s.settings.archiveSourceName} ctx={liveContext()} />
     </div>
   )
 }

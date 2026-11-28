@@ -12,13 +12,14 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { EvoSDK, IdentitySigner } from '@dashevo/evo-sdk';
+import { redactWif } from './lib/redact.mjs';
 
 const { values: o, positionals: [action, type, id] } = parseArgs({ allowPositionals: true, options: {
   to: { type: 'string' }, reason: { type: 'string', default: '' }, persona: { type: 'string', default: '3' }, network: { type: 'string', default: 'testnet' },
 } });
 const FIELDS = {
   hide: { modState: 1 }, unhide: { modState: null }, pin: { sticky: true }, unpin: { sticky: null },
-  lock: { lockedAt: Date.now() }, unlock: { lockedAt: null }, move: { movedToForumId: o.to }, unmove: { movedToForumId: null },
+  lock: { locked: true }, unlock: { locked: null }, move: { movedToForumId: o.to }, unmove: { movedToForumId: null },
 };
 if (!action || !type || !id || (!FIELDS[action] && action !== 'delete') || (action === 'move' && !o.to)) {
   console.error('usage: node scripts/moderate.mjs hide|unhide|pin|unpin|lock|unlock|move|unmove|delete <type> <id> [--to <forumId>] [--reason <text>]');
@@ -53,6 +54,6 @@ try {
   console.log(`${action} ${type} ${id}: done`);
   process.exit(0);
 } catch (e) {
-  console.error(`${action} ${type} ${id} failed:`, e?.message ?? e);
+  console.error(`${action} ${type} ${id} failed:`, redactWif(String(e?.message ?? e)));
   process.exit(1);
 }

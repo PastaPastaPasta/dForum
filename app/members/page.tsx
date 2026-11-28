@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { archiveMembers, members, site } from '@/lib/server/site-data'
 import { rolesFor } from '@/lib/server/thread-route'
 import { Avatar } from '@/components/ui/Avatar'
+import { memberLabel } from '@/lib/forum/model'
 
 export const metadata = { title: 'Members', alternates: { canonical: '/members/' } }
 
@@ -26,7 +27,7 @@ export default function Members() {
             {staff.map((m) => (
               <li key={m.id} className="panel flex items-center gap-3 p-3">
                 <Avatar seed={m.id} name={m.name || m.id} src={m.avatarUrl} size={44} />
-                <div className="min-w-0"><Link href={`/u/${m.id}/`} className="block truncate font-semibold hover:text-dash">{m.name || m.id.slice(0, 8)}</Link><p className="text-sm text-dash">{roles[m.id]}</p></div>
+                <div className="min-w-0"><Link href={`/u/${m.id}/`} className="block truncate font-semibold hover:text-dash">{m.name || memberLabel(m.id)}</Link><p className="text-sm text-dash">{roles[m.id]}</p></div>
               </li>
             ))}
           </ul>
@@ -42,7 +43,7 @@ export default function Members() {
             <tbody className="divide-y divide-rule">
               {list.slice(0, 200).map((m) => (
                 <tr key={m.id}>
-                  <td className="px-4 py-2"><Link href={`/u/${m.id}/`} className="flex items-center gap-2.5 hover:text-dash"><Avatar seed={m.id} name={m.name || m.id} src={m.avatarUrl} size={28} /><span className="truncate font-medium">{m.name || `${m.id.slice(0, 6)}…`}</span></Link></td>
+                  <td className="px-4 py-2"><Link href={`/u/${m.id}/`} className="flex items-center gap-2.5 hover:text-dash"><Avatar seed={m.id} name={m.name || m.id} src={m.avatarUrl} size={28} /><span className="truncate font-medium">{m.name || memberLabel(m.id)}</span></Link></td>
                   <td className="px-4 py-2 text-right tabnum">{m.posts.toLocaleString('en-US')}</td>
                   <td className="px-4 py-2 text-right tabnum">{m.threads.toLocaleString('en-US')}</td>
                   <td className="px-4 py-2 text-right tabnum">{m.reactionsReceived.toLocaleString('en-US')}</td>
@@ -59,7 +60,7 @@ export default function Members() {
           <h2 id="arch" className="text-lg font-semibold">Archive authors</h2>
           <p className="text-sm text-ink-2">Authors of posts imported from {s.settings.archiveSourceName ?? 'the previous forum'}. They are names from the archive, not Dash identities.</p>
           <ul className="flex flex-wrap gap-2">
-            {archived.map((a) => <li key={a.key} className="rounded-md bg-archive-wash px-2.5 py-1 text-sm text-archive">{a.name} <span className="tabnum opacity-75">{a.posts}</span></li>)}
+            {archived.map((a) => <li key={a.key} className="rounded-md bg-archive-wash px-2.5 py-1 text-sm text-archive">{a.name} <span className="tabnum">{a.posts}</span></li>)}
           </ul>
         </section>
       )}

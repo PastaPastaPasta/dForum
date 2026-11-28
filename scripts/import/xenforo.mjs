@@ -9,6 +9,10 @@
  *   structure  create categories/forums (owner-only types: signs with the contract OWNER key)
  *   load       write threads/posts as the ARCHIVIST identity, oldest first, resumable and
  *              idempotent (ledger + the unique byOrigin index)
+ *   archive    close the forums marked with `structure --archive-forums` (owner key); run after
+ *              load, since archived forums refuse all new threads and posts at consensus
+ *   trust      --until now|open|<ISO>: close or reopen the window in which archivist documents
+ *              are shown with their imported authors and dates (forumSettings.archiveTrustUntil)
  *
  * Key material never comes from flags. Testnet derives from the deployer seed in .env.local
  * (owner = identity index 0, archivist = --archivist-index, default 5). Elsewhere set
@@ -20,6 +24,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { redactWif } from '../lib/redact.mjs';
 import { parseForumPage, parseNodeIndex, parseThreadPage } from '../../lib/import/xf-html.ts';
 import { splitMarkdownByBytes, xfHtmlToMarkdown } from '../../lib/import/to-markdown.ts';
 import { bbcodeToMarkdown } from '../../lib/import/bbcode.ts';
@@ -45,6 +50,7 @@ const { values: opts, positionals } = parseArgs({
     limit: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
     'archive-forums': { type: 'string' },
+    until: { type: 'string' },
   },
 });
 const command = positionals[0];
@@ -62,20 +68,21 @@ function sourceUrl(url) {
 }
 
 let lastFetch = 0;
-async function fetchText(url, { headers = {}, attempts = 6 } = {}) {
+async function fetchText(url, { headers = {}, attempts = 6, redirect = 'follow' } = {}) {
   for (let i = 1; ; i++) {
     const wait = lastFetch + DELAY - Date.now();
     if (wait > 0) await sleep(wait);
     lastFetch = Date.now();
     let res;
     try {
-      res = await fetch(url, { headers: { 'user-agent': 'dForum-importer/1.0 (+https://forum.dashhq.org)', ...headers }, redirect: 'follow' });
+      res = await fetch(url, { headers: { 'user-agent': 'dForum-importer/1.0 (+https://forum.dashhq.org)', ...headers }, redirect });
     } catch (e) {
       if (i >= attempts) throw new Error(`fetch ${url}: ${e.message}`);
       await sleep(DELAY * 2 ** i);
       continue;
     }
-    if (res.status === 404) return null;
+    // Gone, or refused by the archive: skip the page rather than abort the crawl.
+    if ([403, 404, 410, 451].includes(res.status)) { log(`skip ${url}: HTTP ${res.status}`); return null; }
     if (res.ok) return res.text();
     if (i >= attempts || ![408, 425, 429, 500, 502, 503, 504, 520, 522, 524].includes(res.status)) {
       throw new Error(`fetch ${url}: HTTP ${res.status}`);
@@ -169,7 +176,8 @@ async function crawlApi() {
   if (!keyFile) throw new Error('--source api needs --api-key-file (a XenForo API key with node/thread read scope)');
   const headers = { 'XF-Api-Key': readFileSync(keyFile, 'utf8').trim(), 'XF-Api-User': opts['api-user'] };
   const api = async (path) => {
-    const text = await fetchText(`${base}api/${path}`, { headers });
+    // The API key must never follow a redirect to another origin.
+    const text = await fetchText(`${base}api/${path}`, { headers, redirect: 'error' });
     if (text === null) return null;
     return JSON.parse(text);
   };
@@ -249,6 +257,9 @@ function plan() {
   return p;
 }
 
+/** Structure ids are per contract: a new registration starts a fresh map. */
+const mapFile = (contractId) => join(CACHE, `structure-map-${contractId}.json`);
+
 // ---- platform ------------------------------------------------------------------------------
 
 async function platform() {
@@ -305,6 +316,17 @@ async function createDoc(ctx, who, type, properties) {
   return created?.id?.toBase58?.() ?? document.id.toBase58();
 }
 
+/** Replaces a document and confirms the new revision landed (rc SDKs differ on who bumps it). */
+async function replaceDoc(ctx, who, type, current, properties) {
+  const document = new ctx.sdkMod.Document({
+    properties, documentTypeName: type, dataContractId: ctx.contractId, ownerId: who.identityId,
+    revision: BigInt(current.$revision) + 1n, id: current.$id,
+  });
+  await ctx.sdk.documents.replace({ document, identityKey: who.key, signer: who.signer });
+  const after = await ctx.sdk.documents.get(ctx.contractId, type, current.$id);
+  if (!after || Number(after.toJSON().$revision) <= Number(current.$revision)) throw new Error(`${type} ${current.$id}: replace did not land`);
+}
+
 async function findByOrigin(ctx, ownerId, type, origId) {
   const res = await ctx.sdk.documents.query({
     dataContractId: ctx.contractId,
@@ -328,7 +350,7 @@ async function idempotentCreate(ctx, who, type, props) {
       if (existing) return existing;
       if (/duplicate|unique/i.test(msg)) throw new Error(`${type} origId ${props.origId}: unique conflict but not found by byOrigin`);
       if (i >= 4) throw e;
-      log(`${type} origId ${props.origId}: retry ${i} after ${msg.slice(0, 120)}`);
+      log(`${type} origId ${props.origId}: retry ${i} after ${redactWif(msg).slice(0, 120)}`);
       await sleep(3000 * i);
     }
   }
@@ -340,14 +362,22 @@ async function structure() {
   const { structure: s } = loadCrawl();
   const ctx = await platform();
   const owner = await signerFor('owner', ctx);
-  const mapPath = join(CACHE, 'structure-map.json');
+  const mapPath = mapFile(ctx.contractId);
   const map = readJson(mapPath, { categories: {}, forums: {} });
+  // A dry run plans in memory only: persisting placeholder ids would poison the real run.
+  const saveMap = () => { if (!opts['dry-run']) writeJson(mapPath, map); };
   const archived = new Set((opts['archive-forums'] ?? '').split(',').filter(Boolean).map(Number));
   const existingForums = new Map();
   const existingCats = new Map();
   for (const [type, target] of [['forum', existingForums], ['category', existingCats]]) {
-    const res = await ctx.sdk.documents.query({ dataContractId: ctx.contractId, documentTypeName: type, orderBy: [['slug', 'asc']], limit: 100 });
-    for (const [id, doc] of res) if (doc) target.set(doc.toJSON().slug, String(id));
+    let startAfter;
+    for (;;) {
+      const res = await ctx.sdk.documents.query({ dataContractId: ctx.contractId, documentTypeName: type, orderBy: [['slug', 'asc']], limit: 100, ...(startAfter ? { startAfter } : {}) });
+      let last;
+      for (const [id, doc] of res) { last = String(id); if (doc) target.set(doc.toJSON().slug, String(id)); }
+      if (res.size < 100 || !last) break;
+      startAfter = last;
+    }
   }
   const slugOf = (title, origId) => `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}-${origId}`.replace(/^-/, '');
   let sort = 100;
@@ -358,7 +388,7 @@ async function structure() {
         slug, title: cat.title.slice(0, 80).padEnd(3, '.'), ...(cat.description ? { description: cat.description.slice(0, 300) } : {}), sort: sort,
       }));
       log(`category ${cat.title} → ${map.categories[cat.origId]}`);
-      writeJson(mapPath, map);
+      saveMap();
     }
     sort += 100;
     let fsort = 0;
@@ -376,12 +406,15 @@ async function structure() {
         title: f.title.slice(0, 80).padEnd(3, '.'),
         ...(f.description ? { description: f.description.slice(0, 500) } : {}),
         sort: fsort,
-        ...(archived.has(f.origId) || archived.has(cat.origId) ? { archived: true } : {}),
         origId: f.origId,
       }));
       log(`forum ${f.title} → ${map.forums[f.origId]}`);
-      writeJson(mapPath, map);
+      saveMap();
     }
+    // Archived forums refuse every write at consensus (the archivist's too), so they are closed by
+    // the `archive` command after the load, not at creation.
+    for (const f of ordered) if (archived.has(f.origId) || archived.has(cat.origId)) map.toArchive = [...new Set([...(map.toArchive ?? []), f.origId])];
+    saveMap();
   }
   log('structure done');
   process.exit(0);
@@ -391,12 +424,14 @@ async function structure() {
 
 async function load() {
   const { structure: s, threads } = loadCrawl();
-  const map = readJson(join(CACHE, 'structure-map.json'), null);
-  if (!map) throw new Error('run structure first');
   const ctx = await platform();
+  const map = readJson(mapFile(ctx.contractId), null);
+  if (!map) throw new Error('run structure first');
   const archivist = await signerFor('archivist', ctx);
   const ledgerPath = join(CACHE, `ledger-${ctx.contractId}.json`);
   const ledger = readJson(ledgerPath, { threads: {}, posts: {}, spentCredits: 0 });
+  const dry = opts['dry-run'];
+  const saveLedger = () => { if (!dry) writeJson(ledgerPath, ledger); };
   const budget = Number(opts['budget-dash']) * 1e11;
   const limit = opts.limit ? Number(opts.limit) : Infinity;
   const startBalance = BigInt(await ctx.sdk.identities.balance(archivist.identityId));
@@ -406,6 +441,7 @@ async function load() {
   for (const t of threads) {
     const forumId = map.forums[t.forumOrigId];
     if (!forumId || forumId === 'dry') continue;
+    t.posts.sort((a, b) => a.createdAt - b.createdAt || a.origId - b.origId);
     t.posts.forEach((p, i) => events.push({ t, p, i, at: p.createdAt, forumId }));
   }
   events.sort((a, b) => a.at - b.at || a.t.origId - b.t.origId || a.i - b.i);
@@ -416,10 +452,10 @@ async function load() {
     if (!ledger.threads[t.origId]) {
       if (ev.i !== 0) continue;
       const props = threadDocProps(t, forumId);
-      if (opts['dry-run']) { log('would create thread', props.title); ledger.threads[t.origId] = 'dry'; continue; }
+      if (dry) { log('would create thread', props.title); ledger.threads[t.origId] = 'dry'; continue; }
       ledger.threads[t.origId] = await idempotentCreate(ctx, archivist, 'thread', props);
       written++;
-      writeJson(ledgerPath, ledger);
+      saveLedger();
       log(`thread ${t.origId} → ${ledger.threads[t.origId]} "${props.title}"`);
     }
     const threadId = ledger.threads[t.origId];
@@ -428,10 +464,10 @@ async function load() {
       const origId = p.origId * 100 + k;
       if (ledger.posts[origId]) continue;
       const props = postDocProps(t, p, chunk, k, threadId, forumId);
-      if (opts['dry-run']) { ledger.posts[origId] = 'dry'; continue; }
+      if (dry) { ledger.posts[origId] = 'dry'; written++; continue; }
       ledger.posts[origId] = await idempotentCreate(ctx, archivist, 'post', props);
       written++;
-      writeJson(ledgerPath, ledger);
+      saveLedger();
     }
     if (written % 25 === 0) {
       const now = BigInt(await ctx.sdk.identities.balance(archivist.identityId));
@@ -442,18 +478,63 @@ async function load() {
   }
   const end = BigInt(await ctx.sdk.identities.balance(archivist.identityId));
   ledger.spentBefore = (ledger.spentBefore ?? 0) + Number(startBalance - end);
-  writeJson(ledgerPath, ledger);
+  saveLedger();
   log(`load done: ${written} writes this run, ${(Number(startBalance - end) / 1e11).toFixed(4)} DASH`);
   process.exit(0);
 }
 
-const commands = { crawl: () => (opts.source === 'api' ? crawlApi() : crawlHtml()), plan, structure, load };
+// ---- archive -------------------------------------------------------------------------------
+
+async function archive() {
+  const ctx = await platform();
+  const map = readJson(mapFile(ctx.contractId), null);
+  if (!map?.toArchive?.length) { log('no forums marked for archiving (structure --archive-forums)'); process.exit(0); }
+  const owner = await signerFor('owner', ctx);
+  for (const origId of map.toArchive) {
+    const id = map.forums[origId];
+    const doc = id && (await ctx.sdk.documents.get(ctx.contractId, 'forum', id));
+    if (!doc) { log(`forum ${origId}: not found`); continue; }
+    const j = doc.toJSON();
+    if (j.archived === true) { log(`forum ${j.title}: already archived`); continue; }
+    if (opts['dry-run']) { log(`would archive ${j.title}`); continue; }
+    const props = Object.fromEntries(Object.entries(j).filter(([k, v]) => !k.startsWith('$') && v !== null));
+    await replaceDoc(ctx, owner, 'forum', j, { ...props, archived: true });
+    log(`archived ${j.title}`);
+  }
+  process.exit(0);
+}
+
+// ---- trust window ----------------------------------------------------------------------------
+
+/** Sets forumSettings.archiveTrustUntil: `--until now` closes the window (archivist documents
+ * created later lose their imported dates and authors), `--until open` reopens it for a later
+ * backfill, or an ISO date. */
+async function trust() {
+  const until = opts.until;
+  if (!until) throw new Error('trust needs --until now|open|<ISO date>');
+  const at = until === 'open' ? undefined : until === 'now' ? Date.now() : Date.parse(until);
+  if (at !== undefined && !Number.isFinite(at)) throw new Error(`bad --until ${until}`);
+  const ctx = await platform();
+  const owner = await signerFor('owner', ctx);
+  const res = await ctx.sdk.documents.query({ dataContractId: ctx.contractId, documentTypeName: 'forumSettings', where: [['key', '==', 'main']], orderBy: [['key', 'asc']], limit: 1 });
+  const doc = [...res.values()].find(Boolean);
+  if (!doc) throw new Error('no forumSettings document; run scripts/seed-forum.mjs first');
+  const j = doc.toJSON();
+  const props = Object.fromEntries(Object.entries(j).filter(([k, v]) => !k.startsWith('$') && v !== null && k !== 'archiveTrustUntil'));
+  if (at !== undefined) props.archiveTrustUntil = at;
+  if (opts['dry-run']) { log('would set archiveTrustUntil', at === undefined ? 'open' : new Date(at).toISOString()); process.exit(0); }
+  await replaceDoc(ctx, owner, 'forumSettings', j, props);
+  log(`archive trust ${at === undefined ? 'open' : `until ${new Date(at).toISOString()}`}`);
+  process.exit(0);
+}
+
+const commands = { crawl: () => (opts.source === 'api' ? crawlApi() : crawlHtml()), plan, structure, load, archive, trust };
 if (!commands[command]) {
-  console.error('usage: node scripts/import/xenforo.mjs crawl|plan|structure|load [options]  (see the header)');
+  console.error('usage: node scripts/import/xenforo.mjs crawl|plan|structure|load|archive|trust [options]  (see the header)');
   process.exit(2);
 }
 Promise.resolve(commands[command]()).catch((e) => {
-  console.error('[import] failed:', e?.message ?? e);
+  console.error('[import] failed:', redactWif(String(e?.message ?? e)));
   process.exit(1);
 });
 export { normalizeTags, splitMarkdownByBytes };

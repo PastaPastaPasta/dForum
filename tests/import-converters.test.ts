@@ -65,7 +65,10 @@ describe('HTML to Markdown', () => {
   it('converts lists, mentions, smilies, media and images', () => {
     expect(md('<ul><li>one</li><li>two<ul><li>deep</li></ul></li></ul>')).toBe('- one\n- two\n\n  - deep')
     expect(md('<a href="/forum/members/x.4/" class="username" data-user-id="4">@Bob</a> hi')).toBe('@Bob hi')
-    expect(md('<img class="smilie" alt=":)" src="x.png" />')).toBe(':)')
+    expect(md('<img class="smilie" alt=":)" src="x.png" />')).toBe('🙂')
+    expect(md('<img class="smilie" alt=":unknown:" src="x.png" />')).toBe(':unknown:')
+    expect(md('<a href="/forum/attachments/a-pdf.9/">View attachment 9</a>')).toBe('[Attachment](https://www.dash.org/forum/attachments/a-pdf.9/)')
+    expect(md('<a href="/forum/attachments/a-pdf.9/">roadmap.pdf</a>')).toBe('[Attachment: roadmap.pdf](https://www.dash.org/forum/attachments/a-pdf.9/)')
     expect(md('<span class="bbMediaWrapper" data-media-site-id="youtube" data-media-key="abcdefg"></span>')).toBe('<https://www.youtube.com/watch?v=abcdefg>')
     expect(md('<img class="bbImage" src="/forum/attachments/x-png.12/" alt="x" />')).toBe('![x](https://www.dash.org/forum/attachments/x-png.12/)')
   })

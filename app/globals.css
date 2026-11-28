@@ -14,13 +14,15 @@
   --rule: 217 225 235;       /* borders */
   --ink: 20 33 61;           /* text */
   --ink-2: 82 96 122;        /* secondary text */
-  --dash: 0 112 210;         /* links, primary */
+  --dash: 0 100 190;         /* links, primary */
   --dash-ink: 255 255 255;   /* text on primary */
-  --live: 14 140 98;         /* on-chain / live */
+  --live: 10 115 80;         /* live status */
   --archive: 146 98 22;      /* imported history */
   --archive-wash: 252 246 233;
-  --danger: 196 43 52;
-  --focus: 0 112 210;
+  --danger: 190 35 45;
+  --danger-ink: 255 255 255;
+  --field: 134 148 171;      /* input borders (3:1) */
+  --focus: 0 100 190;
 }
 
 :root[data-theme='dark'] {
@@ -37,6 +39,8 @@
   --archive: 226 178 92;
   --archive-wash: 40 34 24;
   --danger: 255 120 125;
+  --danger-ink: 40 6 10;
+  --field: 98 116 150;
   --focus: 120 190 255;
 }
 
@@ -55,6 +59,8 @@
     --archive: 226 178 92;
     --archive-wash: 40 34 24;
     --danger: 255 120 125;
+    --danger-ink: 40 6 10;
+    --field: 98 116 150;
     --focus: 120 190 255;
   }
 }
@@ -73,7 +79,7 @@ input::placeholder, textarea::placeholder { color: rgb(var(--ink-2)); opacity: 1
 
 @layer components {
   .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; min-height: 2.5rem;
     border-radius: 6px; padding: 0.45rem 0.9rem; font-size: 0.875rem; font-weight: 600; line-height: 1.25rem;
     border: 1px solid transparent; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
     white-space: nowrap;
@@ -83,22 +89,29 @@ input::placeholder, textarea::placeholder { color: rgb(var(--ink-2)); opacity: 1
   .btn-primary:hover:not(:disabled) { background: rgb(var(--dash) / 0.88); }
   .btn-quiet { background: rgb(var(--sheet)); color: rgb(var(--ink)); border-color: rgb(var(--rule)); }
   .btn-quiet:hover:not(:disabled) { border-color: rgb(var(--dash) / 0.6); color: rgb(var(--dash)); }
-  .btn-ghost { color: rgb(var(--ink-2)); padding: 0.35rem 0.55rem; font-weight: 500; }
+  .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem; min-height: 2.5rem; min-width: 2.5rem;
+    border-radius: 6px; color: rgb(var(--ink-2)); padding: 0.35rem 0.55rem; font-size: 0.875rem; font-weight: 500; white-space: nowrap;
+  }
+  .btn-ghost:disabled { opacity: 0.55; cursor: not-allowed; }
   .btn-ghost:hover:not(:disabled) { color: rgb(var(--ink)); background: rgb(var(--sunk)); }
-  .btn-danger { background: rgb(var(--danger)); color: #fff; }
+  .btn-danger { background: rgb(var(--danger)); color: rgb(var(--danger-ink)); }
+  .btn-danger:hover:not(:disabled) { background: rgb(var(--danger) / 0.88); }
   .field {
-    width: 100%; border-radius: 6px; border: 1px solid rgb(var(--rule)); background: rgb(var(--sheet));
+    width: 100%; min-height: 2.5rem; border-radius: 6px; border: 1px solid rgb(var(--field)); background: rgb(var(--sheet));
     padding: 0.55rem 0.75rem; font-size: 0.9375rem; color: rgb(var(--ink));
   }
-  .field:focus { border-color: rgb(var(--dash)); outline: none; box-shadow: 0 0 0 3px rgb(var(--dash) / 0.18); }
+  .field:focus { border-color: rgb(var(--dash)); }
+  .field:focus-visible { outline: 2px solid rgb(var(--focus)); outline-offset: 1px; }
   .panel { background: rgb(var(--sheet)); border: 1px solid rgb(var(--rule)); border-radius: 8px; }
   .tabnum { font-variant-numeric: tabular-nums; }
-  .link { color: rgb(var(--dash)); }
-  .link:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .link { color: rgb(var(--dash)); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  /* Small controls (page chips, tags, reactions) grow to a 40px target on touch screens. */
+  @media (pointer: coarse) { .tap { min-height: 2.5rem; min-width: 2.5rem; display: inline-flex; align-items: center; justify-content: center; } }
 }
 
 /* Post bodies: serif reading measure. */
-.post-body { font-family: var(--font-serif), Georgia, serif; font-size: 1.0625rem; line-height: 1.7; overflow-wrap: anywhere; }
+.post-body { font-family: var(--font-serif), Georgia, serif; font-size: 1.0625rem; line-height: 1.7; overflow-wrap: anywhere; max-width: 72ch; }
 .post-body > :first-child { margin-top: 0; }
 .post-body > :last-child { margin-bottom: 0; }
 .post-body p { margin: 0 0 0.9em; }

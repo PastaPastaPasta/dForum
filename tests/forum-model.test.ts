@@ -3,7 +3,8 @@ import type { RawDoc } from '@/lib/forum/types'
 import {
   compareIds, countReactions, effectiveAt, isArchive, mergeDocs, resolveForumTree, summarizeThread, threadPosts, sortThreadSummaries, excerpt,
 } from '@/lib/forum/model'
-import { forumActivity, mergeForumThreads, newThreads } from '@/lib/forum/live-merge'
+import { forumActivity, mayWriteIn, mergeForumThreads, newPosts, newThreads } from '@/lib/forum/live-merge'
+import { isUnread } from '@/lib/seen'
 import { splitBody, byteLength } from '@/lib/forum/actions'
 import { normalizeTagInput } from '@/lib/forum/tags'
 
@@ -30,6 +31,37 @@ describe('ordering and provenance', () => {
   })
 })
 
+describe('archive trust window', () => {
+  it('trusts archivist documents created up to archiveTrustUntil and not after', () => {
+    const before = doc(ARCH, 1_000, { origCreatedAt: 5, origAuthor: 'old' })
+    const after = doc(ARCH, 3_000, { origCreatedAt: 5, origAuthor: 'forged' })
+    const ref = { id: ARCH, until: 2_000 }
+    expect(isArchive(before, ref)).toBe(true)
+    expect(isArchive(after, ref)).toBe(false)
+    expect(effectiveAt(after, ref)).toBe(3_000)
+    expect(isArchive(after, { id: ARCH })).toBe(true)
+  })
+  it('lets only staff and the archivist write in archived forums', () => {
+    const ctx = { archive: { id: ARCH }, archivedForums: new Set(['F']), staff: new Set(['MOD']) }
+    expect(mayWriteIn('F', ARCH, ctx)).toBe(true)
+    expect(mayWriteIn('F', 'MOD', ctx)).toBe(true)
+    expect(mayWriteIn('F', 'someone', ctx)).toBe(false)
+    expect(mayWriteIn('open', 'someone', ctx)).toBe(true)
+  })
+})
+
+describe('unread tracking', () => {
+  const seen = { since: 1_000, threads: {}, forums: {} }
+  it('treats activity before the first visit as read', () => {
+    expect(isUnread(seen, 900, undefined)).toBe(false)
+    expect(isUnread(seen, 1_500, undefined)).toBe(true)
+  })
+  it('clears once viewed up to the latest activity', () => {
+    expect(isUnread(seen, 1_500, 1_500)).toBe(false)
+    expect(isUnread(seen, 1_600, 1_500)).toBe(true)
+  })
+})
+
 describe('thread visibility', () => {
   const thread = doc('alice', 100, { title: 'Hello', forumId: 'F' })
   it('lists a thread whose opening post is the owner’s earliest visible post', () => {
@@ -40,13 +72,10 @@ describe('thread visibility', () => {
     expect(view.listable).toBe(true)
     expect(view.posts.map((p) => p.p.body)).toEqual(['hi', 'yo'])
   })
-  it('hides threads whose opening post is hidden, retracted or missing, and drops posts after the lock', () => {
+  it('hides threads whose opening post is hidden, retracted or missing', () => {
     expect(threadPosts(thread, [doc('bob', 110, { threadId: thread.id, body: 'x' })], ARCH).listable).toBe(false)
     expect(threadPosts(thread, [doc('alice', 110, { threadId: thread.id, body: 'x', modState: 1 })], ARCH).listable).toBe(false)
     expect(threadPosts(thread, [doc('alice', 110, { threadId: thread.id, body: 'x', retracted: true })], ARCH).listable).toBe(false)
-    const locked = { ...thread, p: { ...thread.p, lockedAt: 130 } }
-    const posts = [doc('alice', 110, { threadId: thread.id, body: 'a' }), doc('bob', 140, { threadId: thread.id, body: 'late' })]
-    expect(threadPosts(locked, posts, ARCH).posts.map((p) => p.p.body)).toEqual(['a'])
   })
   it('orders archive posts by their original date even when imported out of order', () => {
     const t = doc(ARCH, 1000, { title: 'Old', forumId: 'F', origCreatedAt: 10, origId: 1, origAuthor: 'x' })
@@ -86,26 +115,43 @@ describe('merging and counting', () => {
 
 describe('live delta', () => {
   const snapshotAt = 1000
+  const ctx = { snapshotAt }
   const t = doc('alice', 1500, { title: 'New', forumId: 'F' })
   const open = doc('alice', 1501, { threadId: t.id, forumId: 'F', body: 'hi' })
+  const oldThread = { ...doc('carol', 5, { title: 'Old', forumId: 'F' }), id: 'OLD' }
   const reply = doc('bob', 1600, { threadId: 'OLD', forumId: 'F', body: 'reply' })
   const old = { id: 'OLD', forumId: 'F', title: 'Old', tags: [], ownerId: 'carol', createdAt: 10, sticky: false, locked: false, replies: 3, reactions: 0, lastPostAt: 500, lastPostAuthorId: 'carol' }
   it('adds new threads only once their opening post is visible', () => {
-    expect(newThreads({ threads: [t], posts: [] }, snapshotAt)).toHaveLength(0)
-    expect(newThreads({ threads: [t], posts: [open] }, snapshotAt)).toHaveLength(1)
+    expect(newThreads({ threads: [t], posts: [] }, ctx)).toHaveLength(0)
+    expect(newThreads({ threads: [t], posts: [open] }, ctx)).toHaveLength(1)
   })
   it('bumps forum counts and the thread list', () => {
-    const a = forumActivity({ threads: [t], posts: [open, reply] }, snapshotAt)
-    expect(a.get('F')).toMatchObject({ threads: 1, posts: 2 })
-    const list = mergeForumThreads([old], 'F', { threads: [t], posts: [open, reply] }, snapshotAt)
+    const delta = { threads: [t, oldThread], posts: [open, reply] }
+    expect(forumActivity(delta, ctx).get('F')).toMatchObject({ threads: 1, posts: 2 })
+    const list = mergeForumThreads([old], 'F', delta, ctx)
     expect(list.find((x) => x.id === 'OLD')).toMatchObject({ replies: 4, lastPostAt: 1600, lastPostAuthorId: 'bob' })
     expect(list.find((x) => x.id === t.id)).toMatchObject({ replies: 0, title: 'New' })
+    expect(mergeForumThreads([old], 'F', delta, ctx, false).find((x) => x.id === t.id)).toBeUndefined()
   })
   it('drops threads that were hidden or moved away since the snapshot', () => {
-    const hidden = { ...doc('carol', 5, { title: 'Old', forumId: 'F', modState: 1 }), id: 'OLD' }
-    expect(mergeForumThreads([old], 'F', { threads: [hidden], posts: [] }, snapshotAt)).toHaveLength(0)
-    const moved = { ...doc('carol', 5, { title: 'Old', forumId: 'F', movedToForumId: 'G' }), id: 'OLD' }
-    expect(mergeForumThreads([old], 'F', { threads: [moved], posts: [] }, snapshotAt)).toHaveLength(0)
+    const hidden = { ...oldThread, p: { ...oldThread.p, modState: 1 } }
+    expect(mergeForumThreads([old], 'F', { threads: [hidden], posts: [] }, ctx)).toHaveLength(0)
+    const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
+    expect(mergeForumThreads([old], 'F', { threads: [moved], posts: [] }, ctx)).toHaveLength(0)
+  })
+  it('ignores live posts in hidden threads, unknown threads, and archived forums', () => {
+    expect(newPosts({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [reply] }, ctx)).toHaveLength(0)
+    expect(newPosts({ threads: [], posts: [reply] }, ctx)).toHaveLength(0)
+    const archived = { snapshotAt, archivedForums: new Set(['F']), staff: new Set(['carol']), archive: 'ARCH' }
+    expect(newPosts({ threads: [oldThread], posts: [reply] }, archived)).toHaveLength(0)
+    expect(newPosts({ threads: [oldThread], posts: [{ ...reply, ownerId: 'carol' }] }, archived)).toHaveLength(1)
+    expect(newThreads({ threads: [t], posts: [open] }, archived)).toHaveLength(0)
+  })
+  it('counts moved threads toward their new forum', () => {
+    const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
+    const a = forumActivity({ threads: [moved], posts: [reply] }, ctx)
+    expect(a.get('G')?.posts).toBe(1)
+    expect(a.get('F')).toBeUndefined()
   })
 })
 

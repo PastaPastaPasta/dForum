@@ -122,6 +122,11 @@
           "maxLength": 200,
           "pattern": "^(https://\\S+)?$",
           "position": 8
+        },
+        "archiveTrustUntil": {
+          "type": "integer",
+          "minimum": 0,
+          "position": 9
         }
       },
       "required": [
@@ -333,7 +338,6 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "immutable": [
         "forumId"
       ],
@@ -344,7 +348,7 @@
         ],
         "changeFields": [
           "sticky",
-          "lockedAt",
+          "locked",
           "modState",
           "modNote",
           "movedToForumId",
@@ -356,7 +360,14 @@
           "type": "identifier",
           "refersTo": {
             "type": "permanentDocument",
-            "documentType": "forum"
+            "documentType": "forum",
+            "where": {
+              "archived": {
+                "notEqual": {
+                  "const": true
+                }
+              }
+            }
           },
           "position": 0
         },
@@ -404,9 +415,8 @@
           "type": "boolean",
           "position": 7
         },
-        "lockedAt": {
-          "type": "integer",
-          "minimum": 0,
+        "locked": {
+          "type": "boolean",
           "position": 8
         },
         "modState": {
@@ -449,8 +459,7 @@
             {
               "$createdAt": "asc"
             }
-          ],
-          "rangeCountable": true
+          ]
         },
         {
           "name": "byAuthor",
@@ -464,29 +473,10 @@
           ]
         },
         {
-          "name": "recent",
-          "properties": [
-            {
-              "$createdAt": "asc"
-            }
-          ]
-        },
-        {
           "name": "byUpdated",
           "properties": [
             {
               "$updatedAt": "asc"
-            }
-          ]
-        },
-        {
-          "name": "byTag",
-          "properties": [
-            {
-              "tags": "asc"
-            },
-            {
-              "$createdAt": "asc"
             }
           ]
         },
@@ -506,34 +496,6 @@
           ]
         },
         {
-          "name": "byForumSticky",
-          "properties": [
-            {
-              "forumId": "asc"
-            },
-            {
-              "sticky": "asc"
-            }
-          ],
-          "skipIfAbsent": [
-            "sticky"
-          ]
-        },
-        {
-          "name": "byMovedTo",
-          "properties": [
-            {
-              "movedToForumId": "asc"
-            },
-            {
-              "$createdAt": "asc"
-            }
-          ],
-          "skipIfAbsent": [
-            "movedToForumId"
-          ]
-        },
-        {
           "name": "moderated",
           "properties": [
             {
@@ -548,10 +510,10 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "immutable": [
         "threadId",
-        "forumId"
+        "forumId",
+        "replyToId"
       ],
       "moderatorAbilities": {
         "delete": true,
@@ -561,7 +523,8 @@
         ],
         "changeFields": [
           "modState",
-          "modNote"
+          "modNote",
+          "modFlags"
         ]
       },
       "properties": {
@@ -571,7 +534,12 @@
             "type": "moderatedDocument",
             "documentType": "thread",
             "where": {
-              "forumId": "forumId"
+              "forumId": "forumId",
+              "locked": {
+                "notEqual": {
+                  "const": true
+                }
+              }
             }
           },
           "position": 0
@@ -580,7 +548,14 @@
           "type": "identifier",
           "refersTo": {
             "type": "permanentDocument",
-            "documentType": "forum"
+            "documentType": "forum",
+            "where": {
+              "archived": {
+                "notEqual": {
+                  "const": true
+                }
+              }
+            }
           },
           "position": 1
         },
@@ -600,6 +575,13 @@
         },
         "replyToId": {
           "type": "identifier",
+          "refersTo": {
+            "type": "moderatedDocument",
+            "documentType": "post",
+            "where": {
+              "threadId": "threadId"
+            }
+          },
           "position": 4
         },
         "retracted": {
@@ -638,6 +620,12 @@
           "minLength": 0,
           "maxLength": 200,
           "position": 11
+        },
+        "modFlags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "position": 12
         }
       },
       "required": [
@@ -658,20 +646,7 @@
             {
               "$createdAt": "asc"
             }
-          ],
-          "rangeCountable": true
-        },
-        {
-          "name": "byForum",
-          "properties": [
-            {
-              "forumId": "asc"
-            },
-            {
-              "$createdAt": "asc"
-            }
-          ],
-          "rangeCountable": true
+          ]
         },
         {
           "name": "byAuthor",
@@ -679,15 +654,6 @@
             {
               "$ownerId": "asc"
             },
-            {
-              "$createdAt": "asc"
-            }
-          ],
-          "rangeCountable": true
-        },
-        {
-          "name": "recent",
-          "properties": [
             {
               "$createdAt": "asc"
             }
@@ -717,23 +683,6 @@
           ]
         },
         {
-          "name": "byOrigAuthor",
-          "properties": [
-            {
-              "$ownerId": "asc"
-            },
-            {
-              "origAuthorId": "asc"
-            },
-            {
-              "$createdAt": "asc"
-            }
-          ],
-          "skipIfAbsent": [
-            "origAuthorId"
-          ]
-        },
-        {
           "name": "moderated",
           "properties": [
             {
@@ -748,7 +697,6 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "immutable": [
         "postId",
         "postOwnerId",
@@ -778,7 +726,7 @@
         "kind": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 8,
+          "maximum": 63,
           "position": 3
         }
       },
@@ -822,7 +770,7 @@
               "postOwnerId": "asc"
             },
             {
-              "$createdAt": "asc"
+              "$updatedAt": "asc"
             }
           ]
         },
@@ -838,7 +786,7 @@
     },
     "report": {
       "type": "object",
-      "canBeDeleted": true,
+      "canBeDeleted": false,
       "documentsMutable": false,
       "moderatorAbilities": {
         "delete": true,
@@ -915,6 +863,15 @@
               "$createdAt": "asc"
             }
           ]
+        },
+        {
+          "name": "moderated",
+          "properties": [
+            {
+              "$moderatedAt": "asc"
+            }
+          ],
+          "nullSearchable": false
         }
       ]
     },
@@ -922,12 +879,12 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "moderatorAbilities": {
         "delete": true,
         "changeFields": [
           "customTitle",
-          "modState"
+          "modState",
+          "modFlags"
         ]
       },
       "properties": {
@@ -980,6 +937,12 @@
           "minimum": 1,
           "maximum": 3,
           "position": 7
+        },
+        "modFlags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "position": 8
         }
       },
       "required": [

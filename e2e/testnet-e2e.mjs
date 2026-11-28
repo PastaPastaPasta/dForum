@@ -6,7 +6,7 @@
  *
  * Writes evidence screenshots to E2E_SHOTS (default /work/tmp/shots/e2e) and a JSON summary.
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { chromium } from '/work/scratch/dforum-tools/node_modules/playwright-core/index.mjs'
 import { CDP, SITE, log, login } from './helpers.mjs'
 import { deriveIdentityKeys } from '../scripts/derive-identities.mjs'
@@ -15,17 +15,48 @@ const SHOTS = process.env.E2E_SHOTS ?? '/work/tmp/shots/e2e'
 mkdirSync(SHOTS, { recursive: true })
 const RUN = new Date().toISOString().slice(5, 16).replace(/[-T:]/g, '')
 const result = { run: RUN, steps: [] }
+const hydrationErrors = []
 let shotN = 0
 
 const browser = await chromium.connectOverCDP(CDP)
 async function persona(name) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } })
   const page = await ctx.newPage()
-  page.on('pageerror', (e) => log(name, 'pageerror', e.message.slice(0, 200)))
+  page.on('pageerror', (e) => {
+    log(name, 'pageerror', e.message.slice(0, 200))
+    if (/#418|#423|#425|Hydration/i.test(e.message)) hydrationErrors.push(`${name} ${page.url()}`)
+  })
   page.on('dialog', (d) => { log(name, 'confirm:', d.message().slice(0, 120)); void d.accept() })
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) log(name, 'console', m.text().slice(0, 200)) })
   return { name, ctx, page }
 }
+/** Posts a reply straight through the SDK as persona `index`, bypassing the UI's lock check.
+ * Returns the refusal message, or null when the write was accepted. */
+async function replyFromNode(index, threadId, body) {
+  const sdkMod = await import('@dashevo/evo-sdk')
+  const record = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'))
+  const contractId = record.contracts.team.contractId
+  const identityId = record.personas.find((p) => p.index === index).id
+  const k = deriveIdentityKeys(index).find((x) => x.securityLevel === 'HIGH' && x.purpose === 'AUTHENTICATION')
+  const sdk = sdkMod.EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } })
+  await sdk.connect()
+  const thread = (await sdk.documents.get(contractId, 'thread', threadId)).toJSON()
+  const identity = await sdk.identities.fetch(identityId)
+  const signer = new sdkMod.IdentitySigner()
+  signer.addKeyFromWif(k.wif)
+  const document = new sdkMod.Document({
+    properties: { threadId, forumId: thread.forumId, body },
+    documentTypeName: 'post', dataContractId: contractId, ownerId: identityId, revision: 1n,
+    entropy: crypto.getRandomValues(new Uint8Array(32)),
+  })
+  try {
+    await sdk.documents.create({ document, identityKey: identity.getPublicKeyById(k.keyIndex), signer })
+    return null
+  } catch (e) {
+    return String(e?.message ?? e).replace(/[59c][1-9A-HJ-NP-Za-km-z]{50,51}/g, '[redacted]').replace(/^.*last error: /s, '')
+  }
+}
+
 async function shot(p, label) {
   const file = `${SHOTS}/${String(++shotN).padStart(2, '0')}-${p.name}-${label}.png`
   await p.page.screenshot({ path: file, fullPage: true })
@@ -151,7 +182,7 @@ try {
     return shot(carol, 'report-resolved')
   })
   await step('carol pins and locks bob’s thread', async () => {
-    await carol.page.getByRole('button', { name: 'Content' }).click()
+    await carol.page.getByRole('tab', { name: 'Content' }).click()
     await carol.page.getByLabel('Thread or post link').fill(threadUrl)
     await carol.page.getByRole('button', { name: 'Find' }).click()
     await carol.page.getByTestId('moderation-target').filter({ hasText: `Hello from bob ${RUN}` }).waitFor({ timeout: 60_000 })
@@ -172,15 +203,15 @@ try {
     await carol.page.getByText('Hide: done').waitFor({ timeout: WRITE_TIMEOUT })
   })
   await step('carol bans mallory', async () => {
-    await carol.page.getByRole('button', { name: 'Members' }).click()
+    await carol.page.getByRole('tab', { name: 'Members' }).click()
     await carol.page.getByLabel('Member identity id').fill('5T9NKrPoBWrEDgyGfSHqaqDSKeTkHMr3otusqaxGmbyP')
     await carol.page.getByRole('button', { name: 'Look up' }).click()
-    await carol.page.getByPlaceholder(/Reason/).fill('Spam and scam links')
+    await carol.page.getByLabel(/Reason/).fill('Spam and scam links')
     await carol.page.getByRole('button', { name: 'Ban', exact: true }).click()
     await carol.page.getByText('Ban: done').waitFor({ timeout: WRITE_TIMEOUT })
     await carol.page.getByText(/banned/).first().waitFor({ timeout: 30_000 })
     await shot(carol, 'banned')
-    await carol.page.getByRole('button', { name: 'Audit log' }).click()
+    await carol.page.getByRole('tab', { name: 'Audit log' }).click()
     await carol.page.getByText(/report actioned|hidden/).first().waitFor({ timeout: 60_000 })
     return shot(carol, 'audit-log')
   })
@@ -199,9 +230,22 @@ try {
   })
   await step('bob sees the locked thread with the spam hidden', async () => {
     await bob.page.goto(threadUrl)
-    await bob.page.getByText('This post was hidden by a moderator.').waitFor({ timeout: 90_000 })
-    await bob.page.getByText('This thread is locked').waitFor({ timeout: 30_000 })
+    await bob.page.getByText('Hidden by a moderator.').waitFor({ timeout: 90_000 })
+    await bob.page.getByText('Locked. No new replies can be posted.').waitFor({ timeout: 30_000 })
     return shot(bob, 'thread-after-moderation')
+  })
+  await step('consensus refuses a reply to the locked thread', async () => {
+    // Control: the same script path can write to an open thread (the hidden spam thread).
+    const control = await replyFromNode(2, spamThreadId, `Control write ${RUN}`)
+    if (control) throw new Error(`control write refused: ${control}`)
+    const refusal = await replyFromNode(2, threadId, 'Writing past the lock from a script.')
+    if (!refusal) throw new Error('a reply to a locked thread was accepted')
+    if (!/referenced document's locked/.test(refusal)) throw new Error(`refused for another reason: ${refusal}`)
+    return { refusal: refusal.slice(0, 300) }
+  })
+  await step('pages hydrate without errors', async () => {
+    if (hydrationErrors.length) throw new Error(`hydration failed: ${[...new Set(hydrationErrors)].join(', ')}`)
+    return { checked: 'all pages visited in this run' }
   })
 } finally {
   result.threadId = threadId

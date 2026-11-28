@@ -1,10 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLink, EyeOff, Lock, Pin, ShieldCheck, Trash2, ArrowRightLeft, Eye, Unlock, Flag, Gavel, ScrollText, Search } from 'lucide-react'
 import type { RawDoc } from '@/lib/forum/types'
-import { excerpt, isHidden, num, postBody, shortId, str, threadForumId } from '@/lib/forum/model'
+import { excerpt, isHidden, memberLabel, num, postBody, str, threadForumId } from '@/lib/forum/model'
 import { REPORT_REASONS } from '@/lib/forum/actions'
 import { getDoc, queryAll, queryPage } from '@/lib/live/platform'
 import { refreshLive } from '@/lib/live/overlay'
@@ -30,7 +30,7 @@ export default function ModerationPage() {
   if (frame === 'unknown' || !host) return <p role="status" className="py-16 text-center text-ink-2">Loading…</p>
   if (frame === 'framed') return <Gate title="Open this page in its own tab" body="The moderation console holds a signing key, so it never runs inside a frame." />
   if (!LOGIN_AVAILABLE || !hostIsCanonical(host)) {
-    return <Gate title="Moderation is not available here" body={`Moderators sign in on ${canonicalHost()}. Other copies of this site are read only.`} />
+    return <Gate title="Moderation is not available here" body={`Moderators log in on ${canonicalHost()}. Other copies of this site are read only.`} />
   }
   return <Console />
 }
@@ -50,6 +50,7 @@ function Console() {
   const [identityId, setIdentityId] = useState('')
   const [wif, setWif] = useState('')
   const [tab, setTab] = useState<Tab>('reports')
+  useEffect(() => { if (new URLSearchParams(location.search).get('ref')) setTab('content') }, [])
   const [forums, setForums] = useState<ForumOption[]>([])
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -66,7 +67,7 @@ function Console() {
     key.touch()
     try {
       await fn()
-      setFlash({ ok: true, text: `${label}: done. It is on chain now; the static pages update within the hour.` })
+      setFlash({ ok: true, text: `${label}: done. Visitors see it now; search and the cached pages catch up within the hour.` })
       void refreshLive()
       return true
     } catch (e) {
@@ -102,17 +103,17 @@ function Console() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">Moderation</h1>
-        <span className="flex items-center gap-1.5 rounded-md bg-live/10 px-2 py-1 text-sm text-live"><ShieldCheck className="h-4 w-4" />Signing as {shortId(key.moderator.identityId)}</span>
+        <span className="flex items-center gap-1.5 rounded-md bg-live/10 px-2 py-1 text-sm text-live"><ShieldCheck className="h-4 w-4" />Signing as {memberLabel(key.moderator.identityId)}</span>
         <button type="button" className="btn btn-quiet ml-auto" onClick={key.lock}><Lock className="h-4 w-4" />Lock console</button>
       </div>
-      <nav className="flex gap-1 border-b border-rule" aria-label="Moderation sections">
+      <div role="tablist" className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-rule [scrollbar-width:none]" aria-label="Moderation sections">
         {([['reports', 'Reports', Flag], ['content', 'Content', Search], ['members', 'Members', Gavel], ['log', 'Audit log', ScrollText]] as const).map(([t, label, Icon]) => (
-          <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? 'page' : undefined}
+          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
             className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium ${tab === t ? 'border-dash text-ink' : 'border-transparent text-ink-2 hover:text-ink'}`}>
             <Icon className="h-4 w-4" />{label}
           </button>
         ))}
-      </nav>
+      </div>
       {flash && <p role={flash.ok ? 'status' : 'alert'} className={`rounded-md px-3 py-2 text-sm ${flash.ok ? 'bg-live/10 text-live' : 'bg-danger/10 text-danger'}`}>{flash.text}</p>}
       <ModeratorContext.Provider value={key.moderator}>
         {tab === 'reports' && <Reports {...props} />}
@@ -139,8 +140,14 @@ function Reports({ act, busy }: PanelProps) {
   const [posts, setPosts] = useState<Record<string, RawDoc>>({})
   const [showDone, setShowDone] = useState(false)
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [failed, setFailed] = useState(false)
+  // Outcomes this console just wrote. A node can answer the reload before it has the change, so
+  // these stay applied until the chain reports a status of its own.
+  const [done, setDone] = useState<Record<string, { status: number; hidPost?: string }>>({})
   const load = useCallback(async () => {
-    const r = await queryAll('report', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']] }, 5)
+    setFailed(false)
+    const r = await queryAll('report', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']] }, 5).catch(() => null)
+    if (!r) { setFailed(true); return }
     setReports(r.docs)
     const ids = [...new Set(r.docs.map((d) => str(d, 'postId')).filter((x): x is string => !!x))]
     const found: Record<string, RawDoc> = {}
@@ -153,8 +160,11 @@ function Reports({ act, busy }: PanelProps) {
   useEffect(() => { void load() }, [load])
   const names = useNames({}, (reports ?? []).flatMap((r) => [r.ownerId, posts[str(r, 'postId') ?? '']?.ownerId ?? '']).filter(Boolean))
   const m = useModerator()
-  if (!reports) return <p role="status" className="text-ink-2">Loading reports from Dash Platform…</p>
-  const open = reports.filter((r) => num(r, 'status') === undefined)
+  if (failed) return <p role="alert" className="text-danger">Couldn&apos;t load reports. <button type="button" className="link" onClick={() => void load()}>Try again</button></p>
+  if (!reports) return <p role="status" className="text-ink-2">Loading reports…</p>
+  const statusOf = (r: RawDoc) => num(r, 'status') ?? done[r.id]?.status
+  const hiddenLocally = new Set(Object.values(done).map((d) => d.hidPost).filter(Boolean))
+  const open = reports.filter((r) => statusOf(r) === undefined)
   const list = showDone ? reports : open
   return (
     <section className="space-y-3">
@@ -168,7 +178,7 @@ function Reports({ act, busy }: PanelProps) {
         {list.map((r) => {
           const post = posts[str(r, 'postId') ?? '']
           const reason = REPORT_REASONS.find((x) => x.value === num(r, 'reason'))?.label ?? 'Other'
-          const status = num(r, 'status')
+          const status = statusOf(r)
           return (
             <li key={r.id} className="panel space-y-2 p-4">
               <p className="text-sm"><span className="font-semibold">{reason}</span> reported by <Link className="link" href={`/u/${r.ownerId}/`}>{names(r.ownerId)}</Link> <span className="text-ink-2"><Time at={r.createdAt} /></span>
@@ -176,21 +186,23 @@ function Reports({ act, busy }: PanelProps) {
               {str(r, 'note') && <p className="text-sm text-ink-2">&ldquo;{str(r, 'note')}&rdquo;</p>}
               {post ? (
                 <blockquote className="rounded-md border border-rule bg-sunk/50 px-3 py-2 text-sm">
-                  <p className="mb-1 text-xs text-ink-2">Post by <Link className="link" href={`/u/${post.ownerId}/`}>{names(post.ownerId)}</Link>{isHidden(post) && ' (hidden)'} · <Link className="link" href={`/t/${str(post, 'threadId')}/#post-${post.id}`}>open</Link></p>
+                  <p className="mb-1 text-xs text-ink-2">Post by <Link className="link" href={`/u/${post.ownerId}/`}>{names(post.ownerId)}</Link>{(isHidden(post) || hiddenLocally.has(post.id)) && ' (hidden)'} · <Link className="link" href={`/t/${str(post, 'threadId')}/#post-${post.id}`}>open</Link></p>
                   {excerpt(postBody(post), 400)}
                 </blockquote>
               ) : <p className="text-sm text-ink-2">The reported post was removed.</p>}
               {status === undefined && m && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <input className="field max-w-xs text-sm" placeholder="Resolution note (optional)" maxLength={200} value={notes[r.id] ?? ''} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} />
-                  {post && !isHidden(post) && (
+                  <label className="flex items-center gap-2 text-sm">Note
+                    <input className="field max-w-xs text-sm" placeholder="Optional, saved with the report" maxLength={200} value={notes[r.id] ?? ''} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} />
+                  </label>
+                  {post && !isHidden(post) && !hiddenLocally.has(post.id) && (
                     <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => void act('Hide post and resolve', async () => {
                       await changeDocumentFields(m, 'post', post.id, { modState: 1 }, notes[r.id] ?? '')
                       await changeDocumentFields(m, 'report', r.id, { status: 2, ...(notes[r.id] ? { resolution: notes[r.id] } : {}) })
-                    }).then((ok) => { if (ok) void load() })}><EyeOff className="h-4 w-4" />Hide post</button>
+                    }).then((ok) => { if (ok) { setDone((d) => ({ ...d, [r.id]: { status: 2, hidPost: post.id } })); void load() } })}><EyeOff aria-hidden className="h-4 w-4" />Hide post</button>
                   )}
                   <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void act('Dismiss report', () =>
-                    changeDocumentFields(m, 'report', r.id, { status: 3, ...(notes[r.id] ? { resolution: notes[r.id] } : {}) })).then((ok) => { if (ok) void load() })}>Dismiss</button>
+                    changeDocumentFields(m, 'report', r.id, { status: 3, ...(notes[r.id] ? { resolution: notes[r.id] } : {}) })).then((ok) => { if (ok) { setDone((d) => ({ ...d, [r.id]: { status: 3 } })); void load() } })}>Dismiss</button>
                 </div>
               )}
             </li>
@@ -223,11 +235,14 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
   const names = useNames({}, [doc?.doc.ownerId ?? '', ...recent.map((p) => p.ownerId)].filter(Boolean))
 
   const [looking, setLooking] = useState(false)
+  const requestId = useRef(0)
   const lookup = useCallback(async (input: string) => {
+    const mine = ++requestId.current
     setError(null)
     setDoc(null)
     setThread(null)
     setMoveTo('')
+    setReason('')
     const r = parseRef(input)
     if (!r) { setError('Paste a thread link, a post link (with #post-…), or a thread id.'); return }
     setLooking(true)
@@ -236,7 +251,9 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
     let type = r.type
     if (!d && r.type === 'thread') { d = await getDoc('post', r.id); type = 'post' }
     if (!d) { setError('No thread or post with that id.'); setDoc(null); return }
-    setThread(type === 'thread' ? d : await getDoc('thread', str(d, 'threadId') ?? ''))
+    const parent = type === 'thread' ? d : await getDoc('thread', str(d, 'threadId') ?? '')
+    if (mine !== requestId.current) return
+    setThread(parent)
     setDoc({ type, doc: d })
     } catch {
       setError('Could not reach Dash Platform. Try again.')
@@ -245,7 +262,11 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
     }
   }, [])
   useEffect(() => {
-    queryPage('post', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']], limit: 25 }).then((r) => setRecent(r.docs)).catch(() => undefined)
+    const pre = new URLSearchParams(location.search).get('ref')
+    if (pre) { setRef(pre); void lookup(pre) }
+  }, [lookup])
+  useEffect(() => {
+    queryPage('post', { where: [['$updatedAt', '>', 0]], orderBy: [['$updatedAt', 'desc']], limit: 25 }).then((r) => setRecent(r.docs)).catch(() => undefined)
   }, [])
 
   const reload = () => doc && lookup(doc.type === 'thread' ? doc.doc.id : `#post-${doc.doc.id}`)
@@ -269,7 +290,9 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
           {thread && <Link className="link text-sm" href={`/t/${thread.id}/`}>Open thread <ExternalLink className="inline h-3.5 w-3.5" /></Link>}
           {own ? <p className="text-sm text-ink-2">You can&apos;t moderate your own content (the network refuses it).</p> : m && (
             <>
-              <input className="field text-sm" placeholder="Reason shown in the moderation record (optional)" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+              <label className="block text-sm font-medium">Reason (optional, kept in the public moderation record)
+                <input className="field mt-1 text-sm" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+              </label>
               <div className="flex flex-wrap gap-2">
                 {isHidden(doc.doc)
                   ? <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void fields(doc.type, doc.doc.id, { modState: null }, 'Unhide')}><Eye className="h-4 w-4" />Unhide</button>
@@ -277,8 +300,8 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
                 {doc.type === 'thread' && (
                   <>
                     <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void fields('thread', doc.doc.id, { sticky: doc.doc.p.sticky === true ? null : true }, doc.doc.p.sticky === true ? 'Unpin' : 'Pin')}><Pin className="h-4 w-4" />{doc.doc.p.sticky === true ? 'Unpin' : 'Pin'}</button>
-                    <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void fields('thread', doc.doc.id, { lockedAt: num(doc.doc, 'lockedAt') !== undefined ? null : Date.now() }, num(doc.doc, 'lockedAt') !== undefined ? 'Unlock' : 'Lock')}>
-                      {num(doc.doc, 'lockedAt') !== undefined ? <><Unlock className="h-4 w-4" />Unlock</> : <><Lock className="h-4 w-4" />Lock</>}
+                    <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void fields('thread', doc.doc.id, { locked: doc.doc.p.locked === true ? null : true }, doc.doc.p.locked === true ? 'Unlock' : 'Lock')}>
+                      {doc.doc.p.locked === true ? <><Unlock className="h-4 w-4" />Unlock</> : <><Lock className="h-4 w-4" />Lock</>}
                     </button>
                     <span className="flex items-center gap-1">
                       <select className="field w-auto text-sm" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="Move to forum">
@@ -289,8 +312,10 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
                     </span>
                   </>
                 )}
-                <button type="button" className="btn btn-quiet text-danger" disabled={!!busy} onClick={() => m && void act('Delete', () => deleteDocument(m, doc.type, doc.doc.id, reason),
-                  `Delete this ${doc.type} permanently? Only a record of the deletion stays on chain. Prefer Hide unless the content is illegal.`).then((ok) => { if (ok) void setDoc(null) })}><Trash2 className="h-4 w-4" />Delete</button>
+                <button type="button" className="btn btn-quiet text-danger" disabled={!!busy} onClick={() => m && void act('Delete', async () => {
+                  if (!isHidden(doc.doc)) await changeDocumentFields(m, doc.type, doc.doc.id, { modState: 1 }, reason)
+                  await deleteDocument(m, doc.type, doc.doc.id, reason)
+                }, `Delete this ${doc.type} for good? It is hidden first, then removed; only a record of the removal remains. Use Hide unless the content must not exist at all.`).then((ok) => { if (ok) void setDoc(null) })}><Trash2 className="h-4 w-4" />Delete</button>
               </div>
             </>
           )}
@@ -305,7 +330,7 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
                 <p className="text-ink-2"><Link className="link" href={`/u/${p.ownerId}/`}>{names(p.ownerId)}</Link>, <Time at={p.createdAt} />{isHidden(p) && ' (hidden)'}</p>
                 <p className="line-clamp-2">{excerpt(postBody(p), 240)}</p>
               </div>
-              <button type="button" className="btn btn-quiet" onClick={() => { setRef(`#post-${p.id}`); void lookup(`#post-${p.id}`) }}>Review</button>
+              <button type="button" className="btn btn-quiet" disabled={looking} onClick={() => { setRef(`#post-${p.id}`); void lookup(`#post-${p.id}`) }}>Review</button>
             </li>
           ))}
         </ul>
@@ -337,25 +362,27 @@ function Members({ act, busy, moderatorId }: PanelProps) {
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {status && m && (
         <div className="panel space-y-3 p-4">
-          <p className="text-sm"><Link className="link font-medium" href={`/u/${id}/`}>{shortId(id)}</Link>:{' '}
+          <p className="text-sm"><Link className="link font-medium" href={`/u/${id}/`}>{memberLabel(id)}</Link>:{' '}
             {status.banned ? <span className="text-danger">banned{status.banReason?.text ? ` (${status.banReason.text})` : ''}</span> : 'not banned'},{' '}
             {status.suspendedUntil ? <>suspended until {new Date(Number(status.suspendedUntil)).toUTCString()}</> : 'not suspended'},{' '}
             {(status.warnings?.length ?? 0)} warning{status.warnings?.length === 1 ? '' : 's'}</p>
           {id === moderatorId ? <p className="text-sm text-ink-2">That&apos;s you.</p> : (
             <>
-              <input className="field text-sm" placeholder="Reason (shown to the member on chain)" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+              <label className="block text-sm font-medium">Reason (required for ban, suspend and warn; public)
+                <input className="field mt-1 text-sm" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+              </label>
               <div className="flex flex-wrap items-center gap-2">
                 {status.banned
                   ? <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Unban', () => unbanUser(m, id))}>Unban</button>
                   : <button type="button" className="btn btn-danger" disabled={!!busy || !reason.trim()} onClick={() => void run('Ban', () => banUser(m, id, reason.trim()), 'Ban this identity? It can no longer write to this forum until unbanned.')}>Ban</button>}
                 {status.suspendedUntil
                   ? <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Lift suspension', () => unsuspendUser(m, id))}>Lift suspension</button>
-                  : <span className="flex items-center gap-1"><input type="number" min={1} max={365} className="field w-20 text-sm" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Days" />
+                  : <span className="flex items-center gap-1"><label className="flex items-center gap-1 text-sm"><input type="number" min={1} max={365} className="field w-20 text-sm" value={days} onChange={(e) => setDays(Number(e.target.value))} /> days</label>
                     <button type="button" className="btn btn-quiet" disabled={!!busy || !reason.trim()} onClick={() => void run('Suspend', () => suspendUser(m, id, BigInt(Date.now() + days * 86_400_000), reason.trim()))}>Suspend {days} days</button></span>}
                 <button type="button" className="btn btn-quiet" disabled={!!busy || !reason.trim()} onClick={() => void run('Warn', () => warnUser(m, id, reason.trim()))}>Warn</button>
                 {(status.warnings?.length ?? 0) > 0 && <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Clear warnings', () => clearWarnings(m, id))}>Clear warnings</button>}
               </div>
-              <p className="text-xs text-ink-2">Bans and suspensions stop the identity from writing to this forum&apos;s contract; the network enforces them. Ban, suspend and warn need a reason.</p>
+              <p className="text-xs text-ink-2">Banned and suspended members can&apos;t post, reply, react or edit here; Dash Platform enforces it. Warnings are a public note and block nothing.</p>
             </>
           )}
         </div>
@@ -371,23 +398,23 @@ function AuditLog() {
       queryPage(type, { where: [['$moderatedAt', '>', 0]], orderBy: [['$moderatedAt', 'desc']], limit: 50 }).then((r) => r.docs.map((doc) => ({ type, doc }))).catch(() => [])))
       .then((lists) => setItems(lists.flat().sort((a, b) => (b.doc.moderatedAt ?? 0) - (a.doc.moderatedAt ?? 0))))
   }, [])
-  const names = useNames({}, (items ?? []).map((i) => i.doc.ownerId))
+  const names = useNames({}, (items ?? []).flatMap((i) => [i.doc.ownerId, i.doc.moderatedBy ?? '']).filter(Boolean))
   const rows = useMemo(() => items ?? [], [items])
   if (!items) return <p role="status" className="text-ink-2">Loading the moderation record…</p>
   return (
     <section className="space-y-2">
-      <p className="text-sm text-ink-2">Every moderator field change is stamped on chain. Deletions are recorded separately by the network and are not listed here.</p>
+      <p className="text-sm text-ink-2">The latest moderation actions, newest first. Each row shows the item&apos;s current state. Deletions are kept in a separate record and are not listed.</p>
       {rows.length === 0 ? <p className="panel px-4 py-6 text-center text-ink-2">No moderation actions yet.</p> : (
         <ul className="panel divide-y divide-rule text-sm">
           {rows.map(({ type, doc }) => (
             <li key={`${type}-${doc.id}`} className="flex flex-wrap items-baseline gap-x-2 px-4 py-2">
-              <span className="font-medium capitalize">{type}</span>
-              <span className="text-ink-2">by {names(doc.ownerId)}</span>
-              <span>{[isHidden(doc) && 'hidden', doc.p.sticky === true && 'pinned', num(doc, 'lockedAt') !== undefined && 'locked', str(doc, 'movedToForumId') && 'moved',
+              <span className="font-medium">{doc.moderatedBy ? names(doc.moderatedBy) : 'A moderator'}</span>
+              <span className="text-ink-2">{type} by {names(doc.ownerId)}:</span>
+              <span>{[isHidden(doc) && 'hidden', doc.p.sticky === true && 'pinned', doc.p.locked === true && 'locked', str(doc, 'movedToForumId') && 'moved',
                 num(doc, 'status') === 2 && 'report actioned', num(doc, 'status') === 3 && 'report dismissed'].filter(Boolean).join(', ') || 'restored'}</span>
               <span className="ml-auto text-ink-2">{doc.moderatedAt ? <Time at={doc.moderatedAt} /> : null}</span>
-              {type === 'thread' && <Link className="link" href={`/t/${doc.id}/`}>open</Link>}
-              {type === 'post' && <Link className="link" href={`/t/${str(doc, 'threadId')}/#post-${doc.id}`}>open</Link>}
+              {type === 'thread' && <Link className="link" href={`/t/${doc.id}/`}>{str(doc, 'title') ?? 'View thread'}</Link>}
+              {type === 'post' && <Link className="link" href={`/t/${str(doc, 'threadId')}/#post-${doc.id}`}>View post</Link>}
             </li>
           ))}
         </ul>

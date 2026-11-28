@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import type { SiteFile } from '@/lib/forum/types'
-import { excerpt, postBody, str, archiveAuthor, effectiveAt, isHidden, isRetracted } from '@/lib/forum/model'
+import { archiveRef, excerpt, postBody, str, archiveAuthor, effectiveAt } from '@/lib/forum/model'
+import { newPosts, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { useSession } from '@/lib/session'
@@ -13,18 +14,14 @@ import { AuthorLink } from './AuthorLink'
 
 type Latest = SiteFile['latestPosts'][number]
 
-export function HomeSidebar({ site, names }: { site: SiteFile; names: Record<string, string> }) {
+export function HomeSidebar({ site, names, ctx }: { site: SiteFile; names: Record<string, string>; ctx: LiveContextProps }) {
   const { session, ready } = useSession()
   const live = useLive(site.snapshotAt)
-  const archive = site.settings.archiveOwnerId
-  const titles = new Map(site.latestThreads.map((t) => [t.id, t.title]))
-  for (const t of live.threads) titles.set(t.id, str(t, 'title') ?? '')
-  const fresh: Latest[] = live.posts
-    .filter((p) => p.createdAt > site.snapshotAt && !isHidden(p) && !isRetracted(p))
-    .map((p) => ({
-      postId: p.id, threadId: str(p, 'threadId') ?? '', threadTitle: titles.get(str(p, 'threadId') ?? '') ?? '', at: effectiveAt(p, archive),
-      authorId: p.ownerId, archiveAuthor: archiveAuthor(p, archive), forumId: str(p, 'forumId') ?? '', excerpt: excerpt(postBody(p), 140),
-    }))
+  const archive = archiveRef(site.settings)
+  const fresh: Latest[] = newPosts(live, toLiveContext(ctx)).map(({ post: p, thread }) => ({
+    postId: p.id, threadId: thread.id, threadTitle: str(thread, 'title') ?? '', at: effectiveAt(p, archive),
+    authorId: p.ownerId, archiveAuthor: archiveAuthor(p, archive), forumId: str(thread, 'forumId') ?? '', excerpt: excerpt(postBody(p), 140),
+  }))
   const seen = new Set<string>()
   const latest = [...fresh, ...site.latestPosts]
     .sort((a, b) => b.at - a.at)
@@ -44,7 +41,10 @@ export function HomeSidebar({ site, names }: { site: SiteFile; names: Record<str
       <section className="panel">
         <h2 className="flex items-center justify-between border-b border-rule px-4 py-2.5 font-semibold">
           Latest posts
-          {live.status === 'live' && <span className="flex items-center gap-1.5 text-xs font-medium text-live"><span className="h-1.5 w-1.5 rounded-full bg-live" />Live</span>}
+          {live.status === 'live' && (
+            <span className="flex items-center gap-1.5 text-xs font-medium text-live"><span className="h-1.5 w-1.5 rounded-full bg-live" />{live.truncated ? 'Catching up' : 'Live'}</span>
+          )}
+          {live.status === 'offline' && <span className="text-xs font-medium text-ink-2">Offline: showing the last index</span>}
         </h2>
         {latest.length === 0 ? (
           <p className="px-4 py-3 text-sm text-ink-2">Nothing posted yet.</p>

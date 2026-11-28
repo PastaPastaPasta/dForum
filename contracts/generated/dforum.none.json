@@ -75,6 +75,11 @@
           "maxLength": 200,
           "pattern": "^(https://\\S+)?$",
           "position": 8
+        },
+        "archiveTrustUntil": {
+          "type": "integer",
+          "minimum": 0,
+          "position": 9
         }
       },
       "required": [
@@ -286,7 +291,6 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "immutable": [
         "forumId"
       ],
@@ -295,7 +299,14 @@
           "type": "identifier",
           "refersTo": {
             "type": "permanentDocument",
-            "documentType": "forum"
+            "documentType": "forum",
+            "where": {
+              "archived": {
+                "notEqual": {
+                  "const": true
+                }
+              }
+            }
           },
           "position": 0
         },
@@ -357,8 +368,7 @@
             {
               "$createdAt": "asc"
             }
-          ],
-          "rangeCountable": true
+          ]
         },
         {
           "name": "byAuthor",
@@ -372,29 +382,10 @@
           ]
         },
         {
-          "name": "recent",
-          "properties": [
-            {
-              "$createdAt": "asc"
-            }
-          ]
-        },
-        {
           "name": "byUpdated",
           "properties": [
             {
               "$updatedAt": "asc"
-            }
-          ]
-        },
-        {
-          "name": "byTag",
-          "properties": [
-            {
-              "tags": "asc"
-            },
-            {
-              "$createdAt": "asc"
             }
           ]
         },
@@ -419,10 +410,10 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "immutable": [
         "threadId",
-        "forumId"
+        "forumId",
+        "replyToId"
       ],
       "properties": {
         "threadId": {
@@ -440,7 +431,14 @@
           "type": "identifier",
           "refersTo": {
             "type": "permanentDocument",
-            "documentType": "forum"
+            "documentType": "forum",
+            "where": {
+              "archived": {
+                "notEqual": {
+                  "const": true
+                }
+              }
+            }
           },
           "position": 1
         },
@@ -460,6 +458,13 @@
         },
         "replyToId": {
           "type": "identifier",
+          "refersTo": {
+            "type": "permanentDocument",
+            "documentType": "post",
+            "where": {
+              "threadId": "threadId"
+            }
+          },
           "position": 4
         },
         "retracted": {
@@ -506,20 +511,7 @@
             {
               "$createdAt": "asc"
             }
-          ],
-          "rangeCountable": true
-        },
-        {
-          "name": "byForum",
-          "properties": [
-            {
-              "forumId": "asc"
-            },
-            {
-              "$createdAt": "asc"
-            }
-          ],
-          "rangeCountable": true
+          ]
         },
         {
           "name": "byAuthor",
@@ -527,15 +519,6 @@
             {
               "$ownerId": "asc"
             },
-            {
-              "$createdAt": "asc"
-            }
-          ],
-          "rangeCountable": true
-        },
-        {
-          "name": "recent",
-          "properties": [
             {
               "$createdAt": "asc"
             }
@@ -563,23 +546,6 @@
           "skipIfAbsent": [
             "origId"
           ]
-        },
-        {
-          "name": "byOrigAuthor",
-          "properties": [
-            {
-              "$ownerId": "asc"
-            },
-            {
-              "origAuthorId": "asc"
-            },
-            {
-              "$createdAt": "asc"
-            }
-          ],
-          "skipIfAbsent": [
-            "origAuthorId"
-          ]
         }
       ]
     },
@@ -587,7 +553,6 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "immutable": [
         "postId",
         "postOwnerId",
@@ -617,7 +582,7 @@
         "kind": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 8,
+          "maximum": 63,
           "position": 3
         }
       },
@@ -661,7 +626,7 @@
               "postOwnerId": "asc"
             },
             {
-              "$createdAt": "asc"
+              "$updatedAt": "asc"
             }
           ]
         },
@@ -677,7 +642,7 @@
     },
     "report": {
       "type": "object",
-      "canBeDeleted": true,
+      "canBeDeleted": false,
       "documentsMutable": false,
       "properties": {
         "postId": {
@@ -742,7 +707,6 @@
       "type": "object",
       "canBeDeleted": false,
       "documentsMutable": true,
-      "documentsCountable": true,
       "properties": {
         "displayName": {
           "type": "string",

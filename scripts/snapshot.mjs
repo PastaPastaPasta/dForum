@@ -21,9 +21,10 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync 
 import { dirname } from 'node:path';
 import { EvoSDK } from '@dashevo/evo-sdk';
 import {
-  archiveAuthor, countReactions, effectiveAt, excerpt, isArchive, isHidden, isRetracted, lastPostOf, num,
+  archiveAuthor, archiveRef, countReactions, effectiveAt, excerpt, isArchive, isHidden, isRetracted, lastPostOf, num,
   postBody, resolveForumTree, sortThreadSummaries, str, summarizeThread, threadForumId, threadPosts,
 } from '../lib/forum/model.ts';
+import { mayWriteIn } from '../lib/forum/live-merge.ts';
 
 const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
 const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readDeployment().contractId;
@@ -130,24 +131,93 @@ function upsert(map, docs) {
   }
 }
 
+/**
+ * Pages a mutable index by value (field >= last value seen) rather than by document cursor: an
+ * edit mid-scan moves a cursor document to the end of the index and a cursor would skip what lay
+ * between. When a whole page shares one value (one busy block), the id cursor breaks the tie.
+ */
+async function byValue(sdk, type, field, since) {
+  const seen = new Map();
+  let from = since;
+  let tieAfter;
+  for (;;) {
+    const res = await withRetry(`${type} ${field} query`, () => sdk.documents.query({
+      dataContractId: CONTRACT_ID,
+      documentTypeName: type,
+      where: [[field, '>=', from]],
+      orderBy: [[field, 'asc']],
+      limit: PAGE,
+      ...(tieAfter ? { startAfter: tieAfter } : {}),
+    }));
+    const docs = [];
+    let lastKey;
+    for (const [key, doc] of res) {
+      lastKey = String(key);
+      if (doc) docs.push(toRaw(doc));
+    }
+    for (const d of docs) seen.set(d.id, d);
+    if (res.size < PAGE || !docs.length) break;
+    const valueOf = (d) => (field === '$moderatedAt' ? d.moderatedAt : d.updatedAt) ?? 0;
+    const last = valueOf(docs[docs.length - 1]);
+    if (last === valueOf(docs[0])) { tieAfter = lastKey; continue }
+    tieAfter = undefined;
+    from = last;
+  }
+  return [...seen.values()];
+}
+
+/** Moderator deletions, which no index can show: the contract keeps a removal record per document. */
+async function removals(sdk, type) {
+  const ids = [];
+  let startAfter;
+  for (let i = 0; i < 100; i++) {
+    const page = await withRetry(`${type} removals`, () => sdk.contracts.documentRemovals({
+      contractId: CONTRACT_ID, documentTypeName: type, limit: 100, ...(startAfter ? { startAfter } : {}),
+    }));
+    for (const r of page.removals) ids.push(String(r.documentId));
+    if (!page.nextStartAfter) break;
+    startAfter = page.nextStartAfter;
+  }
+  return ids;
+}
+
+const FULL_EVERY_MS = 24 * 3600_000;
+
 async function sync(sdk) {
   const snapshotAt = await blockTime(sdk);
+  const contract = await withRetry('contract', () => sdk.contracts.fetch(CONTRACT_ID));
+  // `none` contracts have no moderation: no $moderatedAt indexes and no removal records.
+  const moderated = !!contract.toJSON()?.config?.moderation;
   const cache = loadCache();
-  const state = cache ?? { version: 2, contractId: CONTRACT_ID, watermark: 0, docs: { thread: {}, post: {}, reaction: {}, profile: {} } };
-  const since = cache ? Math.max(0, cache.watermark - OVERLAP_MS) : 0;
-  const mode = cache ? `incremental since ${new Date(since).toISOString()}` : 'full';
+  const stale = cache && snapshotAt - (cache.lastFullAt ?? 0) > FULL_EVERY_MS;
+  const full = !cache || stale;
+  const state = full
+    ? { version: 2, contractId: CONTRACT_ID, watermark: 0, lastFullAt: snapshotAt, docs: { thread: {}, post: {}, reaction: {}, profile: {} } }
+    : cache;
+  const since = full ? 0 : Math.max(0, cache.watermark - OVERLAP_MS);
+  const mode = full ? 'full' : `incremental since ${new Date(since).toISOString()}`;
   for (const type of ['thread', 'post', 'reaction', 'profile']) {
-    const where = since ? [['$updatedAt', '>=', since]] : [];
-    const changed = await all(sdk, type, { where, orderBy: [['$updatedAt', 'asc']] });
+    const changed = await byValue(sdk, type, '$updatedAt', since);
     upsert(state.docs[type], changed);
-    if (type !== 'reaction') {
-      const moderated = await all(sdk, type, {
-        where: [['$moderatedAt', '>=', since]],
-        orderBy: [['$moderatedAt', 'asc']],
-      });
-      upsert(state.docs[type], moderated);
+    if (moderated && type !== 'reaction') upsert(state.docs[type], await byValue(sdk, type, '$moderatedAt', since));
+    let removed = 0;
+    if (moderated && type !== 'reaction') {
+      for (const id of await removals(sdk, type)) if (state.docs[type][id]) { delete state.docs[type][id]; removed++ }
     }
-    console.log(`snapshot: ${type} ${mode}: ${changed.length} changed`);
+    console.log(`snapshot: ${type} ${mode}: ${changed.length} changed, ${removed} removed by moderators`);
+  }
+  // Dash usernames (DPNS) for members without a forum display name; cached, refreshed on full scans.
+  state.dpns ??= {};
+  const named = new Set(Object.values(state.docs.profile).filter((p) => str(p, 'displayName')).map((p) => p.ownerId));
+  const authors = new Set([...Object.values(state.docs.thread), ...Object.values(state.docs.post)].map((d) => d.ownerId));
+  const lookups = [...authors].filter((id) => !named.has(id) && !(id in state.dpns)).slice(0, 300);
+  for (const id of lookups) {
+    try {
+      const name = await sdk.dpns.username(id);
+      state.dpns[id] = typeof name === 'string' ? name.replace(/\.dash$/, '') : '';
+    } catch {
+      state.dpns[id] = '';
+    }
   }
   state.watermark = snapshotAt;
   const small = {
@@ -156,7 +226,6 @@ async function sync(sdk) {
     forum: await all(sdk, 'forum', { orderBy: [['slug', 'asc']] }),
     teamMember: await all(sdk, 'teamMember', { orderBy: [['memberId', 'asc']] }),
   };
-  const contract = await withRetry('contract', () => sdk.contracts.fetch(CONTRACT_ID));
   return { state, small, snapshotAt, contract };
 }
 
@@ -188,10 +257,15 @@ export function build({ state, small, snapshotAt, contract }) {
         archiveOwnerId: str(settingsDoc, 'archiveOwnerId'),
         archiveSourceName: str(settingsDoc, 'archiveSourceName'),
         archiveSourceUrl: str(settingsDoc, 'archiveSourceUrl'),
+        archiveTrustUntil: num(settingsDoc, 'archiveTrustUntil'),
       }).filter(([, v]) => v !== undefined))
     : { name: 'dForum' };
-  const archive = settings.archiveOwnerId;
+  const archive = archiveRef(settings);
+  const archivist = settings.archiveOwnerId;
   const { ownerId, moderators } = moderationRoster(contract);
+  if (archivist && (archivist === ownerId || moderators.includes(archivist))) {
+    console.warn('snapshot: WARNING the archivist is the owner or a moderator; moderators cannot take down its documents');
+  }
   // Only the contract owner's structure documents count (owner-only types, but be explicit).
   const owned = (docs) => docs.filter((d) => !ownerId || d.ownerId === ownerId);
 
@@ -205,10 +279,18 @@ export function build({ state, small, snapshotAt, contract }) {
   }));
   const forums = resolveForumTree(forumsRaw, categories);
   const forumIds = new Set(forums.map((f) => f.id));
+  const writeCtx = {
+    archive,
+    archivedForums: new Set(forums.filter((f) => f.archived).map((f) => f.id)),
+    staff: new Set([ownerId, ...moderators].filter(Boolean)),
+  };
 
-  const threads = Object.values(state.docs.thread);
-  const posts = Object.values(state.docs.post);
-  const reactionsLive = Object.values(state.docs.reaction).filter((r) => (num(r, 'kind') ?? 0) > 0);
+  // Documents created after the watermark belong to the next snapshot; the browser counts
+  // anything created after snapshotAt as new, so including them here would count them twice.
+  const settled = (d) => d.createdAt <= snapshotAt;
+  const threads = Object.values(state.docs.thread).filter(settled);
+  const posts = Object.values(state.docs.post).filter(settled);
+  const reactionsLive = Object.values(state.docs.reaction).filter((r) => settled(r) && (num(r, 'kind') ?? 0) > 0);
   const reactions = countReactions(reactionsLive);
   const postsByThread = new Map();
   for (const p of posts) {
@@ -227,8 +309,13 @@ export function build({ state, small, snapshotAt, contract }) {
   const archiveMembers = new Map();
   let archivePosts = 0;
   for (const thread of threads) {
-    if (!forumIds.has(threadForumId(thread))) continue;
-    const view = threadPosts(thread, postsByThread.get(thread.id) ?? [], archive);
+    const forumId = threadForumId(thread);
+    if (!forumIds.has(forumId)) continue;
+    // Archived forums take writes from staff and the archivist only; the contract can't refuse
+    // the others, so every reader drops them.
+    if (!mayWriteIn(forumId, thread.ownerId, writeCtx)) continue;
+    const allowedPosts = (postsByThread.get(thread.id) ?? []).filter((p) => mayWriteIn(forumId, p.ownerId, writeCtx));
+    const view = threadPosts(thread, allowedPosts, archive);
     if (!view.listable) continue;
     const summary = summarizeThread(thread, view, reactions, archive);
     summaries.push(summary);
@@ -295,12 +382,13 @@ export function build({ state, small, snapshotAt, contract }) {
   const profiles = new Map(Object.values(state.docs.profile).map((p) => [p.ownerId, p]));
   const members = [];
   for (const [id, s] of memberStats) {
-    if (id === archive) continue;
+    if (id === archivist) continue;
     const prof = profiles.get(id);
     const hidden = prof ? isHidden(prof) : false;
     members.push(Object.fromEntries(Object.entries({
       id,
-      name: (!hidden && str(prof, 'displayName')) || '',
+      name: (!hidden && (str(prof, 'displayName') || state.dpns?.[id])) || '',
+      dpns: state.dpns?.[id] || undefined,
       title: str(prof, 'customTitle'),
       avatarUrl: hidden ? undefined : str(prof, 'avatarUrl'),
       bio: hidden ? undefined : str(prof, 'bio'),
@@ -315,7 +403,7 @@ export function build({ state, small, snapshotAt, contract }) {
     }).filter(([, v]) => v !== undefined && v !== '')));
   }
   for (const prof of profiles.values()) {
-    if (memberStats.has(prof.ownerId) || isHidden(prof) || prof.ownerId === archive) continue;
+    if (memberStats.has(prof.ownerId) || isHidden(prof) || prof.ownerId === archivist) continue;
     members.push(Object.fromEntries(Object.entries({
       id: prof.ownerId, name: str(prof, 'displayName') ?? '', title: str(prof, 'customTitle'), avatarUrl: str(prof, 'avatarUrl'),
       bio: str(prof, 'bio'), signature: str(prof, 'signature'), website: str(prof, 'website'), location: str(prof, 'location'),
@@ -362,7 +450,7 @@ export function build({ state, small, snapshotAt, contract }) {
     latestThreads,
     latestPosts,
     ...(newest ? { newestMember: { id: newest.id, name: newest.name } } : {}),
-    tags: [...tagCounts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count).slice(0, 40),
+    tags: [...tagCounts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count),
   };
 
   const userFiles = members.map((m) => {

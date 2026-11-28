@@ -1,8 +1,9 @@
+import type { ForumView } from '@/lib/forum/types'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { THREADS_PER_PAGE } from '@/lib/forum/types'
 import { childForums } from '@/lib/forum/model'
-import { site, forumBySlug, forumFile, memberNames } from './site-data'
+import { site, forumBySlug, forumFile, memberNames, liveContext } from './site-data'
 import { ForumPage } from '@/components/forum/ForumPage'
 
 export function forumParams(withPages: boolean) {
@@ -36,13 +37,15 @@ export function ForumRoute({ slug, n = 1 }: { slug: string; n?: number }) {
   const threads = all.slice((n - 1) * THREADS_PER_PAGE, n * THREADS_PER_PAGE)
   const subforums = childForums(s.forums, forum.id)
   const crumbs = [{ href: '/', label: 'Forums' }]
-  const chain = []
+  const chain: ForumView[] = []
   let parent = forum.parentForumId ? s.forums.find((f) => f.id === forum.parentForumId) : undefined
   while (parent) { chain.unshift(parent); parent = parent.parentForumId ? s.forums.find((f) => f.id === parent?.parentForumId) : undefined }
+  const cat = s.categories.find((c) => c.id === (chain[0] ?? forum).categoryId)
+  if (cat) crumbs.push({ href: `/#cat-${cat.id}`, label: cat.title })
   for (const p of chain) crumbs.push({ href: `/f/${p.slug}/`, label: p.title })
   const names = memberNames([...threads.flatMap((t) => [t.ownerId, t.lastPostAuthorId]), ...subforums.map((f) => f.lastPost?.authorId ?? '')])
   return (
     <ForumPage forum={forum} crumbs={crumbs} subforums={subforums} threads={threads} page={n} pages={pages} names={names}
-      snapshotAt={s.snapshotAt} archiveOwnerId={s.settings.archiveOwnerId} />
+      ctx={liveContext()} />
   )
 }

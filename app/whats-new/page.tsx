@@ -1,4 +1,4 @@
-import { forumFile, memberNames, site } from '@/lib/server/site-data'
+import { forumFile, liveContext, memberNames, site } from '@/lib/server/site-data'
 import { sortThreadSummaries } from '@/lib/forum/model'
 import { WhatsNew } from '@/components/forum/WhatsNew'
 
@@ -14,7 +14,7 @@ export default function Page() {
         <h1 className="text-2xl font-semibold tracking-tight">What&apos;s new</h1>
         <p className="mt-1 text-ink-2">Threads with the latest replies across every forum.</p>
       </div>
-      <WhatsNew threads={threads} snapshotAt={s.snapshotAt} archive={s.settings.archiveOwnerId}
+      <WhatsNew threads={threads} ctx={liveContext()}
         names={memberNames(threads.flatMap((t) => [t.ownerId, t.lastPostAuthorId]))} forumTitles={Object.fromEntries(s.forums.map((f) => [f.id, f.title]))} />
     </div>
   )

@@ -66,8 +66,8 @@ jobs:
       - name: Lint
         run: npx next lint
       # The snapshot is incremental: the raw-document cache from the previous run is restored and
-      # only changes since its watermark are read (byUpdated + moderated indexes). Once a day the
-      # run starts from scratch, which is how moderator deletions drop out of the index.
+      # only changes since its watermark are read (byUpdated + moderated indexes, plus the
+      # contract's removal records). A cache older than 24 h triggers a full rescan by itself.
       - name: Restore snapshot cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -76,7 +76,7 @@ jobs:
           restore-keys: snapshot-${{ hashFiles('contracts/deployments/testnet.json') }}-
       - name: Snapshot (static index data)
         run: |
-          if [ "$(date -u +%H)" = "03" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             node scripts/snapshot.mjs --full
           else
             node scripts/snapshot.mjs

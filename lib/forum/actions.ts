@@ -65,21 +65,34 @@ async function authorReplace(s: Signer, type: string, id: string, changes: Recor
   return toRaw(updated)
 }
 
-export async function createThread(s: Signer, input: { forumId: string; title: string; tags: string[]; body: string }) {
-  const thread = await createDocument('thread', s.identityId, s.authKeyWif, {
-    forumId: input.forumId,
-    title: input.title.trim(),
-    ...(input.tags.length ? { tags: input.tags } : {}),
-  })
+/**
+ * A thread is two writes. When the opening post fails, the caller keeps the returned threadId
+ * (via `onThread`) and retries with `existingThreadId`, so a retry never creates a second thread.
+ */
+export async function createThread(
+  s: Signer,
+  input: { forumId: string; title: string; tags: string[]; body: string; existingThreadId?: string },
+  onThread?: (threadId: string) => void,
+) {
+  let threadId = input.existingThreadId
+  if (!threadId) {
+    const thread = await createDocument('thread', s.identityId, s.authKeyWif, {
+      forumId: input.forumId,
+      title: input.title.trim(),
+      ...(input.tags.length ? { tags: input.tags } : {}),
+    })
+    threadId = thread.id
+    injectLocal('thread', toRaw(thread))
+    onThread?.(threadId)
+  }
   const post = await createDocument('post', s.identityId, s.authKeyWif, {
-    threadId: thread.id,
+    threadId,
     forumId: input.forumId,
     ...splitBody(input.body),
   })
-  injectLocal('thread', toRaw(thread))
   injectLocal('post', toRaw(post))
   void refreshLive()
-  return { threadId: thread.id, postId: post.id }
+  return { threadId, postId: post.id }
 }
 
 export async function reply(s: Signer, thread: RawDoc, body: string, replyToId?: string) {

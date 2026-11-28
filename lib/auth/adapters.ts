@@ -42,6 +42,8 @@ const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000
 function hostAllowed(): boolean {
   if (typeof window === 'undefined') return false
   if (!LOGIN_AVAILABLE) return false
+  // A framed copy of the site never reads or writes key material.
+  if (window.top !== window.self) return false
   return hostIsCanonical(window.location.hostname)
 }
 

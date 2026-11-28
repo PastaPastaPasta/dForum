@@ -80,10 +80,10 @@ export const Composer = forwardRef<ComposerHandle, {
       )}
       <div className="flex flex-wrap items-center gap-3 border-t border-rule px-3 py-2">
         <p className="text-xs text-ink-2">Markdown supported. Posts are public and stored on Dash Platform.</p>
-        <span className={`ml-auto text-xs tabnum ${over ? 'font-semibold text-danger' : 'text-ink-2'}`}>{(bytes / 1024).toFixed(1)} / 10 KB</span>
+        <span className={`ml-auto text-xs tabnum ${over ? 'font-semibold text-danger' : 'text-ink-2'}`}>{over ? `Too long by ${(bytes - BODY_MAX_BYTES).toLocaleString('en-US')} characters` : bytes > BODY_MAX_BYTES * 0.8 ? `${Math.round((bytes / BODY_MAX_BYTES) * 100)}% of the length limit` : ''}</span>
         {onCancel && <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>Cancel</button>}
         <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={busy || over || !value.trim()}>
-          {busy ? 'Saving to Platform…' : submitLabel}
+          {busy ? (submitLabel.startsWith('Save') ? 'Saving…' : 'Posting…') : submitLabel}
         </button>
       </div>
       {error && <p role="alert" className="border-t border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{error}</p>}

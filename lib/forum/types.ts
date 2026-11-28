@@ -12,6 +12,8 @@ export interface RawDoc {
   updatedAt: number
   /** $moderatedAt — set only by moderator changeFields. */
   moderatedAt?: number
+  /** $moderatedBy — the moderator of the latest change. */
+  moderatedBy?: string
   /** Non-system properties: identifiers as base58, everything else JSON-plain. */
   p: Record<string, unknown>
 }
@@ -23,6 +25,7 @@ export interface ForumSettings {
   rules?: string
   announcement?: string
   archiveOwnerId?: string
+  archiveTrustUntil?: number
   archiveSourceName?: string
   archiveSourceUrl?: string
 }
@@ -71,6 +74,8 @@ export interface ThreadSummary {
   sticky: boolean
   locked: boolean
   replies: number
+  /** Posts on the thread pages, hidden placeholders included (sets the page count). */
+  posts?: number
   reactions: number
   lastPostAt: number
   lastPostAuthorId: string

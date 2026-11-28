@@ -16,7 +16,9 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '
 
 createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
-  const rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
+  let decoded;
+  try { decoded = decodeURIComponent(url.pathname); } catch { res.writeHead(400); res.end('bad request'); return; }
+  const rel = normalize(decoded).replace(/^(\.\.[/\\])+/, '');
   let file = join(root, rel);
   if (existsSync(file) && statSync(file).isDirectory()) {
     if (!url.pathname.endsWith('/')) { res.writeHead(301, { location: `${url.pathname}/${url.search}` }); res.end(); return; }

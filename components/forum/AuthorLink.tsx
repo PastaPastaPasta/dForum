@@ -5,5 +5,5 @@ export function AuthorLink({ id, name, archiveAuthor, className = '' }: { id: st
   if (archiveAuthor) {
     return <span className={`text-archive ${className}`} title="Imported author (not a Dash identity)">{archiveAuthor}</span>
   }
-  return <Link href={`/u/${id}/`} className={`font-medium hover:text-dash ${className}`}>{name}</Link>
+  return <Link prefetch={false} href={`/u/${id}/`} className={`font-medium hover:text-dash ${className}`}>{name}</Link>
 }

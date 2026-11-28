@@ -14,9 +14,10 @@ type Route = { kind: 'thread' | 'profile'; id: string } | { kind: 'none' } | nul
 
 const ID = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 
-export function LiveFallback({ snapshotAt, archive, sourceUrl, forums }: {
+export function LiveFallback({ snapshotAt, archive, sourceUrl, forums, ctx }: {
+  ctx: import('@/lib/forum/live-merge').LiveContextProps
   snapshotAt: number
-  archive?: string
+  archive?: import('@/lib/forum/model').ArchiveRef
   sourceUrl?: string
   forums: ForumView[]
   categories: CategoryView[]
@@ -34,7 +35,7 @@ export function LiveFallback({ snapshotAt, archive, sourceUrl, forums }: {
     return (
       <ThreadPage threadId={route.id} thread={null} crumbs={[{ href: '/', label: 'Forums' }]} forumArchived={false} posts={[]} firstNumber={1}
         page={1} pages={1} postIndex={[]} reactions={{}} members={{}} roles={{}} snapshotAt={snapshotAt} archive={archive} sourceUrl={sourceUrl}
-        forums={forums} />
+        forums={forums} ctx={ctx} />
     )
   }
   if (route.kind === 'profile') {

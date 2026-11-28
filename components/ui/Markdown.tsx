@@ -1,8 +1,10 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import { PostImage } from './PostImage'
 
-const SAFE = /^(https?:|mailto:|\/|#)/i
+// Relative paths only when not protocol-relative (`//host` or `/\\host` would leave the site).
+const SAFE = /^(https?:|mailto:|#|\/(?![/\\]))/i
 
 /** Post bodies. No raw HTML; only http(s)/mailto/relative links; external links are ugc. */
 export function Markdown({ source, className = 'post-body' }: { source: string; className?: string }) {
@@ -24,8 +26,7 @@ export function Markdown({ source, className = 'post-body' }: { source: string; 
           },
           img: ({ src, alt }) =>
             src && /^https:\/\//i.test(String(src)) ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={String(src)} alt={alt ?? ''} loading="lazy" referrerPolicy="no-referrer" />
+              <PostImage src={String(src)} alt={alt ?? ''} />
             ) : (
               <span>{alt}</span>
             ),

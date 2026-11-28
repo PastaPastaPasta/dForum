@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { IBM_Plex_Mono, IBM_Plex_Sans, Source_Serif_4 } from 'next/font/google'
 import { SessionProvider } from '@/lib/session'
+import { OfflineBanner } from '@/components/site/OfflineBanner'
 import { Header } from '@/components/site/Header'
 import { Footer } from '@/components/site/Footer'
 import { site } from '@/lib/server/site-data'
@@ -53,6 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </a>
           <div className="flex min-h-screen flex-col">
             <Header siteName={s.settings.name || 'dForum'} />
+            <OfflineBanner />
             <main id="main" className="mx-auto w-full max-w-page flex-1 px-4 pt-6">{children}</main>
             <Footer siteName={s.settings.name || 'dForum'} snapshotAt={s.snapshotAt} archiveSourceName={s.settings.archiveSourceName} archiveSourceUrl={s.settings.archiveSourceUrl} />
           </div>

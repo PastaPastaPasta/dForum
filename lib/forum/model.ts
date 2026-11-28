@@ -6,7 +6,7 @@
  * - Effective date = origCreatedAt for trusted archive documents, else $createdAt.
  * - Opening post = earliest post (effective date, then $id bytes) owned by the thread owner.
  *   A thread is listed only when its opening post exists, is visible and is not retracted.
- * - Hidden = modState set. Locked threads ignore posts created (on chain) after lockedAt.
+ * - Hidden = modState set. Locked (moderator `locked`) threads refuse new posts at consensus.
  * - A moderator move (movedToForumId) re-homes a thread; forumId stays as written.
  */
 import type { CategoryView, ForumView, LastPost, RawDoc, ReactionCounts, ThreadSummary } from './types.ts'
@@ -56,15 +56,26 @@ export const num = (doc: RawDoc | undefined, key: string): number | undefined =>
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
 
-export function isArchive(doc: RawDoc, archiveOwnerId?: string): boolean {
-  return !!archiveOwnerId && doc.ownerId === archiveOwnerId && num(doc, 'origCreatedAt') !== undefined
+/** The archivist and, optionally, the time after which its provenance is no longer trusted. */
+export type ArchiveRef = string | { id: string; until?: number } | undefined
+
+export const archiveId = (ref: ArchiveRef): string | undefined => (typeof ref === 'string' ? ref : ref?.id)
+
+export function archiveRef(settings: { archiveOwnerId?: string; archiveTrustUntil?: number }): ArchiveRef {
+  return settings.archiveOwnerId ? { id: settings.archiveOwnerId, until: settings.archiveTrustUntil } : undefined
 }
 
-export function effectiveAt(doc: RawDoc, archiveOwnerId?: string): number {
+export function isArchive(doc: RawDoc, archiveOwnerId?: ArchiveRef): boolean {
+  const id = archiveId(archiveOwnerId)
+  const until = typeof archiveOwnerId === 'object' ? archiveOwnerId.until : undefined
+  return !!id && doc.ownerId === id && num(doc, 'origCreatedAt') !== undefined && (until === undefined || doc.createdAt <= until)
+}
+
+export function effectiveAt(doc: RawDoc, archiveOwnerId?: ArchiveRef): number {
   return isArchive(doc, archiveOwnerId) ? (num(doc, 'origCreatedAt') as number) : doc.createdAt
 }
 
-export function archiveAuthor(doc: RawDoc, archiveOwnerId?: string): string | undefined {
+export function archiveAuthor(doc: RawDoc, archiveOwnerId?: ArchiveRef): string | undefined {
   return isArchive(doc, archiveOwnerId) ? str(doc, 'origAuthor') ?? 'unknown' : undefined
 }
 
@@ -80,16 +91,14 @@ export function threadForumId(thread: RawDoc): string {
   return str(thread, 'movedToForumId') ?? (str(thread, 'forumId') as string)
 }
 
-export function threadLockedAt(thread: RawDoc): number | undefined {
-  return num(thread, 'lockedAt')
-}
+export const isLocked = (thread: RawDoc): boolean => thread.p.locked === true
 
 export function threadTags(thread: RawDoc): string[] {
   const t = thread.p.tags
   return Array.isArray(t) ? t.filter((x): x is string => typeof x === 'string') : []
 }
 
-export function byEffective(archiveOwnerId?: string) {
+export function byEffective(archiveOwnerId?: ArchiveRef) {
   return (a: RawDoc, b: RawDoc): number =>
     effectiveAt(a, archiveOwnerId) - effectiveAt(b, archiveOwnerId) || a.createdAt - b.createdAt || compareIds(a.id, b.id)
 }
@@ -101,13 +110,12 @@ export interface ThreadPostsView {
   listable: boolean
 }
 
-export function threadPosts(thread: RawDoc, posts: RawDoc[], archiveOwnerId?: string): ThreadPostsView {
+export function threadPosts(thread: RawDoc, posts: RawDoc[], archiveOwnerId?: ArchiveRef): ThreadPostsView {
   const sorted = posts.filter((p) => str(p, 'threadId') === thread.id).sort(byEffective(archiveOwnerId))
   const openingIndex = sorted.findIndex((p) => p.ownerId === thread.ownerId)
   if (openingIndex < 0) return { opening: null, posts: [], listable: false }
   const opening = sorted[openingIndex]
-  const lockedAt = threadLockedAt(thread)
-  const kept = sorted.slice(openingIndex).filter((p) => p === opening || lockedAt === undefined || p.createdAt <= lockedAt)
+  const kept = sorted.slice(openingIndex)
   const listable = !isHidden(thread) && !isHidden(opening) && !isRetracted(opening)
   return { opening, posts: kept, listable }
 }
@@ -143,7 +151,7 @@ export function summarizeThread(
   thread: RawDoc,
   view: ThreadPostsView,
   reactions: Record<string, ReactionCounts>,
-  archiveOwnerId?: string,
+  archiveOwnerId?: ArchiveRef,
 ): ThreadSummary {
   const visible = view.posts.filter((p) => !isHidden(p) && !isRetracted(p))
   const last = visible[visible.length - 1] ?? view.opening ?? thread
@@ -158,8 +166,9 @@ export function summarizeThread(
     ...(origId !== undefined ? { origId } : {}),
     createdAt: effectiveAt(thread, archiveOwnerId),
     sticky: thread.p.sticky === true,
-    locked: threadLockedAt(thread) !== undefined,
+    locked: isLocked(thread),
     replies: Math.max(0, visible.length - 1),
+    posts: view.posts.length,
     reactions: visible.reduce((n, p) => n + reactionTotal(reactions[p.id]), 0),
     lastPostAt: effectiveAt(last, archiveOwnerId),
     lastPostAuthorId: last.ownerId,
@@ -234,8 +243,11 @@ export function excerpt(markdown: string, max = 180): string {
 }
 
 export function shortId(id: string): string {
-  return id.length > 10 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id
+  return id.length > 10 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id
 }
+
+/** How a member with no display name and no Dash username is shown, everywhere. */
+export const memberLabel = (id: string): string => `Member ${shortId(id)}`
 
 export function slugify(title: string): string {
   return title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'thread'

@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { DataContract, EvoSDK, IdentitySigner } from '@dashevo/evo-sdk';
+import { redactWif } from './lib/redact.mjs';
 
 const { values: o } = parseArgs({ options: {
   add: { type: 'string', multiple: true, default: [] }, remove: { type: 'string', multiple: true, default: [] },
@@ -55,7 +56,7 @@ const dataContract = DataContract.fromJSON(json, true, PROTOCOL_VERSION);
 try {
   await sdk.contracts.update({ dataContract, identityKey, signer });
 } catch (e) {
-  console.error('update failed:', e?.message ?? e);
+  console.error('update failed:', redactWif(String(e?.message ?? e)));
   process.exit(1);
 }
 const after = (await sdk.contracts.fetch(contractId)).toJSON(PROTOCOL_VERSION);

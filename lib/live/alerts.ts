@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { RawDoc } from '@/lib/forum/types'
-import { num, str } from '@/lib/forum/model'
+import { isHidden, isRetracted, num, str } from '@/lib/forum/model'
 import { queryPage } from './platform'
 
 export interface Alert {
@@ -35,7 +35,7 @@ const listeners = new Set<() => void>()
 export async function fetchAlerts(identityId: string): Promise<Alert[]> {
   const since = Date.now() - 60 * 24 * 3600_000
   const [reactions, threads] = await Promise.all([
-    queryPage('reaction', { where: [['postOwnerId', '==', identityId], ['$createdAt', '>', since]], orderBy: [['$createdAt', 'desc']], limit: 50 }),
+    queryPage('reaction', { where: [['postOwnerId', '==', identityId], ['$updatedAt', '>', since]], orderBy: [['$updatedAt', 'desc']], limit: 50 }),
     queryPage('thread', { where: [['$ownerId', '==', identityId]], orderBy: [['$createdAt', 'desc']], limit: 15 }),
   ])
   const alerts: Alert[] = []
@@ -47,8 +47,11 @@ export async function fetchAlerts(identityId: string): Promise<Alert[]> {
   const replies = await Promise.all(threads.docs.map((t) =>
     queryPage('post', { where: [['threadId', '==', t.id], ['$createdAt', '>', since]], orderBy: [['$createdAt', 'desc']], limit: 20 })
       .then((r) => r.docs).catch(() => [] as RawDoc[])))
+  const threadById = new Map(threads.docs.map((t: RawDoc) => [t.id, t]))
   for (const p of replies.flat()) {
-    if (p.ownerId === identityId) continue
+    if (p.ownerId === identityId || isHidden(p) || isRetracted(p)) continue
+    const t = threadById.get(str(p, 'threadId') ?? '')
+    if (!t || isHidden(t)) continue
     const threadId = str(p, 'threadId') ?? ''
     alerts.push({ kind: 'reply', at: p.createdAt, actorId: p.ownerId, threadId, threadTitle: titles.get(threadId), postId: p.id })
   }

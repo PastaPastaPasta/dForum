@@ -19,7 +19,7 @@ export async function respond(uri, persona) {
 export async function login(page, persona, { shots } = {}) {
   await page.goto(`${SITE}/login/`, { waitUntil: 'load' })
   await page.getByRole('button', { name: 'Log in with Dash' }).last().click()
-  const link = page.getByRole('link', { name: 'Open login URI in wallet' })
+  const link = page.getByRole('link', { name: 'Open your Dash wallet to log in' })
   await link.waitFor({ timeout: 120_000 })
   if (shots) await page.screenshot({ path: `${shots}-login-qr.png` })
   const uri = await link.getAttribute('href')

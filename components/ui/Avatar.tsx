@@ -7,9 +7,9 @@ function hue(seed: string): number {
 }
 
 function initials(name: string): string {
-  const parts = name.replace(/[^\p{L}\p{N} ._-]/gu, '').split(/[\s._-]+/).filter(Boolean)
-  const s = parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] ?? '?').slice(0, 2)
-  return s.toUpperCase()
+  const parts = name.replace(/[^\p{L} ._-]/gu, '').split(/[\s._-]+/).filter(Boolean)
+  const s = parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] ?? '').slice(0, 2)
+  return (s || '?').toUpperCase()
 }
 
 export function Avatar({ seed, name, src, size = 40, archive = false }: {
@@ -37,7 +37,7 @@ export function Avatar({ seed, name, src, size = 40, archive = false }: {
   const h = hue(seed)
   return (
     <span aria-hidden className="shrink-0 inline-flex items-center justify-center rounded-full font-semibold text-white"
-      style={{ ...style, background: `hsl(${h} 52% 42%)` }}>
+      style={{ ...style, background: `hsl(${h} 50% 36%)` }}>
       {initials(name)}
     </span>
   )

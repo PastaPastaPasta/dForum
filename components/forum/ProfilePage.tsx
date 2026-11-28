@@ -6,6 +6,8 @@ import { Globe, MapPin } from 'lucide-react'
 import type { MemberView, UserFile } from '@/lib/forum/types'
 import { isHidden, str } from '@/lib/forum/model'
 import { useLive } from '@/lib/live/overlay'
+import { useNames } from '@/lib/live/names'
+import { memberLabel } from '@/lib/forum/model'
 import { useSession } from '@/lib/session'
 import { Avatar } from '@/components/ui/Avatar'
 import { Markdown } from '@/components/ui/Markdown'
@@ -29,12 +31,14 @@ export function ProfilePage({ id, file, role, snapshotAt, forumTitles }: {
     if (!liveProfile) return base
     if (isHidden(liveProfile)) return { ...base, hidden: true }
     return {
-      ...base, name: str(liveProfile, 'displayName') ?? base.name, bio: str(liveProfile, 'bio'), signature: str(liveProfile, 'signature'),
+      ...base, hidden: undefined, name: str(liveProfile, 'displayName') ?? base.name, bio: str(liveProfile, 'bio'), signature: str(liveProfile, 'signature'),
       website: str(liveProfile, 'website'), location: str(liveProfile, 'location'), avatarUrl: str(liveProfile, 'avatarUrl'),
       title: str(liveProfile, 'customTitle') ?? base.title,
     }
   }, [file, liveProfile, id])
-  const name = member.hidden ? 'Hidden profile' : member.name || `${id.slice(0, 6)}…${id.slice(-4)}`
+  const name = member.hidden ? 'Hidden profile' : member.name || memberLabel(id)
+  const others = useNames({}, (file?.threads ?? []).map((t) => t.lastPostAuthorId), live.profiles)
+  const nameOf = (who: string) => (who === id ? name : others(who))
   const website = member.website && /^https?:\/\//.test(member.website) ? member.website : undefined
 
   return (
@@ -63,7 +67,7 @@ export function ProfilePage({ id, file, role, snapshotAt, forumTitles }: {
       </section>
       <section aria-labelledby="threads-h" className="space-y-2">
         <h2 id="threads-h" className="text-lg font-semibold">Threads started</h2>
-        <ThreadList threads={file?.threads ?? []} nameOf={() => name} showForum forumTitle={(f) => forumTitles[f]} emptyText="No threads yet." />
+        <ThreadList threads={file?.threads ?? []} nameOf={nameOf} showForum forumTitle={(f) => forumTitles[f]} emptyText="No threads yet." />
       </section>
       <section aria-labelledby="posts-h" className="space-y-2">
         <h2 id="posts-h" className="text-lg font-semibold">Recent posts</h2>

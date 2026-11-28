@@ -23,8 +23,8 @@ import { redactWif } from '@/lib/redact'
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input, select, textarea, [role="button"]'
 
 const CARRIER_LABELS: Record<string, { name: string; audience: string }> = {
-  dashpay: { name: 'dashpay://connect', audience: 'new wallets' },
-  'dash-key': { name: 'dash-key:', audience: 'current wallets' },
+  dashpay: { name: 'DashPay', audience: 'new wallets' },
+  'dash-key': { name: 'older wallet', audience: 'current wallets' },
 }
 
 export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
@@ -113,7 +113,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
           : null
 
   const stepText =
-    login.phase === 'preparing' ? 'Preparing wallet sign-in…'
+    login.phase === 'preparing' ? 'Preparing your login…'
       : login.phase === 'accepted' ? 'Logging you in…'
         : login.phase === 'confirm' ? 'Your wallet answered. Choose the identity to log in with.'
           : login.phase === 'waiting' ? 'Waiting for wallet…'
@@ -150,7 +150,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
           {login.phase === 'preparing' && (
             <>
               <Loader2 className="w-8 h-8 animate-spin text-dash" aria-hidden="true" />
-              <p className="text-sm text-ink-2">Preparing wallet sign-in…</p>
+              <p className="text-sm text-ink-2">Preparing your login…</p>
             </>
           )}
 
@@ -161,12 +161,12 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
               <a
                 href={primaryCarrierUri.uri}
                 className="btn btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
-                aria-label="Open login URI in wallet"
+                aria-label="Open your Dash wallet to log in"
               >
                 <ExternalLink className="w-4 h-4" aria-hidden="true" /> Open in wallet
               </a>
               <div className="p-3 bg-white rounded-xl border-2 border-dash">
-                <QRCodeSVG value={primaryCarrierUri.uri} size={240} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Login URI QR code" />
+                <QRCodeSVG value={primaryCarrierUri.uri} size={240} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="QR code to log in with your Dash wallet" />
               </div>
               <div className="text-center">
                 <p className="text-sm font-medium">Or scan with your Dash wallet</p>
@@ -179,7 +179,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                   href={fallbackCarrier.uri}
                   className="text-xs text-ink-2 hover:text-ink transition underline underline-offset-2"
                 >
-                  Use the {CARRIER_LABELS[fallbackCarrier.carrier]?.name ?? 'alternate'} link
+                  Wallet didn&apos;t open? Try the {CARRIER_LABELS[fallbackCarrier.carrier]?.name ?? 'alternate'} link
                 </a>
               )}
               <button
@@ -196,16 +196,16 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                 className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-ink-2 hover:bg-sunk hover:text-ink transition"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-live" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? 'URI copied' : 'Copy URI'}
+                {copied ? 'Link copied' : 'Copy login link'}
               </button>
               {copyFailed && (
                 <div className="w-full">
-                  <p className="text-xs text-archive">Copy failed — select the URI below</p>
-                  <input readOnly value={primaryCarrierUri.uri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-rule bg-paper px-2 py-1.5 text-xs font-mono text-ink break-all" aria-label="Login URI" />
+                  <p className="text-xs text-archive">Couldn&apos;t copy. Select the link below and copy it.</p>
+                  <input readOnly value={primaryCarrierUri.uri} onFocus={(e) => e.target.select()} className="mt-1 w-full rounded-lg border border-rule bg-paper px-2 py-1.5 text-xs font-mono text-ink break-all" aria-label="Login link" />
                 </div>
               )}
               <p className="text-xs text-ink-2 text-center">
-                Open the URI in your wallet, or scan the QR with it.
+                Approve the request in your wallet. This page continues by itself.
               </p>
             </>
           )}
@@ -225,7 +225,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                       >
                         <UserRound className="w-5 h-5 text-dash shrink-0" aria-hidden="true" />
                         <span className="min-w-0 flex-1">
-                          {candidateNames[candidate.identityId] && candidateNames[candidate.identityId] !== shortId(candidate.identityId, 12) && <span className="block text-sm text-ink truncate">{candidateNames[candidate.identityId]}</span>}
+                          {candidateNames[candidate.identityId] && <span className="block text-sm text-ink truncate">{candidateNames[candidate.identityId]}</span>}
                           <span className="block text-xs font-mono text-ink-2 truncate" title={candidate.identityId}>{shortId(candidate.identityId, 12)}</span>
                         </span>
                       </button>

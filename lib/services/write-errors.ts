@@ -11,6 +11,7 @@
  * in order and fall back to null (unknown write failure).
  */
 import { classifyAppConnectError, type AppConnectErrorClassification } from 'platform-auth'
+import { redactWif } from '@/lib/redact'
 
 export function consensusCodeOf(err: unknown): number | null {
   const seen = new Set<unknown>()
@@ -57,6 +58,10 @@ export function classifyWriteError(err: unknown): AppConnectErrorClassification 
 
 /** Best human-readable text for any thrown value (wasm SDK errors are not Error instances). */
 export function errorText(err: unknown): string {
+  return redactWif(rawErrorText(err))
+}
+
+function rawErrorText(err: unknown): string {
   if (typeof err === 'string') return err
   if (err && typeof err === 'object') {
     const e = err as { message?: unknown; kind?: unknown; code?: unknown; toString?: () => string }
@@ -77,6 +82,12 @@ export function writeFailureMessage(err: unknown): {
   const text = errorText(err)
   if (/is banned on contract|code 41107/i.test(text)) {
     return { message: 'Moderators have banned your identity from posting on this forum.', classification: null, sessionLogout: false }
+  }
+  if (/referenced document's locked/i.test(text)) {
+    return { message: 'This thread is locked. New replies can\'t be posted.', classification: null, sessionLogout: false }
+  }
+  if (/referenced document's archived/i.test(text)) {
+    return { message: 'This forum is archived. New threads and replies can\'t be posted.', classification: null, sessionLogout: false }
   }
   if (/suspended/i.test(text) && /contract/i.test(text)) {
     return { message: 'Your identity is suspended on this forum for now. Try again after the suspension ends.', classification: null, sessionLogout: false }

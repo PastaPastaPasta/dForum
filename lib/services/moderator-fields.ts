@@ -5,9 +5,9 @@
  * Author-side writes strip moderator-owned fields before the write.
  */
 export const MODERATOR_FIELDS: Record<string, readonly string[]> = {
-  thread: ['sticky', 'lockedAt', 'modState', 'modNote', 'movedToForumId', 'modFlags'],
-  post: ['modState', 'modNote'],
-  profile: ['customTitle', 'modState'],
+  thread: ['sticky', 'locked', 'modState', 'modNote', 'movedToForumId', 'modFlags'],
+  post: ['modState', 'modNote', 'modFlags'],
+  profile: ['customTitle', 'modState', 'modFlags'],
   report: ['status', 'resolution'],
 }
 

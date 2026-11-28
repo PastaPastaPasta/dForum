@@ -1,30 +1,31 @@
 'use client'
 
 import type { SiteFile, ThreadSummary } from '@/lib/forum/types'
-import { archiveAuthor, effectiveAt, sortThreadSummaries, str, threadForumId, threadLockedAt, threadTags } from '@/lib/forum/model'
-import { newThreads } from '@/lib/forum/live-merge'
+import { archiveAuthor, effectiveAt, sortThreadSummaries, str, threadForumId, isLocked, threadTags } from '@/lib/forum/model'
+import { newPosts, newThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { ThreadList } from './ThreadList'
 
-export function WhatsNew({ threads, snapshotAt, archive, names, forumTitles }: {
+export function WhatsNew({ threads, ctx, names, forumTitles }: {
   threads: ThreadSummary[]
-  snapshotAt: number
-  archive?: string
+  ctx: LiveContextProps
   names: Record<string, string>
   forumTitles: Record<string, string>
 }) {
-  const live = useLive(snapshotAt)
+  const live = useLive(ctx.snapshotAt)
+  const lc = toLiveContext(ctx)
+  const archive = ctx.archive
   const byId = new Map(threads.map((t) => [t.id, { ...t }]))
-  for (const t of newThreads(live, snapshotAt)) {
+  for (const t of newThreads(live, lc)) {
     byId.set(t.id, {
       id: t.id, forumId: threadForumId(t), title: str(t, 'title') ?? '', tags: threadTags(t), ownerId: t.ownerId, archiveAuthor: archiveAuthor(t, archive),
-      createdAt: effectiveAt(t, archive), sticky: false, locked: threadLockedAt(t) !== undefined, replies: 0, reactions: 0, lastPostAt: effectiveAt(t, archive), lastPostAuthorId: t.ownerId,
+      createdAt: effectiveAt(t, archive), sticky: false, locked: isLocked(t), replies: 0, reactions: 0, lastPostAt: effectiveAt(t, archive), lastPostAuthorId: t.ownerId,
     })
   }
-  for (const p of live.posts) {
-    const s = byId.get(str(p, 'threadId') ?? '')
-    if (!s || p.createdAt <= snapshotAt || p.ownerId === s.ownerId && p.createdAt === s.createdAt) continue
+  for (const { post: p, thread } of newPosts(live, lc)) {
+    const s = byId.get(thread.id)
+    if (!s) continue
     if (effectiveAt(p, archive) > s.lastPostAt) { s.lastPostAt = effectiveAt(p, archive); s.lastPostAuthorId = p.ownerId; s.lastPostArchiveAuthor = archiveAuthor(p, archive); s.lastPostId = p.id }
   }
   const list = sortThreadSummaries([...byId.values()].map((t) => ({ ...t, sticky: false }))).slice(0, 50)

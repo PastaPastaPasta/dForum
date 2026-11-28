@@ -234,25 +234,6 @@ export async function queryRaw(
   return { docs: out, rawCount: page.size, lastId }
 }
 
-export async function count(
-  type: string,
-  options: {
-    where?: [string, string, unknown][]
-    groupBy?: string[]
-  } = {},
-): Promise<Map<string, bigint>> {
-  const sdk = await getSdk()
-  const map = await sdk.documents.count({
-    dataContractId: CONTRACT_ID,
-    documentTypeName: type,
-    where: options.where as never,
-    groupBy: options.groupBy ?? [],
-  })
-  const out = new Map<string, bigint>()
-  for (const [key, value] of map.entries()) out.set(String(key), value)
-  return out
-}
-
 export async function get(type: string, documentId: string): Promise<DocRef | null> {
   const sdk = await getSdk()
   const raw = await sdk.documents.get(CONTRACT_ID, type, documentId)
@@ -459,7 +440,10 @@ export async function replaceDocument(
         nonce,
         authKeyWif,
         identityKey: sign.identityKey as never,
-        landed: async (id) => ((await get(existing.documentTypeName, id))?.revision ?? 0n) >= nextRevision,
+        landed: async (id) => {
+          const now = await get(existing.documentTypeName, id)
+          return !!now && now.revision >= nextRevision && now.updatedAt > existing.updatedAt
+        },
       })
       // The chain wrote the document — a re-read failure is not a write
       // failure. Report honestly: return what the write produced.

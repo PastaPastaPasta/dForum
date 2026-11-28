@@ -23,6 +23,7 @@ export function toRaw(doc: { toJSON(): Record<string, unknown> }): RawDoc {
     p,
   }
   if (j.$moderatedAt != null) raw.moderatedAt = Number(j.$moderatedAt)
+  if (j.$moderatedBy != null) raw.moderatedBy = String(j.$moderatedBy)
   return raw
 }
 

@@ -33,6 +33,8 @@ const META_RE = /<meta\s+http-equiv="Content-Security-Policy"[^>]*\/?>/i
 // Insert right after the charset meta (or right after <head>) so the policy
 // governs every external script and all content below — a meta placed late in
 // <head> would arrive after the scripts it is meant to allow.
+// No whitespace around the insert: React hydrates <head>, and a stray text node there fails
+// hydration on every page (React #418), forcing a full client re-render.
 const CHARSET_RE = /<meta\s+charset=[^>]*>/i
 const HEAD_OPEN_RE = /<head>/i
 
@@ -55,11 +57,11 @@ for (const file of files) {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`
   // Drop any existing meta (the layout used to emit one) — we re-insert it in
   // the right position so the policy governs every external script below it.
-  html = html.replace(META_RE, '')
+  html = html.replace(/\n?<meta\s+http-equiv="Content-Security-Policy"[^>]*\/?>/i, '')
   if (CHARSET_RE.test(html)) {
-    html = html.replace(CHARSET_RE, (m) => `${m}\n${meta}`)
+    html = html.replace(CHARSET_RE, (m) => `${m}${meta}`)
   } else if (HEAD_OPEN_RE.test(html)) {
-    html = html.replace(HEAD_OPEN_RE, (m) => `${m}\n${meta}`)
+    html = html.replace(HEAD_OPEN_RE, (m) => `${m}${meta}`)
   } else {
     // No insertion point — leaving it unchanged would ship an unprotected page.
     console.error(`FAIL: no <head> in ${file}`)

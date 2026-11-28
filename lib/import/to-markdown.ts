@@ -8,6 +8,14 @@ export interface MarkdownOptions {
   baseUrl: string
 }
 
+/** XenForo's default smilie codes. */
+const SMILIES: Record<string, string> = {
+  ':)': '🙂', ':-)': '🙂', ';)': '😉', ';-)': '😉', ':(': '🙁', ':-(': '🙁', ':D': '😃', ':-D': '😃', ':P': '😛', ':p': '😛',
+  ':o': '😮', ':O': '😮', ':mad:': '😠', ':confused:': '😕', ':cool:': '😎', ':rolleyes:': '🙄', ':eek:': '😳',
+  ':LOL:': '😂', ':lol:': '😂', ':oops:': '😳', ':cry:': '😢', ':evil:': '😈', ':twisted:': '😈', ':whistle:': '😗', ':geek:': '🤓',
+  ':sick:': '🤢', ':alien:': '👽', ':unsure:': '😕', ':sleep:': '😴', ':love:': '😍', ':giggle:': '🤭', ':coffee:': '☕', ':rolleyes': '🙄',
+}
+
 const BLOCK_TAGS = new Set(['div', 'p', 'section', 'article', 'center', 'figure', 'aside', 'header', 'footer'])
 
 export function absoluteUrl(href: string, base: string): string | null {
@@ -164,7 +172,7 @@ function renderNode(node: Node, o: MarkdownOptions, atLineStart: boolean): strin
       return renderTable(el, o)
     case 'img': {
       const alt = (el.getAttribute('alt') ?? '').replace(/[[\]]/g, '')
-      if (hasClass(el, 'smilie')) return alt
+      if (hasClass(el, 'smilie')) return SMILIES[alt.trim()] ?? alt
       const candidates = [el.getAttribute('data-url'), el.getAttribute('data-src'), el.getAttribute('src')]
         .filter((v): v is string => !!v && !v.startsWith('data:'))
       const src = candidates.map((c) => absoluteUrl(c, o.baseUrl)).find((u) => u && u.replace(/\/$/, '') !== o.baseUrl.replace(/\/$/, ''))
@@ -178,7 +186,10 @@ function renderNode(node: Node, o: MarkdownOptions, atLineStart: boolean): strin
       }
       const href = absoluteUrl(el.getAttribute('href') ?? '', o.baseUrl)
       if (!href) return text
-      if (/\/attachments\//.test(href)) return `[attachment: ${text || 'file'}](${mdUrl(href)})`
+      if (/\/attachments\//.test(href)) {
+        const label = text.replace(/^view attachment\s*/i, '').trim()
+        return `[Attachment${label && !/^\d+$/.test(label) ? `: ${label}` : ''}](${mdUrl(href)})`
+      }
       const plain = el.text.trim()
       if (!text || plain === href || plain === el.getAttribute('href')) return `<${mdUrl(href)}>`
       return `[${text}](${mdUrl(href)})`

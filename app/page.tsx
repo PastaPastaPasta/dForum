@@ -1,4 +1,4 @@
-import { site, memberNames } from '@/lib/server/site-data'
+import { site, memberNames, liveContext } from '@/lib/server/site-data'
 import { ForumIndex } from '@/components/forum/ForumIndex'
 import { HomeSidebar } from '@/components/forum/HomeSidebar'
 import { Markdown } from '@/components/ui/Markdown'
@@ -19,8 +19,8 @@ export default function Home() {
         </div>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <ForumIndex categories={s.categories} forums={s.forums} names={names} snapshotAt={s.snapshotAt} archiveOwnerId={s.settings.archiveOwnerId} />
-        <HomeSidebar site={s} names={names} />
+        <ForumIndex categories={s.categories} forums={s.forums} names={names} ctx={liveContext()} />
+        <HomeSidebar site={{ ...s, forums: [], categories: [] }} names={names} ctx={liveContext()} />
       </div>
     </>
   )

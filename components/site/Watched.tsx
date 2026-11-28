@@ -10,19 +10,20 @@ import { useWatches } from '@/lib/watch'
 export function Watched({ snapshotAt }: { snapshotAt: number }) {
   const watches = useWatches()
   const live = useLive(snapshotAt)
+  // Posts in the static copy of each thread; 0 when the thread is newer than the snapshot.
   const [counts, setCounts] = useState<Record<string, number>>({})
   const ids = Object.keys(watches)
   useEffect(() => {
     let alive = true
     for (const id of ids) {
-      fetch(`/data/v2/thread/${id}.json`).then((r) => (r.ok ? (r.json() as Promise<ThreadFile>) : null))
+      fetch(`/data/v2/thread/${id}.json`).then((r) => (r.ok ? (r.json() as Promise<ThreadFile>) : r.status === 404 ? { posts: [] } as unknown as ThreadFile : null))
         .then((t) => { if (alive && t) setCounts((c) => ({ ...c, [id]: t.posts.length })) }).catch(() => undefined)
     }
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids.join()])
   const fresh = (id: string) => live.posts.filter((p) => str(p, 'threadId') === id && p.createdAt > snapshotAt && !isHidden(p) && !isRetracted(p)).length
-  const list = ids.map((id) => ({ id, ...watches[id], total: (counts[id] ?? watches[id].seen) + fresh(id) })).sort((a, b) => (b.total - b.seen) - (a.total - a.seen) || b.at - a.at)
+  const list = ids.map((id) => ({ id, ...watches[id], total: counts[id] === undefined ? watches[id].seen : counts[id] + fresh(id) })).sort((a, b) => (b.total - b.seen) - (a.total - a.seen) || b.at - a.at)
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Watched threads</h1>

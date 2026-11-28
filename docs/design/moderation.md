@@ -26,7 +26,7 @@ This signs with the owner's CRITICAL key (`DFORUM_OWNER_WIF` and `DFORUM_OWNER_K
 | --- | --- | --- |
 | Hide / unhide a thread, post or profile | changeFields `modState` | Hidden everywhere; the post keeps a placeholder. Reversible. |
 | Pin / unpin a thread | changeFields `sticky` | Sorted first in its forum |
-| Lock / unlock a thread | changeFields `lockedAt` | The composer closes; later posts are ignored by every reader |
+| Lock / unlock a thread | changeFields `locked` | Consensus refuses new replies; edits and reactions close in the app |
 | Move a thread | changeFields `movedToForumId` | Listed in the new forum |
 | Delete | `moderatorDeleteDocument` | Removed, leaving a removal record (thread keeps forumId; post keeps threadId and forumId). The console recommends hiding instead. |
 | Resolve a report | changeFields `status` (2 actioned, 3 dismissed) + `resolution` | Leaves the open queue |
@@ -42,7 +42,7 @@ The network refuses moderation of documents owned by the moderator, the owner or
 - The key stays in this tab only. It is wiped (signer freed, WIF dropped) on lock, when the tab is hidden, on page hide, after 10 idle minutes, and on unmount. Nothing is persisted.
 - Sections:
   - **Reports**: the open queue, with hide-and-resolve or dismiss.
-  - **Content**: find by link; hide, pin, lock, move or delete; the latest 25 posts.
+  - **Content**: find by link (or arrive from a post's Moderate action); hide, pin, lock, move or delete; the 25 most recently changed posts.
   - **Members**: status, ban, suspend and warn. Ban, suspend and warn need a reason, which is stored on chain.
   - **Audit log**: documents by `$moderatedAt`.
 - Starting a new lookup clears the previous target before any action buttons render.
@@ -52,4 +52,5 @@ The network refuses moderation of documents owned by the moderator, the owner or
 
 - **Banned users' old content stays visible.** A ban stops new writes but does not hide old content; moderators hide what needs hiding. The SDK build in use cannot list the banlist.
 - **Reports are public on chain,** including the reporter. The report form says so.
-- **Locks are not enforced at consensus** (spike S3). Every reader drops posts created after `lockedAt`.
+- **Locks and archived forums are enforced at consensus** (contract v3): a post must refer to a thread whose `locked` is not true, and threads and posts must refer to a forum whose `archived` is not true. Edits of existing posts in a locked thread are refused only by the app.
+- **Moderators reach the console from any post.** Signed-in staff see a Moderate action that opens the console with the post already looked up.

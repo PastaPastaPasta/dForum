@@ -4,6 +4,7 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { archiveRef } from '@/lib/forum/model'
 import type { ArchiveMemberView, ForumFile, ForumView, MemberView, SiteFile, ThreadFile, UserFile } from '@/lib/forum/types'
 
 const DATA = join(process.cwd(), 'data')
@@ -55,4 +56,15 @@ export function memberCards(ids: Iterable<string>): Record<string, MemberView> {
   const out: Record<string, MemberView> = {}
   for (const m of members()) if (wanted.has(m.id)) out[m.id] = m
   return out
+}
+
+/** What the live layer needs to apply the reader rules in the browser. */
+export function liveContext(): import('@/lib/forum/live-merge').LiveContextProps {
+  const s = site()
+  return {
+    snapshotAt: s.snapshotAt,
+    archive: archiveRef(s.settings),
+    archivedForums: s.forums.filter((f) => f.archived).map((f) => f.id),
+    staff: [...new Set([s.ownerId, ...s.moderators].filter(Boolean))],
+  }
 }

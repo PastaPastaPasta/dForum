@@ -8,7 +8,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { POSTS_PER_PAGE, THREADS_PER_PAGE } from '../lib/forum/types.ts';
-import { effectiveAt, excerpt, isHidden, isRetracted, postBody } from '../lib/forum/model.ts';
+import { archiveRef, effectiveAt, excerpt, isHidden, isRetracted, postBody } from '../lib/forum/model.ts';
 
 const OUT = 'out';
 const SITE = (process.env.SITE_URL || 'https://forum.dashhq.org').replace(/\/+$/, '');
@@ -21,7 +21,7 @@ if (!existsSync('data/site.json')) {
   process.exit(1);
 }
 const site = read('site.json');
-const archive = site.settings.archiveOwnerId;
+const archive = archiveRef(site.settings);
 const threadFiles = existsSync('data/thread') ? readdirSync('data/thread').filter((f) => f.endsWith('.json')) : [];
 const forumFile = (id) => (existsSync(`data/forum/${id}.json`) ? read(`forum/${id}.json`) : { threads: [] });
 
@@ -41,11 +41,24 @@ for (const file of threadFiles) {
 for (const t of site.tags) urls.push({ loc: `/tags/${t.tag}/` });
 const members = existsSync('data/members.json') ? read('members.json') : [];
 for (const m of members) if (!m.hidden) urls.push({ loc: `/u/${m.id}/` });
-writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
+// One file up to 45k URLs; beyond that, sitemap.xml becomes an index of numbered parts
+// (the protocol caps a file at 50k URLs).
+const urlset = (list) => `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls.map((u) => `  <url><loc>${esc(SITE + u.loc)}</loc>${u.lastmod ? `<lastmod>${iso(u.lastmod).slice(0, 10)}</lastmod>` : ''}</url>`).join('\n')}
+${list.map((u) => `  <url><loc>${esc(SITE + u.loc)}</loc>${u.lastmod ? `<lastmod>${iso(u.lastmod).slice(0, 10)}</lastmod>` : ''}</url>`).join('\n')}
 </urlset>
+`;
+const PART = 45000;
+if (urls.length <= PART) writeFileSync(join(OUT, 'sitemap.xml'), urlset(urls));
+else {
+  const parts = Math.ceil(urls.length / PART);
+  for (let i = 0; i < parts; i++) writeFileSync(join(OUT, `sitemap-${i + 1}.xml`), urlset(urls.slice(i * PART, (i + 1) * PART)));
+  writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${Array.from({ length: parts }, (_, i) => `  <sitemap><loc>${esc(`${SITE}/sitemap-${i + 1}.xml`)}</loc></sitemap>`).join('\n')}
+</sitemapindex>
 `);
+}
 
 writeFileSync(join(OUT, 'robots.txt'), `User-agent: *
 Allow: /

@@ -30,6 +30,7 @@ export interface BatchWriteArgs {
 }
 
 const TRANSIENT = /Tenderdash is not available|\(code 14\)|UNAVAILABLE|Deadline expired|timed out|no available (addresses|nodes)|connection (refused|reset)|transport error/i
+const ALREADY_SEEN = /already (in|exists|received|been)|duplicate state transition|in (the )?mempool|state transition .*already/i
 const errText = (e: unknown) => String((e as { message?: unknown })?.message ?? e)
 
 /**
@@ -81,7 +82,19 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
         await sdk.stateTransitions.broadcastAndWait(stateTransition)
         break
       } catch (e) {
-        if (documentId && args.landed && (await args.landed(documentId).catch(() => false))) break
+        const landed = () => (documentId && args.landed ? args.landed(documentId).catch(() => false) : Promise.resolve(false))
+        if (await landed()) break
+        // The network already has this exact transition: it will land (or expire); wait for it
+        // rather than failing into a user retry that would sign a second write.
+        if (ALREADY_SEEN.test(errText(e))) {
+          let ok = false
+          for (let i = 0; i < 12 && !ok; i++) {
+            await new Promise((r) => setTimeout(r, 5000))
+            ok = await landed()
+          }
+          if (ok) break
+          throw new Error('The network received this write but has not confirmed it yet. Reload the page in a minute before trying again.')
+        }
         if (attempt >= 3 || !TRANSIENT.test(errText(e))) throw e
         await new Promise((r) => setTimeout(r, 1500 * attempt))
       }

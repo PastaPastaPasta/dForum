@@ -10,16 +10,16 @@
   },
   "contracts": {
     "team": {
-      "contractId": "85NE7sDLE6UEmPu7GXFwTKUZZudXxLZM6WwVkTTQDKEX",
+      "contractId": "9e34k5BMLbEwmTz69aiihHec8VMZy7RuE4BmR935LoWC",
       "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
       "mode": "team",
       "version": 1,
-      "identityNonce": "2",
-      "registeredAt": "2026-11-28T07:44:45.214Z",
-      "costCredits": "90809183230",
-      "sizeBytes": 9198,
-      "transitionSha256": "1867906166cf6f0810e1420cb59d249f5dc3b33d00eaf0d51f7c4e12a16ae832",
-      "registrationTxHash": "1867906166cf6f0810e1420cb59d249f5dc3b33d00eaf0d51f7c4e12a16ae832"
+      "identityNonce": "3",
+      "registeredAt": "2026-11-28T09:37:51.223Z",
+      "costCredits": "84786346210",
+      "sizeBytes": 8965,
+      "transitionSha256": "bc8706f4b36e41721214f403b975137aabd81d8b1ee3ab8330b4ce4c7b3a4ed7",
+      "registrationTxHash": "bc8706f4b36e41721214f403b975137aabd81d8b1ee3ab8330b4ce4c7b3a4ed7"
     }
   },
   "retired": {
@@ -36,6 +36,19 @@
       "broadcastAt": "2026-11-26T07:06:00Z",
       "registrationTxHash": "C1EA4532D42B19C54E0E43F13BC58E1F76ED87D2C0283DF5ABFB5574173D9297",
       "retiredAt": "2026-11-28"
+    },
+    "teamV2": {
+      "contractId": "85NE7sDLE6UEmPu7GXFwTKUZZudXxLZM6WwVkTTQDKEX",
+      "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
+      "mode": "team",
+      "version": 1,
+      "identityNonce": "2",
+      "registeredAt": "2026-11-28T07:44:45.214Z",
+      "costCredits": "90809183230",
+      "sizeBytes": 9198,
+      "registrationTxHash": "1867906166cf6f0810e1420cb59d249f5dc3b33d00eaf0d51f7c4e12a16ae832",
+      "note": "v2 schema; superseded by v3 (consensus-enforced locks and archived forums)",
+      "retiredAt": "2026-11-28"
     }
   },
   "personas": [
@@ -43,7 +56,8 @@
       "index": 1,
       "name": "alice",
       "id": "BHDMfa8MYiS2NsVY6pfbGfdsALBR9SvVFWNwGxPjJ3k5",
-      "role": "member"
+      "role": "member",
+      "status": "not created: identity create timed out repeatedly; asset lock 52f1daa5\u20263f20 (height 1599940) still unclaimed"
     },
     {
       "index": 2,

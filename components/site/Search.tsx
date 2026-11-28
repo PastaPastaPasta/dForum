@@ -4,19 +4,24 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { Search as SearchIcon } from 'lucide-react'
 import { str, threadForumId } from '@/lib/forum/model'
-import { newThreads } from '@/lib/forum/live-merge'
+import { newThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 
-interface Hit { url: string; title: string; excerpt: string; forum?: string }
+interface Sub { url: string; title: string; excerpt: string }
+interface Hit { url: string; title: string; excerpt: string; forum?: string; subs: Sub[] }
 type Pagefind = {
-  search(q: string, o?: { filters?: Record<string, string> }): Promise<{ results: Array<{ data(): Promise<{ url: string; excerpt: string; meta: Record<string, string>; filters: Record<string, string[]> }> }> }>
+  search(q: string, o?: { filters?: Record<string, string> }): Promise<{ results: Array<{ data(): Promise<{ url: string; excerpt: string; meta: Record<string, string>; filters: Record<string, string[]>; sub_results?: Sub[] }> }> }>
   filters(): Promise<Record<string, Record<string, number>>>
 }
 
 let pagefind: Promise<Pagefind> | null = null
+const markOnly = (html: string) => html.replace(/<(?!\/?mark>)[^>]*>/g, '')
+const postUrl = (url: string) => url.replace('#h-', '#post-')
+
 const loadPagefind = () => (pagefind ??= import(/* webpackIgnore: true */ '/pagefind/pagefind.js' as string).then((m: Pagefind & { options?(o: object): Promise<void> }) => m))
 
-export function Search({ snapshotAt, forumTitles }: { snapshotAt: number; forumTitles: Record<string, string> }) {
+export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitles: Record<string, string> }) {
+  const snapshotAt = ctx.snapshotAt
   const [q, setQ] = useState('')
   const [forum, setForum] = useState('')
   const [forums, setForums] = useState<string[]>([])
@@ -47,7 +52,10 @@ export function Search({ snapshotAt, forumTitles }: { snapshotAt: number; forumT
         const res = await pf.search(query, forum ? { filters: { forum } } : undefined)
         const data = await Promise.all(res.results.slice(0, 30).map((r) => r.data()))
         if (n !== seq.current) return
-        setHits(data.map((d) => ({ url: d.url, title: d.meta.title ?? d.url, excerpt: d.excerpt, forum: d.filters.forum?.[0] })))
+        setHits(data.map((d) => ({
+          url: d.url, title: d.meta.title ?? d.url, excerpt: d.excerpt, forum: d.filters.forum?.[0],
+          subs: (d.sub_results ?? []).filter((r) => r.url.includes('#h-')).slice(0, 3),
+        })))
         setState('idle')
       } catch {
         if (n === seq.current) setState('error')
@@ -57,17 +65,17 @@ export function Search({ snapshotAt, forumTitles }: { snapshotAt: number; forumT
   }, [q, forum])
 
   const needle = q.trim().toLowerCase()
-  const fresh = needle ? newThreads(live, snapshotAt).filter((t) => (str(t, 'title') ?? '').toLowerCase().includes(needle)) : []
+  const fresh = needle ? newThreads(live, toLiveContext(ctx)).filter((t) => (str(t, 'title') ?? '').toLowerCase().includes(needle)) : []
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <h1 className="text-2xl font-semibold tracking-tight">Search</h1>
-      <form role="search" onSubmit={(e) => e.preventDefault()} className="flex flex-wrap gap-2">
-        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-rule bg-sheet px-3 focus-within:border-dash">
+      <form role="search" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-2 sm:flex-row">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-field bg-sheet px-3 focus-within:border-dash">
           <SearchIcon aria-hidden className="h-4 w-4 text-ink-2" />
           <input autoFocus type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search threads and posts" aria-label="Search terms" className="h-10 min-w-0 flex-1 bg-transparent outline-none" />
         </label>
-        <select className="field w-auto" value={forum} onChange={(e) => setForum(e.target.value)} aria-label="Forum">
+        <select className="field sm:w-auto" value={forum} onChange={(e) => setForum(e.target.value)} aria-label="Forum">
           <option value="">All forums</option>
           {forums.map((f) => <option key={f} value={f}>{f}</option>)}
         </select>
@@ -77,7 +85,7 @@ export function Search({ snapshotAt, forumTitles }: { snapshotAt: number; forumT
           <h2 className="text-sm font-semibold text-ink-2">New since the last index update</h2>
           <ul className="panel divide-y divide-rule">
             {fresh.map((t) => (
-              <li key={t.id} className="px-4 py-3"><Link href={`/t/${t.id}/`} className="font-medium hover:text-dash">{str(t, 'title')}</Link><p className="text-sm text-ink-2">{forumTitles[threadForumId(t)]}</p></li>
+              <li key={t.id} className="px-4 py-3"><Link prefetch={false} href={`/t/${t.id}/`} className="font-medium hover:text-dash">{str(t, 'title')}</Link><p className="text-sm text-ink-2">{forumTitles[threadForumId(t)]}</p></li>
             ))}
           </ul>
         </section>
@@ -93,7 +101,17 @@ export function Search({ snapshotAt, forumTitles }: { snapshotAt: number; forumT
                   <a href={h.url} className="font-medium hover:text-dash">{h.title}</a>
                   {h.forum && <p className="text-xs text-ink-2">{h.forum}</p>}
                   {/* Pagefind excerpts are escaped text with <mark> highlights only. */}
-                  <p className="mt-1 text-sm text-ink-2 [&_mark]:bg-dash/20 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: h.excerpt.replace(/<(?!\/?mark>)[^>]*>/g, "") }} />
+                  {h.subs.length === 0 && <p className="mt-1 text-sm text-ink-2 [&_mark]:bg-dash/20 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: markOnly(h.excerpt) }} />}
+                  {h.subs.length > 0 && (
+                    <ul className="mt-1.5 space-y-1.5 border-l-2 border-rule pl-3">
+                      {h.subs.map((r) => (
+                        <li key={r.url} className="text-sm">
+                          <a href={postUrl(r.url)} className="font-medium text-ink-2 hover:text-dash">{r.title}</a>
+                          <p className="text-ink-2 [&_mark]:bg-dash/20 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: markOnly(r.excerpt) }} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               ))}
             </ul>

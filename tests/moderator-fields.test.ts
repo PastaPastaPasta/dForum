@@ -8,7 +8,7 @@ const buildContract = _buildContract as (opts: { moderation?: string; deployer?:
 
 describe('stripModeratorFields — author writes never carry moderator fields', () => {
   it('drops moderator-owned fields per type', () => {
-    const stripped = stripModeratorFields('thread', { title: 't', sticky: true, lockedAt: 9, modState: 3, body: 'x' })
+    const stripped = stripModeratorFields('thread', { title: 't', sticky: true, locked: true, modState: 3, body: 'x' })
     expect(stripped).toEqual({ title: 't', body: 'x' })
   })
 

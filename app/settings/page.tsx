@@ -92,9 +92,9 @@ export default function SettingsPage() {
           </div>
         </div>
         {state === 'loading' && <p role="status" className="text-ink-2"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading your profile from Dash Platform…</p>}
-        {state === 'error' && <p role="alert" className="text-danger">Couldn&apos;t load your profile. Saving creates a new one only if none exists.</p>}
+        {state === 'error' && <p role="alert" className="text-danger">Couldn&apos;t load your profile from Dash Platform, so editing is paused to avoid overwriting it. Reload the page to try again.</p>}
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void save() }}>
-          <fieldset disabled={state === 'loading'} className="space-y-4 disabled:opacity-60">
+          <fieldset disabled={state !== 'ready'} className="space-y-4 disabled:opacity-60">
           {FIELDS.map((f) => (
             <label key={f.key} className="block">
               <span className="text-sm font-medium">{f.label}</span>

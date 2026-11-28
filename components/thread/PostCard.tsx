@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { Flag, Link2, MessageSquareQuote, Pencil, Trash2, EyeOff, History } from 'lucide-react'
+import { Check, Flag, Link2, MessageSquareQuote, Pencil, Shield, Trash2, EyeOff, History } from 'lucide-react'
 import type { MemberView, RawDoc, ReactionCounts } from '@/lib/forum/types'
 import { archiveAuthor, effectiveAt, isEdited, isHidden, isRetracted, num, postBody } from '@/lib/forum/model'
 import { REPORT_REASONS } from '@/lib/forum/actions'
@@ -14,6 +14,8 @@ import { Reactions } from './Reactions'
 
 export interface PostActions {
   canWrite: boolean
+  /** The signed-in member is the owner or a moderator. */
+  staff: boolean
   busy: string | null
   onQuote(post: RawDoc, name: string): void
   onEdit(post: RawDoc, body: string): Promise<boolean>
@@ -31,7 +33,7 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
   name: string
   member?: MemberView
   role?: string
-  archive?: string
+  archive?: import('@/lib/forum/model').ArchiveRef
   sourceUrl?: string
   reactions: ReactionCounts
   mine: number
@@ -44,19 +46,22 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
   const [reason, setReason] = useState<number>(1)
   const [note, setNote] = useState('')
   const [reported, setReported] = useState(false)
+  const [copied, setCopied] = useState(false)
   const imported = archiveAuthor(post, archive)
   const displayName = imported ?? name
   const hidden = isHidden(post)
   const retracted = isRetracted(post)
+  const visible = !hidden && !retracted
   const own = me === post.ownerId && !imported
   const busy = actions.busy === post.id
   const at = effectiveAt(post, archive)
   const origPostId = imported && num(post, 'origId') ? Math.floor((num(post, 'origId') as number) / 100) : undefined
 
   return (
-    <article id={`post-${post.id}`} aria-labelledby={`post-${post.id}-author`}
+    <article id={`post-${post.id}`} aria-label={`Post #${n} by ${displayName}`}
       className={`panel scroll-mt-20 overflow-hidden md:grid md:grid-cols-[11rem_1fr] ${imported ? 'border-l-4 border-l-archive/70' : ''}`}>
-      <aside className={`flex items-center gap-3 border-b border-rule px-4 py-3 md:flex-col md:items-center md:border-b-0 md:border-r md:py-5 md:text-center ${imported ? 'bg-archive-wash/60' : 'bg-sunk/40'}`}>
+      <h2 id={`h-${post.id}`} className="sr-only">Post #{n} by {displayName}</h2>
+      <aside data-pagefind-ignore className={`flex items-center gap-3 border-b border-rule px-4 py-3 md:flex-col md:items-center md:border-b-0 md:border-r md:py-5 md:text-center ${imported ? 'bg-archive-wash/60' : 'bg-sunk/40'}`}>
         <Avatar seed={post.ownerId + (imported ?? '')} name={displayName} src={member?.avatarUrl} size={56} archive={!!imported} />
         <div className="min-w-0 md:w-full">
           {imported ? (
@@ -80,22 +85,23 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
         </div>
       </aside>
       <div className="flex min-w-0 flex-col">
-        <header className="flex items-center gap-2 px-4 pt-3 text-sm text-ink-2 md:px-5">
-          <Link href={`/t/${threadId}/#post-${post.id}`} className="hover:text-dash"><Time at={at} /></Link>
+        <header data-pagefind-ignore className="flex items-center gap-2 px-4 pt-3 text-sm text-ink-2 md:px-5">
+          <Link prefetch={false} href={`/t/${threadId}/#post-${post.id}`} className="hover:text-dash"><Time at={at} /></Link>
           {imported && (
-            <span className="rounded bg-archive-wash px-1.5 text-xs text-archive">
-              Archive{sourceUrl && origPostId ? <>{' '}<a className="underline" href={`${sourceUrl.replace(/\/?$/, '/')}posts/${origPostId}/`} rel="nofollow noopener" aria-label={`Original post by ${imported}`}>original</a></> : null}
-            </span>
+            <span className="rounded bg-archive-wash px-1.5 text-xs text-archive">Imported</span>
           )}
-          {isEdited(post) && !retracted && !imported && <span className="flex items-center gap-1" title={`Edited ${new Date(post.updatedAt).toUTCString()}`}><History className="h-3.5 w-3.5" />edited</span>}
+          {imported && sourceUrl && origPostId && (
+            <a className="text-xs underline decoration-rule underline-offset-2 hover:text-dash" href={`${sourceUrl.replace(/\/?$/, '/')}posts/${origPostId}/`} rel="nofollow noopener" aria-label={`Original post by ${imported}`}>Original</a>
+          )}
+          {isEdited(post) && !retracted && !imported && <span className="flex items-center gap-1" title={`Edited ${new Date(post.updatedAt).toUTCString()}`}><History aria-hidden className="h-3.5 w-3.5" />Edited</span>}
           <a href={`#post-${post.id}`} className="ml-auto tabnum hover:text-dash" aria-label={`Permalink to post ${n}`}>#{n}</a>
         </header>
 
         <div className="flex-1 px-4 py-3 md:px-5">
           {hidden ? (
-            <p className="flex items-center gap-2 text-ink-2"><EyeOff className="h-4 w-4" />This post was hidden by a moderator.</p>
+            <p className="flex items-center gap-2 text-sm text-ink-2"><EyeOff aria-hidden className="h-4 w-4" />Hidden by a moderator.</p>
           ) : retracted ? (
-            <p className="flex items-center gap-2 text-ink-2"><Trash2 className="h-4 w-4" />Deleted by its author.</p>
+            <p className="flex items-center gap-2 text-sm text-ink-2"><Trash2 aria-hidden className="h-4 w-4" />Deleted by its author.</p>
           ) : editing ? (
             <Composer value={draft} onChange={setDraft} busy={busy} submitLabel="Save changes" label="Edit post" autoFocus
               onCancel={() => setEditing(false)}
@@ -107,31 +113,46 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
             <div className="mt-4 border-t border-rule pt-2 text-sm text-ink-2"><Markdown source={member.signature} className="post-body !font-sans !text-sm" /></div>
           )}
         </div>
-        {!hidden && !retracted && !editing && (
+        {!editing && (visible || actions.staff) && (
           <footer data-pagefind-ignore className="flex flex-wrap items-center gap-1 border-t border-rule px-2 py-1.5 md:px-3">
-            <Reactions counts={reactions} mine={mine} canReact={actions.canWrite && !own} busy={busy} onReact={(k) => actions.onReact(post, k)} />
+            {visible && <Reactions counts={reactions} mine={mine} canReact={actions.canWrite && !own} busy={busy} onReact={(k) => actions.onReact(post, k)} />}
             <div className="ml-auto flex flex-wrap items-center">
-              <button type="button" className="btn-ghost text-sm" onClick={() => void navigator.clipboard?.writeText(`${location.origin}/t/${threadId}/#post-${post.id}`)}>
-                <Link2 className="h-4 w-4" /><span className="hidden sm:inline">Copy link</span>
+              {visible && <>
+              <button type="button" className="btn-ghost text-sm" aria-label={copied ? 'Link copied' : `Copy link to post #${n}`}
+                onClick={() => {
+                  void navigator.clipboard?.writeText(`${location.origin}/t/${threadId}/#post-${post.id}`).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  })
+                }}>
+                {copied ? <Check aria-hidden className="h-4 w-4 text-live" /> : <Link2 aria-hidden className="h-4 w-4" />}
+                <span className="hidden sm:inline" aria-hidden>{copied ? 'Copied' : 'Copy link'}</span>
               </button>
+              <span className="sr-only" role="status">{copied ? 'Link copied' : ''}</span>
               {actions.canWrite && (
                 <button type="button" className="btn-ghost text-sm" onClick={() => actions.onQuote(post, displayName)}>
-                  <MessageSquareQuote className="h-4 w-4" />Quote
+                  <MessageSquareQuote aria-hidden className="h-4 w-4" />Quote
                 </button>
               )}
               {own && actions.canWrite && (
                 <>
-                  <button type="button" className="btn-ghost text-sm" disabled={busy} onClick={() => { setDraft(postBody(post)); setEditing(true) }}><Pencil className="h-4 w-4" />Edit</button>
+                  <button type="button" className="btn-ghost text-sm" disabled={busy} onClick={() => { setDraft(postBody(post)); setEditing(true) }}><Pencil aria-hidden className="h-4 w-4" />Edit</button>
                   <button type="button" className="btn-ghost text-sm" disabled={busy}
-                    onClick={() => { if (confirm('Delete this post? Its text is replaced on chain; the record of the post remains.')) actions.onRetract(post) }}>
-                    <Trash2 className="h-4 w-4" />Delete
+                    onClick={() => { if (confirm('Delete this post? Its text is removed for everyone. A placeholder stays so the thread numbering is kept.')) actions.onRetract(post) }}>
+                    <Trash2 aria-hidden className="h-4 w-4" />Delete
                   </button>
                 </>
               )}
               {actions.canWrite && !own && (
                 <button type="button" className="btn-ghost text-sm" aria-expanded={reporting} disabled={reported} onClick={() => setReporting((r) => !r)}>
-                  <Flag className="h-4 w-4" />{reported ? 'Reported' : 'Report'}
+                  <Flag aria-hidden className="h-4 w-4" />{reported ? 'Reported' : 'Report'}
                 </button>
+              )}
+            </>}
+              {actions.staff && (
+                <Link prefetch={false} href={`/moderation/?ref=${encodeURIComponent(`/t/${threadId}/#post-${post.id}`)}`} className="btn-ghost text-sm">
+                  <Shield aria-hidden className="h-4 w-4" />Moderate
+                </Link>
               )}
             </div>
           </footer>

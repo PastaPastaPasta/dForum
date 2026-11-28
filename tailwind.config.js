@@ -24,6 +24,8 @@ module.exports = {
         archive: token('archive'),
         'archive-wash': token('archive-wash'),
         danger: token('danger'),
+        'danger-ink': token('danger-ink'),
+        field: token('field'),
       },
       maxWidth: { page: '76rem', read: '44rem' },
     },
