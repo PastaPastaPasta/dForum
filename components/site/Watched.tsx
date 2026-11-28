@@ -24,6 +24,13 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids.join()])
   const fresh = (id: string) => live.posts.filter((p) => str(p, 'threadId') === id && p.createdAt > snapshotAt && !isHidden(p) && !isRetracted(p)).length
+  // The page holding the first new reply, capped at the last page the static index built (newer
+  // replies show on that last page live).
+  const firstNewPage = (id: string, seen: number, unread: number) => {
+    if (!unread) return 1
+    const built = Math.max(1, Math.ceil((counts[id] ?? 0) / POSTS_PER_PAGE))
+    return Math.min(Math.floor(seen / POSTS_PER_PAGE) + 1, built)
+  }
   const list = ids.map((id) => ({ id, ...watches[id], total: counts[id] === undefined ? watches[id].seen : counts[id] + fresh(id) })).sort((a, b) => (b.total - b.seen) - (a.total - a.seen) || b.at - a.at)
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -38,7 +45,7 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
             return (
               <li key={w.id} className="flex items-center gap-3 px-4 py-2">
                 {/* Unread threads open on the page holding the first new reply. */}
-                <Link href={unread && w.seen >= POSTS_PER_PAGE ? `/t/${w.id}/page/${Math.floor(w.seen / POSTS_PER_PAGE) + 1}/` : `/t/${w.id}/`}
+                <Link href={firstNewPage(w.id, w.seen, unread) > 1 ? `/t/${w.id}/page/${firstNewPage(w.id, w.seen, unread)}/` : `/t/${w.id}/`}
                   className={`tap-y min-w-0 flex-1 truncate ${unread ? 'font-semibold' : ''} hover:text-dash`}>{w.title}</Link>
                 {unread > 0 && <span className="rounded-full bg-dash px-2 text-xs font-semibold text-dash-ink tabnum">{unread} new</span>}
                 <button type="button" className="btn-ghost text-sm" onClick={() => unwatch(w.id)} aria-label={`Stop watching ${w.title}`}>Unwatch</button>

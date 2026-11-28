@@ -12,6 +12,21 @@ export interface DeltaDocs {
   /** Changed threads plus the threads of every live post (the overlay resolves them). */
   threads: RawDoc[]
   posts: RawDoc[]
+  /** Threads whose first posts the overlay has loaded into `posts`: their listability is known. */
+  heads?: readonly string[]
+}
+
+/** Delta posts grouped by thread, built once per call site instead of filtering per post. */
+function postsByThread(posts: RawDoc[]): Map<string, RawDoc[]> {
+  const out = new Map<string, RawDoc[]>()
+  for (const p of posts) {
+    const id = str(p, 'threadId')
+    if (!id) continue
+    const list = out.get(id)
+    if (list) list.push(p)
+    else out.set(id, [p])
+  }
+  return out
 }
 
 export interface LiveContext {
@@ -61,20 +76,21 @@ export interface DeltaChanges {
   thread(id: string): RawDoc | undefined
 }
 
-export function deltaChanges(delta: DeltaDocs): DeltaChanges {
+export function deltaChanges(delta: DeltaDocs, archive?: ArchiveRef): DeltaChanges {
   const threads = byId(delta.threads)
   const posts = byId(delta.posts)
+  const grouped = postsByThread(delta.posts)
+  const heads = new Set(delta.heads ?? [])
+  const gone = new Map<string, boolean>()
   return {
     threadGone: (id) => {
       const t = threads.get(id)
       if (!t) return false
       if (isHidden(t)) return true
-      // The opening post is written right after its thread. When the delta holds the owner's first
-      // post from that moment, it is the opening post (archive threads included: they load in order).
-      const first = delta.posts
-        .filter((p) => str(p, 'threadId') === id && p.ownerId === t.ownerId)
-        .sort((a, b) => a.createdAt - b.createdAt)[0]
-      return !!first && first.createdAt - t.createdAt < STRADDLE_MS && !visible(first)
+      // Only threads whose first posts are loaded can be judged: then the snapshot's rule applies.
+      if (!heads.has(id)) return false
+      if (!gone.has(id)) gone.set(id, !threadPosts(t, grouped.get(id) ?? [], archive).listable)
+      return gone.get(id) as boolean
     },
     postGone: (id) => { const p = posts.get(id); return !!p && !visible(p) },
     thread: (id) => threads.get(id),
@@ -96,9 +112,10 @@ const STRADDLE_MS = 120_000
 /** New listable threads (opening post present and visible) that the snapshot could not list: created
  * after it, or created just before it with an opening post that landed after it. */
 export function newThreads(delta: DeltaDocs, ctx: LiveContext): RawDoc[] {
+  const grouped = postsByThread(delta.posts)
   return delta.threads.filter((t) => {
     // The same rule the snapshot applies: the thread and its opening post are visible.
-    const view = threadPosts(t, delta.posts, ctx.archive)
+    const view = threadPosts(t, grouped.get(t.id) ?? [], ctx.archive)
     if (!view.listable || !view.opening) return false
     if (t.createdAt > ctx.snapshotAt) return true
     return t.createdAt > ctx.snapshotAt - STRADDLE_MS && view.opening.createdAt > ctx.snapshotAt
@@ -111,9 +128,10 @@ export function newPosts(delta: DeltaDocs, ctx: LiveContext): Array<{ post: RawD
   // The snapshot's rule: a post shows only in a listable thread (opening post present and visible).
   // The overlay loads each live thread's first posts, so a reply ("bump") can't revive a thread
   // whose opening post was hidden — however long ago — or that never had one.
+  const grouped = postsByThread(delta.posts)
   const listable = new Map<string, boolean>()
   const isListable = (t: RawDoc) => {
-    if (!listable.has(t.id)) listable.set(t.id, threadPosts(t, delta.posts, ctx.archive).listable)
+    if (!listable.has(t.id)) listable.set(t.id, threadPosts(t, grouped.get(t.id) ?? [], ctx.archive).listable)
     return listable.get(t.id) as boolean
   }
   const out: Array<{ post: RawDoc; thread: RawDoc }> = []
@@ -151,10 +169,12 @@ export function mergeForumThreads(
   includeNew = true,
 ): ThreadSummary[] {
   const summaries = new Map(base.map((s) => [s.id, { ...s }]))
+  const changes = deltaChanges(delta, ctx.archive)
   for (const t of delta.threads) {
     const cur = summaries.get(t.id)
     if (!cur) continue
-    if (isHidden(t) || threadForumId(t) !== forumId) { summaries.delete(t.id); continue }
+    // Hidden, moved away, or its opening post hidden or retracted since the snapshot.
+    if (changes.threadGone(t.id) || threadForumId(t) !== forumId) { summaries.delete(t.id); continue }
     cur.title = str(t, 'title') ?? cur.title
     cur.tags = threadTags(t)
     cur.sticky = t.p.sticky === true

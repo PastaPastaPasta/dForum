@@ -27,7 +27,7 @@ export function ForumIndex({ categories, forums, names, ctx }: {
   const seen = useSeen()
   const unread = (f: ForumView) => !!f.lastPost && isUnread(seen, f.lastPost.at, seen.forums[f.id])
 
-  const changes = deltaChanges(live)
+  const changes = deltaChanges(live, ctx.archive)
   const withLive = (f: ForumView): ForumView => {
     let threads = f.threadCount
     let posts = f.postCount

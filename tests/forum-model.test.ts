@@ -166,6 +166,17 @@ describe('live delta', () => {
     expect(newPosts({ threads: [empty], posts: [reply2] }, ctx)).toHaveLength(0)
     expect(forumActivity({ threads: [scam, empty], posts: [scamOpen, bump, reply2] }, ctx).get('F')).toBeUndefined()
   })
+  it('keeps a thread whose hidden post is a reply, not the opening post (archive threads included)', () => {
+    const arch = doc(ARCH, 100, { title: 'Imported', forumId: 'F', origCreatedAt: 1 })
+    const first = doc(ARCH, 101, { threadId: arch.id, forumId: 'F', body: 'first', origCreatedAt: 1 })
+    const second = { ...doc(ARCH, 102, { threadId: arch.id, forumId: 'F', body: 'second', origCreatedAt: 2, modState: 1 }), moderatedAt: 1500 }
+    const c = deltaChanges({ threads: [arch], posts: [first, second], heads: [arch.id] }, { id: ARCH })
+    expect(c.threadGone(arch.id)).toBe(false)
+    const summary = { id: arch.id, forumId: 'F', title: 'Imported', tags: [], ownerId: ARCH, createdAt: 1, sticky: false, locked: false, replies: 1, reactions: 0, lastPostAt: 2, lastPostAuthorId: ARCH }
+    expect(mergeForumThreads([summary], 'F', { threads: [arch], posts: [first, second], heads: [arch.id] }, { snapshotAt, archive: { id: ARCH } })).toHaveLength(1)
+    const retractedOpen = { ...first, p: { ...first.p, retracted: true } }
+    expect(mergeForumThreads([summary], 'F', { threads: [arch], posts: [retractedOpen, second], heads: [arch.id] }, { snapshotAt, archive: { id: ARCH } })).toHaveLength(0)
+  })
   it('ignores live posts in hidden or unknown threads', () => {
     expect(newPosts({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [reply] }, ctx)).toHaveLength(0)
     expect(newPosts({ threads: [], posts: [reply] }, ctx)).toHaveLength(0)
@@ -189,7 +200,9 @@ describe('live delta', () => {
     expect(newThreads({ threads: [t], posts: [hiddenOpen, later] }, ctx)).toHaveLength(0)
     const retracted = { ...open, p: { ...open.p, retracted: true } }
     expect(newThreads({ threads: [t], posts: [retracted, later] }, ctx)).toHaveLength(0)
-    expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later] }).threadGone(t.id)).toBe(true)
+    expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later], heads: [t.id] }).threadGone(t.id)).toBe(true)
+    // Without the thread's first posts loaded, nothing is judged from partial data.
+    expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later] }).threadGone(t.id)).toBe(false)
     expect(newPosts({ threads: [t], posts: [hiddenOpen, later] }, ctx)).toHaveLength(0)
     // An older thread (in the snapshot) whose opening post was hidden since: a bump stays out.
     const old2 = doc('mallory', 900, { title: 'Scam', forumId: 'F' })
@@ -199,7 +212,7 @@ describe('live delta', () => {
   })
   it('reports moderation of documents the static index lists', () => {
     const hiddenPost = { ...reply, p: { ...reply.p, modState: 1 } }
-    const c = deltaChanges({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [hiddenPost] })
+    const c = deltaChanges({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [hiddenPost], heads: ['OLD'] })
     expect(c.threadGone('OLD')).toBe(true)
     expect(c.postGone(reply.id)).toBe(true)
     expect(c.threadGone('other')).toBe(false)

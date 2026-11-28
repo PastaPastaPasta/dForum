@@ -13,3 +13,14 @@ export function legacySmilies(text: string): string {
 export function withoutCode(md: string, fn: (text: string) => string): string {
   return md.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, i) => (i % 2 ? part : fn(part))).join('')
 }
+
+type MdNode = { type: string; value?: string; children?: MdNode[] }
+
+/** remark plugin: legacy smiley codes in text nodes only (code of every kind keeps its text). */
+export function remarkLegacySmilies() {
+  const walk = (node: MdNode) => {
+    if (node.type === 'text' && node.value) node.value = legacySmilies(node.value)
+    else if (node.type !== 'code' && node.type !== 'inlineCode') node.children?.forEach(walk)
+  }
+  return (tree: MdNode) => walk(tree)
+}

@@ -357,7 +357,7 @@ function securityLevelNumber(level: string): number {
   }
 }
 
-// The last nonce this tab used per identity. A node that hasn't seen our previous write yet would
+// The last nonce this tab handed out per identity. A node that hasn't seen our previous write yet would
 // hand back the same nonce (40204 "nonce already present at tip"); never go backwards.
 const usedNonce = new Map<string, bigint>()
 
@@ -366,7 +366,12 @@ async function freshNonce(identityId: string): Promise<bigint> {
   const raw = (await sdk.wasm.getIdentityContractNonce(identityId, CONTRACT_ID)) ?? 0n
   const chainNext = (raw & SEQUENCE_MASK) + 1n
   const mine = (usedNonce.get(identityId) ?? 0n) + 1n
-  return chainNext > mine ? chainNext : mine
+  const next = chainNext > mine ? chainNext : mine
+  // Reserved now, so writes running at the same time in this tab (reacting to two posts quickly)
+  // take different nonces. A write that fails leaves a gap, which Platform tolerates; the landed
+  // check keeps the stale-nonce retry from duplicating a write that went through.
+  usedNonce.set(identityId, next)
+  return next
 }
 
 /** Records a nonce once its write went through, so the next write in this tab starts above it. */
@@ -381,6 +386,11 @@ async function withNonceRetry<T>(identityId: string, write: () => Promise<T>): P
     return await write()
   } catch (e) {
     const text = String((e as { message?: unknown })?.message ?? e)
+    // Too many failed writes left the reserved nonce too far ahead: start again from the chain's.
+    if (/too far in (the )?future/i.test(text)) {
+      usedNonce.delete(identityId)
+      return write()
+    }
     if (!STALE_NONCE.test(text)) throw e
     // The message prints the chain's nonce as "24" or "Some(24)".
     const current = text.match(/current identity nonce is (?:Some\()?(\d+)/)?.[1]

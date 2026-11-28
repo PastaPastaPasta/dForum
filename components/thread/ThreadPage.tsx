@@ -120,8 +120,12 @@ export function ThreadPage(props: ThreadPageProps) {
   }, [thread, props.thread, props.postIndex, fetched.posts, livePosts, archive, page, posts])
   // Threads newer than the static index render on the 404 page; give the tab the thread's title.
   const liveTitle = !props.thread && thread && listable ? str(thread, 'title') : undefined
+  const siteSuffix = useRef<string | null>(null)
   useEffect(() => {
-    if (liveTitle) document.title = document.title.replace(/^[^|]*\|/, () => `${liveTitle} |`)
+    if (!liveTitle) return
+    // The site name is whatever follows the last " | " of the title this page started with.
+    siteSuffix.current ??= document.title.split(' | ').pop() ?? ''
+    document.title = siteSuffix.current ? `${liveTitle} | ${siteSuffix.current}` : liveTitle
   }, [liveTitle])
   const newElsewhere = page < pages ? livePosts.filter((p) => p.createdAt > snapshotAt && !props.postIndex.includes(p.id.slice(0, ID_PREFIX))).length : 0
 

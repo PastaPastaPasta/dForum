@@ -403,7 +403,7 @@ function Members({ act, busy, moderatorId, memberPrefill }: PanelProps) {
   return (
     <section className="space-y-4">
       <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (valid) void load() }}>
-        <input className="field max-w-xl flex-1 font-mono text-sm" placeholder="Member identity id" value={target} onChange={(e) => { setTarget(e.target.value); setStatus(null) }} aria-label="Member identity id" />
+        <input className="field max-w-xl flex-1 font-mono text-sm" placeholder="Member identity id" value={target} onChange={(e) => { statusRequest.current++; setTarget(e.target.value); setStatus(null) }} aria-label="Member identity id" />
         <button className="btn btn-primary" disabled={!valid}>Look up</button>
       </form>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}

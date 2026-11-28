@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { PostImage } from './PostImage'
 import { Quote } from './Quote'
-import { legacySmilies, withoutCode } from '@/lib/import/smilies'
+import { remarkLegacySmilies } from '@/lib/import/smilies'
 
 // Relative paths only when not protocol-relative (`//host` or `/\\host` would leave the site).
 const SAFE = /^(https?:|mailto:|#|\/(?![/\\]))/i
@@ -23,7 +23,7 @@ export function Markdown({ source, className = 'post-body', attachmentsFrom }: {
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkBreaks, remarkLegacySmilies]}
         skipHtml
         urlTransform={(url) => (SAFE.test(url.trim()) ? url : '')}
         components={{
@@ -53,7 +53,7 @@ export function Markdown({ source, className = 'post-body', attachmentsFrom }: {
             ),
         }}
       >
-        {withoutCode(source, legacySmilies)}
+        {source}
       </ReactMarkdown>
     </div>
   )

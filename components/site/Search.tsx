@@ -79,7 +79,7 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
   }, [q, forum])
 
   // The index is up to an hour old: drop threads moderators have hidden since.
-  const changes = deltaChanges(live)
+  const changes = deltaChanges(live, ctx.archive)
   const shownHits = hits?.filter((h) => !changes.threadGone(h.url.match(/\/t\/([^/]+)\//)?.[1] ?? '')) ?? null
   const needle = q.trim().toLowerCase()
   const fresh = needle ? newThreads(live, toLiveContext(ctx)).filter((t) => (str(t, 'title') ?? '').toLowerCase().includes(needle)) : []

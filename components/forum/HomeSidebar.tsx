@@ -23,7 +23,7 @@ export function HomeSidebar({ site, names, ctx }: { site: SiteFile; names: Recor
     authorId: p.ownerId, archiveAuthor: archiveAuthor(p, archive), forumId: str(thread, 'forumId') ?? '', excerpt: excerpt(postBody(p), 140),
   }))
   // Static entries drop out as soon as the live delta shows their thread or post hidden.
-  const changes = deltaChanges(live)
+  const changes = deltaChanges(live, archive)
   const still = site.latestPosts
     .filter((l) => !changes.threadGone(l.threadId) && !changes.postGone(l.postId))
     .map((l) => { const t = changes.thread(l.threadId); return t ? { ...l, threadTitle: str(t, 'title') ?? l.threadTitle } : l })

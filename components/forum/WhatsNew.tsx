@@ -16,7 +16,7 @@ export function WhatsNew({ threads, ctx, names, forumTitles }: {
   const live = useLive(ctx.snapshotAt)
   const lc = toLiveContext(ctx)
   const archive = ctx.archive
-  const changes = deltaChanges(live)
+  const changes = deltaChanges(live, ctx.archive)
   const byId = new Map<string, ThreadSummary>()
   for (const t of threads) {
     if (changes.threadGone(t.id)) continue

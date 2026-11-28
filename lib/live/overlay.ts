@@ -21,11 +21,13 @@ export interface LiveState {
   posts: RawDoc[]
   reactions: RawDoc[]
   profiles: RawDoc[]
+  /** Threads whose first posts are loaded into `posts`. */
+  heads: string[]
   updatedAt: number
   truncated: boolean
 }
 
-const EMPTY: LiveState = { status: 'idle', threads: [], posts: [], reactions: [], profiles: [], updatedAt: 0, truncated: false }
+const EMPTY: LiveState = { status: 'idle', threads: [], posts: [], reactions: [], profiles: [], heads: [], updatedAt: 0, truncated: false }
 let state: LiveState = EMPTY
 let since = 0
 let timer: ReturnType<typeof setInterval> | null = null
@@ -116,6 +118,7 @@ export function refreshLive(): Promise<void> {
         status: 'live',
         threads: allThreads,
         posts: mergeDocs(state.posts, [...posts.docs, ...heads]),
+        heads: [...headsFetched, ...needHeads.slice(0, HEADS_PER_POLL)],
         reactions: mergeDocs(state.reactions, reactions.docs),
         profiles: mergeDocs(state.profiles, profiles.docs),
         truncated: threads.truncated || posts.truncated || reactions.truncated || profiles.truncated,

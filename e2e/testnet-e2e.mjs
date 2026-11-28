@@ -21,12 +21,17 @@ let shotN = 0
 const browser = await chromium.connectOverCDP(CDP)
 async function persona(name) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } })
+  // Confirms answer yes in the page itself: another client attached to this shared browser can
+  // otherwise dismiss a native dialog before Playwright accepts it.
+  await ctx.addInitScript(() => {
+    window.confirm = (message) => { console.info(`confirm: ${message}`); return true }
+  })
   const page = await ctx.newPage()
   page.on('pageerror', (e) => {
     log(name, 'pageerror', e.message.slice(0, 200))
     if (/#418|#423|#425|Hydration/i.test(e.message)) hydrationErrors.push(`${name} ${page.url()}`)
   })
-  page.on('dialog', (d) => { log(name, 'confirm:', d.message().slice(0, 120)); void d.accept() })
+  page.on('dialog', (d) => { log(name, 'confirm:', d.message().slice(0, 120)); d.accept().catch(() => undefined) })
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) log(name, 'console', m.text().slice(0, 200)) })
   return { name, ctx, page }
 }

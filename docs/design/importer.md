@@ -38,6 +38,8 @@ node scripts/import/xenforo.mjs trust --until now
 
 **Backfilling again later.** The crawl, ledger and structure map are all resumable, so a later backfill (new threads on dash.org/forum, or forums skipped the first time) is the same sequence: `crawl --refresh` (refetches the node index, forum lists and the newest page of each known thread; older pages come from the cache), `trust --until open` (refused if the archivist wrote anything while the window was closed), `structure` (existing categories and forums are found by slug and reused), `load` (the ledger and the `byOrigin` index skip everything already written), then `trust --until now`. Forums already archived refuse new posts at consensus; to add history to one, the owner clears `archived` first and runs `archive` again afterwards.
 
+`crawl --refresh` in API mode refetches a thread when its reply count grew; a reply deleted on XenForo plus a new one leaves the count unchanged and the thread is skipped, and title, sticky or lock changes aren't refetched. Use a fresh crawl directory for a full re-sync.
+
 Two things to know while a backfill runs: a thread a moderator locks before its import finishes refuses the rest of its posts (consensus), so `load` stops there; and XenForo's own lock state isn't carried over (lock imported threads from the console if needed).
 
 The structure map is kept per contract (`structure-map-<contract>.json`), as is the ledger, so registering a new contract starts a clean import.
