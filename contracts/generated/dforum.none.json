@@ -292,7 +292,11 @@
       "canBeDeleted": false,
       "documentsMutable": true,
       "immutable": [
-        "forumId"
+        "forumId",
+        "origId",
+        "origAuthor",
+        "origAuthorId",
+        "origCreatedAt"
       ],
       "properties": {
         "forumId": {
@@ -413,7 +417,11 @@
       "immutable": [
         "threadId",
         "forumId",
-        "replyToId"
+        "replyToId",
+        "origId",
+        "origAuthor",
+        "origAuthorId",
+        "origCreatedAt"
       ],
       "properties": {
         "threadId": {
@@ -586,6 +594,14 @@
           "position": 3
         }
       },
+      "propertyConstraints": {
+        "notSelf": {
+          "notEqual": [
+            "postOwnerId",
+            "$ownerId"
+          ]
+        }
+      },
       "required": [
         "$createdAt",
         "$updatedAt",
@@ -712,6 +728,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 40,
+          "pattern": "^[^\\x00-\\x1F\\x7F\\x{200B}-\\x{200F}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}\\x{FEFF}]+$",
           "position": 0
         },
         "bio": {

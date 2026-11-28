@@ -52,5 +52,8 @@ The network refuses moderation of documents owned by the moderator, the owner or
 
 - **Banned users' old content stays visible.** A ban stops new writes but does not hide old content; moderators hide what needs hiding. The SDK build in use cannot list the banlist.
 - **Reports are public on chain,** including the reporter. The report form says so.
-- **Locks and archived forums are enforced at consensus** (contract v3): a post must refer to a thread whose `locked` is not true, and threads and posts must refer to a forum whose `archived` is not true. Edits of existing posts in a locked thread are refused only by the app.
+- **Locks and archived forums are enforced at consensus.** New posts and reactions must refer to a thread whose `locked` is not true, and threads and posts to a forum whose `archived` is not true. Since contract v4 a rule also reads the thread on every post and reaction edit, so a lock freezes existing posts (edits and author deletes) and reaction toggles, and a locked thread's title and tags become immutable.
+- **Moves don't change where consensus checks a reply.** A post's `forumId` is the thread's original forum (a moderator-only field can't carry a reference), so the console doesn't offer archived forums as move targets, and the app closes replies when either the original or the current forum is archived.
+- **Hidden threads still accept replies at consensus,** but readers show neither the replies nor the thread; only staff see a hidden thread's title. Lock a thread as well if replies should stop.
+- **Profiles are hidden, never deleted.** A moderator delete would free the member's unique profile slot; the console only hides.
 - **Moderators reach the console from any post.** Signed-in staff see a Moderate action that opens the console with the post already looked up.

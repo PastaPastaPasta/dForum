@@ -10,16 +10,16 @@
   },
   "contracts": {
     "team": {
-      "contractId": "9e34k5BMLbEwmTz69aiihHec8VMZy7RuE4BmR935LoWC",
+      "contractId": "xYdwEvUCcKiPfhZMpjvUptReYR34DDgGNP9Ti4AFtHq",
       "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
       "mode": "team",
       "version": 1,
-      "identityNonce": "3",
-      "registeredAt": "2026-11-28T09:37:51.223Z",
-      "costCredits": "84786346210",
-      "sizeBytes": 8965,
-      "transitionSha256": "bc8706f4b36e41721214f403b975137aabd81d8b1ee3ab8330b4ce4c7b3a4ed7",
-      "registrationTxHash": "bc8706f4b36e41721214f403b975137aabd81d8b1ee3ab8330b4ce4c7b3a4ed7"
+      "identityNonce": "4",
+      "registeredAt": "2026-11-28T10:25:23.309Z",
+      "costCredits": "84815577790",
+      "sizeBytes": 9618,
+      "transitionSha256": "3a2e1c03ff56c09e0d51b3b5e14700edc74a579b84936df16b1cca4334f28981",
+      "registrationTxHash": "3a2e1c03ff56c09e0d51b3b5e14700edc74a579b84936df16b1cca4334f28981"
     }
   },
   "retired": {
@@ -48,6 +48,17 @@
       "sizeBytes": 9198,
       "registrationTxHash": "1867906166cf6f0810e1420cb59d249f5dc3b33d00eaf0d51f7c4e12a16ae832",
       "note": "v2 schema; superseded by v3 (consensus-enforced locks and archived forums)",
+      "retiredAt": "2026-11-28"
+    },
+    "teamV3": {
+      "contractId": "9e34k5BMLbEwmTz69aiihHec8VMZy7RuE4BmR935LoWC",
+      "ownerId": "6Dftf346svGz5btcf7NpQ3iPurku4JTit4kzWX7P7VwM",
+      "mode": "team",
+      "version": 2,
+      "identityNonce": "3",
+      "registeredAt": "2026-11-28T09:38:00Z",
+      "costCredits": "84786346210",
+      "note": "v3 schema; superseded by v4 (locks freeze edits and reactions, archive provenance immutable, no self-reactions)",
       "retiredAt": "2026-11-28"
     }
   },

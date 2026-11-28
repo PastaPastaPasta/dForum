@@ -339,12 +339,36 @@
       "canBeDeleted": false,
       "documentsMutable": true,
       "immutable": [
-        "forumId"
+        "forumId",
+        "origId",
+        "origAuthor",
+        "origAuthorId",
+        "origCreatedAt",
+        {
+          "property": "title",
+          "when": {
+            "equal": [
+              "$old.locked",
+              1
+            ]
+          }
+        },
+        {
+          "property": "tags",
+          "when": {
+            "equal": [
+              "$old.locked",
+              1
+            ]
+          }
+        }
       ],
       "moderatorAbilities": {
         "delete": true,
         "deleteKeepsFields": [
-          "forumId"
+          "forumId",
+          "locked",
+          "origId"
         ],
         "changeFields": [
           "sticky",
@@ -513,19 +537,42 @@
       "immutable": [
         "threadId",
         "forumId",
-        "replyToId"
+        "replyToId",
+        "origId",
+        "origAuthor",
+        "origAuthorId",
+        "origCreatedAt"
       ],
       "moderatorAbilities": {
         "delete": true,
         "deleteKeepsFields": [
           "threadId",
-          "forumId"
+          "forumId",
+          "origId"
         ],
         "changeFields": [
           "modState",
           "modNote",
           "modFlags"
         ]
+      },
+      "propertyConstraints": {
+        "threadOpen": {
+          "equal": [
+            {
+              "ifAbsent": [
+                {
+                  "referenced": [
+                    "threadId",
+                    "locked"
+                  ]
+                },
+                0
+              ]
+            },
+            0
+          ]
+        }
       },
       "properties": {
         "threadId": {
@@ -721,6 +768,17 @@
         },
         "threadId": {
           "type": "identifier",
+          "refersTo": {
+            "type": "moderatedDocument",
+            "documentType": "thread",
+            "where": {
+              "locked": {
+                "notEqual": {
+                  "const": true
+                }
+              }
+            }
+          },
           "position": 2
         },
         "kind": {
@@ -728,6 +786,30 @@
           "minimum": 0,
           "maximum": 63,
           "position": 3
+        }
+      },
+      "propertyConstraints": {
+        "notSelf": {
+          "notEqual": [
+            "postOwnerId",
+            "$ownerId"
+          ]
+        },
+        "threadOpen": {
+          "equal": [
+            {
+              "ifAbsent": [
+                {
+                  "referenced": [
+                    "threadId",
+                    "locked"
+                  ]
+                },
+                0
+              ]
+            },
+            0
+          ]
         }
       },
       "required": [
@@ -892,6 +974,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 40,
+          "pattern": "^[^\\x00-\\x1F\\x7F\\x{200B}-\\x{200F}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}\\x{FEFF}]+$",
           "position": 0
         },
         "bio": {

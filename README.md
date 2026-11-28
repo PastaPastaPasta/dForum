@@ -7,7 +7,7 @@ A community forum stored entirely on Dash Platform: threads, posts, reactions, r
 ## How it fits together
 
 ```
-Dash Platform (contract v3) ──hourly──> scripts/snapshot.mjs ──> data/*.json ──> next build ──> static pages
+Dash Platform (contract v4) ──hourly──> scripts/snapshot.mjs ──> data/*.json ──> next build ──> static pages
         │                                                                     + sitemap, RSS, llms.txt, JSON API, search index
         └──live (browser)──> changed-since-snapshot queries ──> merged into every page; writes signed in the tab
 ```

@@ -546,6 +546,28 @@ async function trust() {
         throw new Error(`the archivist wrote ${type}s after the trust window closed (${new Date(j.archiveTrustUntil).toISOString()}); reopening would trust them. Review and remove them first.`);
       }
     }
+    // Edits made while the window was closed (an imported post rewritten with a leaked key) would be
+    // re-trusted too. No index pairs owner and $updatedAt, so walk byUpdated from the cutoff.
+    for (const type of ['thread', 'post']) {
+      if (!archivist || !j.archiveTrustUntil) break;
+      let from = j.archiveTrustUntil;
+      let startAfter;
+      for (;;) {
+        const res = await ctx.sdk.documents.query({
+          dataContractId: ctx.contractId, documentTypeName: type,
+          where: [['$updatedAt', '>', from]], orderBy: [['$updatedAt', 'asc']], limit: 100, ...(startAfter ? { startAfter } : {}),
+        });
+        let last;
+        for (const [id, d] of res) {
+          last = String(id);
+          if (d && d.toJSON().$ownerId === archivist) {
+            throw new Error(`archivist ${type} ${id} was edited after the trust window closed; reopening would trust the edit. Review it first.`);
+          }
+        }
+        if (res.size < 100 || !last) break;
+        startAfter = last;
+      }
+    }
   }
   const props = Object.fromEntries(Object.entries(j).filter(([k, v]) => !k.startsWith('$') && v !== null && k !== 'archiveTrustUntil'));
   if (at !== undefined) props.archiveTrustUntil = at;

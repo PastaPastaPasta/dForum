@@ -75,4 +75,4 @@ for (const t of seed.team ?? []) {
 }
 console.log('seed done');
 }
-main().then(() => process.exit(0), (e) => { console.error('seed failed:', e?.message, e?.code ?? '', e?.kind ?? ''); process.exit(1); });
+main().then(() => process.exit(0), (e) => { console.error('seed failed:', redactWif(String(e?.message ?? e)), e?.code ?? '', e?.kind ?? ''); process.exit(1); });

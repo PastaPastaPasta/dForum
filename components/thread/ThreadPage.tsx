@@ -199,6 +199,17 @@ export function ThreadPage(props: ThreadPageProps) {
     )
   }
 
+  // A hidden thread's title, tags and author are hidden too: only staff see what was moderated.
+  const viewerIsStaff = !!session && !!props.ctx?.staff.includes(session.identityId)
+  if (isHidden(thread) && !viewerIsStaff) {
+    return (
+      <div className="panel mx-auto max-w-read p-8 text-center">
+        <h1 className="text-xl font-semibold">This thread was hidden by moderators</h1>
+        <p className="mt-2 text-ink-2">It is no longer shown on the forum. <Link className="link" href="/">Back to the forums</Link></p>
+      </div>
+    )
+  }
+
   let crumbs = props.crumbs
   let forumArchived = props.forumArchived
   if (!props.thread && props.forums) {

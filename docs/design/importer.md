@@ -60,7 +60,7 @@ Speed-ups for a full mainnet migration:
 
 - Pipeline identity-contract nonces.
 - Run several archivist identities. This needs `archiveOwnerId` to become a list in a contract update, since new optional fields are allowed.
-- Import forum by forum, newest first, behind read-only `archived` forums until each forum is complete.
+- Import forum by forum, newest first, into forums that are still open, and archive each one once it is complete (consensus refuses every write to an archived forum, the archivist's included).
 
 ## Not imported
 

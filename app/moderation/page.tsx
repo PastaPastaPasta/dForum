@@ -147,7 +147,7 @@ function Reports({ act, busy }: PanelProps) {
   const [done, setDone] = useState<Record<string, { status: number; hidPost?: string }>>({})
   const load = useCallback(async () => {
     setFailed(false)
-    const r = await queryAll('report', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']] }, 30).catch(() => null)
+    const r = await queryAll('report', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']] }, 200).catch(() => null)
     if (!r) { setFailed(true); return }
     setReports(r.docs)
     setTruncated(r.truncated)

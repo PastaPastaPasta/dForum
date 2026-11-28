@@ -190,7 +190,8 @@ async function sync(sdk) {
   // `none` contracts have no moderation: no $moderatedAt indexes and no removal records.
   const moderated = !!contract.toJSON()?.config?.moderation;
   const cache = loadCache();
-  const stale = cache && snapshotAt - (cache.lastFullAt ?? 0) > FULL_EVERY_MS;
+  // A lastFullAt in the future (a tampered cache) counts as stale too.
+  const stale = cache && (snapshotAt - (cache.lastFullAt ?? 0) > FULL_EVERY_MS || (cache.lastFullAt ?? 0) > snapshotAt);
   const full = !cache || stale;
   const state = full
     ? { version: 2, contractId: CONTRACT_ID, watermark: 0, lastFullAt: snapshotAt, docs: { thread: {}, post: {}, reaction: {}, profile: {} } }

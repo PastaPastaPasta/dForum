@@ -57,6 +57,39 @@ async function replyFromNode(index, threadId, body) {
   }
 }
 
+/** Replaces persona `index`'s post in `threadId` whose body contains `match`. Returns the refusal,
+ * or null when the edit was accepted. */
+async function editFromNode(index, threadId, match, body) {
+  const sdkMod = await import('@dashevo/evo-sdk')
+  const record = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'))
+  const contractId = record.contracts.team.contractId
+  const identityId = record.personas.find((p) => p.index === index).id
+  const k = deriveIdentityKeys(index).find((x) => x.securityLevel === 'HIGH' && x.purpose === 'AUTHENTICATION')
+  const sdk = sdkMod.EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } })
+  await sdk.connect()
+  const res = await sdk.documents.query({ dataContractId: contractId, documentTypeName: 'post', where: [['threadId', '==', threadId]], orderBy: [['$createdAt', 'asc']], limit: 50 })
+  const post = [...res.values()].filter(Boolean).map((d) => d.toJSON()).find((j) => j.$ownerId === identityId && String(j.body).includes(match))
+  if (!post) throw new Error(`no post matching "${match}"`)
+  const identity = await sdk.identities.fetch(identityId)
+  const signer = new sdkMod.IdentitySigner()
+  signer.addKeyFromWif(k.wif)
+  const document = new sdkMod.Document({
+    properties: { threadId, forumId: post.forumId, body }, documentTypeName: 'post', dataContractId: contractId, ownerId: identityId,
+    revision: BigInt(post.$revision) + 1n, id: post.$id,
+  })
+  try {
+    await sdk.documents.replace({ document, identityKey: identity.getPublicKeyById(k.keyIndex), signer })
+    // A lagging node may answer with the old revision: look a few times before calling it refused.
+    for (let i = 0; i < 5; i++) {
+      if ((await sdk.documents.get(contractId, 'post', post.$id)).toJSON().body === body) return null
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+    return 'edit was not applied'
+  } catch (e) {
+    return String(e?.message ?? e).replace(/[59c][1-9A-HJ-NP-Za-km-z]{50,51}/g, '[redacted]').replace(/^.*last error: /s, '')
+  }
+}
+
 async function shot(p, label) {
   const file = `${SHOTS}/${String(++shotN).padStart(2, '0')}-${p.name}-${label}.png`
   await p.page.screenshot({ path: file, fullPage: true })
@@ -86,6 +119,24 @@ mallory = await persona('mallory')
 let threadUrl, threadId, spamThreadId
 
 try {
+  // A previous run ends with mallory banned; lift it so this run starts from the same fixture.
+  await step('fixture: mallory is not banned', async () => {
+    const sdkMod = await import('@dashevo/evo-sdk')
+    const record = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'))
+    const carolId = record.personas.find((p) => p.index === 3).id
+    const malloryId = record.personas.find((p) => p.index === 4).id
+    const k = deriveIdentityKeys(3).find((x) => x.securityLevel === 'CRITICAL' && x.purpose === 'AUTHENTICATION')
+    const sdk = sdkMod.EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } })
+    await sdk.connect()
+    const signer = new sdkMod.IdentitySigner()
+    signer.addKeyFromWif(k.wif)
+    try {
+      await sdk.contracts.unbanUser({ identity: await sdk.identities.fetch(carolId), contractId: record.contracts.team.contractId, identityId: malloryId, signer })
+      return { unbanned: true }
+    } catch (e) {
+      return { unbanned: false, note: String(e?.message ?? e).replace(/[59c][1-9A-HJ-NP-Za-km-z]{50,51}/g, '[redacted]').slice(-160) }
+    }
+  })
   await step('bob logs in with Dash (App Connect v2 via test wallet)', () => login(bob.page, 92, { shots: `${SHOTS}/00-bob` }))
   await step('bob saves a profile', async () => {
     await bob.page.goto(`${SITE}/settings/`)
@@ -241,7 +292,10 @@ try {
     const refusal = await replyFromNode(2, threadId, 'Writing past the lock from a script.')
     if (!refusal) throw new Error('a reply to a locked thread was accepted')
     if (!/referenced document's locked/.test(refusal)) throw new Error(`refused for another reason: ${refusal}`)
-    return { refusal: refusal.slice(0, 300) }
+    // v4: the lock also freezes existing posts. bob's earlier reply can't be edited any more.
+    const editRefusal = await editFromNode(2, threadId, 'A first reply', 'Edited after the lock.')
+    if (!editRefusal) throw new Error('an edit in a locked thread was accepted')
+    return { refusal: refusal.slice(0, 300), editRefusal: editRefusal.slice(0, 300) }
   })
   await step('pages hydrate without errors', async () => {
     if (hydrationErrors.length) throw new Error(`hydration failed: ${[...new Set(hydrationErrors)].join(', ')}`)

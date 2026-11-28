@@ -1,6 +1,6 @@
-# dForum design (v3)
+# dForum design (v4)
 
-Status as of 2026-11-28. Contract v3 is live on testnet as `9e34k5BMLbEwmTz69aiihHec8VMZy7RuE4BmR935LoWC`; v2 (`85NE…KDEX`) and v1 (`ozZN…ADM16`) are retired. The decisions below were reviewed with the Opus design advisor.
+Status as of 2026-11-28. Contract v4 is live on testnet as `xYdwEvUCcKiPfhZMpjvUptReYR34DDgGNP9Ti4AFtHq`; v3 (`9e34…LoWC`), v2 (`85NE…KDEX`) and v1 (`ozZN…ADM16`) are retired. The decisions below were reviewed with the Opus design advisor.
 
 dForum is a forum whose content, identities and moderation all live on Dash Platform. The site is a static index rebuilt from the chain every hour, with a live layer in the browser. Its baseline is dash.org/forum (XenForo 2): categories, forums, sub-forums, threads, posts, likes, pins, locks, moves, search, profiles, member lists, alerts, moderation and RSS.
 

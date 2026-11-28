@@ -6,7 +6,7 @@
  * - Effective date = origCreatedAt for trusted archive documents, else $createdAt.
  * - Opening post = earliest post (effective date, then $id bytes) owned by the thread owner.
  *   A thread is listed only when its opening post exists, is visible and is not retracted.
- * - Hidden = modState set. Locked (moderator `locked`) threads refuse new posts at consensus.
+ * - Hidden = modState set. Locked (moderator `locked`) threads refuse new posts, edits and reactions at consensus (v4).
  * - A moderator move (movedToForumId) re-homes a thread; forumId stays as written.
  */
 import type { CategoryView, ForumView, LastPost, RawDoc, ReactionCounts, ThreadSummary } from './types.ts'
@@ -68,7 +68,10 @@ export function archiveRef(settings: { archiveOwnerId?: string; archiveTrustUnti
 export function isArchive(doc: RawDoc, archiveOwnerId?: ArchiveRef): boolean {
   const id = archiveId(archiveOwnerId)
   const until = typeof archiveOwnerId === 'object' ? archiveOwnerId.until : undefined
-  return !!id && doc.ownerId === id && num(doc, 'origCreatedAt') !== undefined && (until === undefined || doc.createdAt <= until)
+  // Both dates: a document edited after the window closed (a leaked archivist key) loses its trust.
+  // Moderator changes don't move $updatedAt, so hiding an imported post keeps it trusted.
+  return !!id && doc.ownerId === id && num(doc, 'origCreatedAt') !== undefined
+    && (until === undefined || (doc.createdAt <= until && doc.updatedAt <= until))
 }
 
 export function effectiveAt(doc: RawDoc, archiveOwnerId?: ArchiveRef): number {
@@ -105,7 +108,7 @@ export function byEffective(archiveOwnerId?: ArchiveRef) {
 
 export interface ThreadPostsView {
   opening: RawDoc | null
-  /** Opening post first, then the replies that count (before-opening and after-lock dropped). */
+  /** Opening post first, then the replies that count (posts written before the opening post are dropped). */
   posts: RawDoc[]
   listable: boolean
 }

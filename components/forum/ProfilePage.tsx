@@ -52,8 +52,8 @@ export function ProfilePage({ id, file, role, snapshotAt, forumTitles }: {
           </div>
           <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2">
             {member.joinedAt > 0 && <span>Joined {joined.format(member.joinedAt)}</span>}
-            {member.location && <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{member.location}</span>}
-            {website && <a className="flex items-center gap-1 link" href={website} rel="nofollow ugc noopener" target="_blank"><Globe className="h-3.5 w-3.5" />{website.replace(/^https?:\/\//, '').slice(0, 40)}</a>}
+            {member.location && !member.hidden && <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{member.location}</span>}
+            {website && !member.hidden && <a className="flex items-center gap-1 link" href={website} rel="nofollow ugc noopener" target="_blank"><Globe className="h-3.5 w-3.5" />{website.replace(/^https?:\/\//, '').slice(0, 40)}</a>}
           </p>
           {member.bio && !member.hidden && <Markdown source={member.bio} className="post-body max-w-read !text-base" />}
           <p className="text-xs text-ink-2">Dash identity <span className="font-mono break-all">{id}</span></p>

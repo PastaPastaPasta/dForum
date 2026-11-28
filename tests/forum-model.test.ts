@@ -40,6 +40,10 @@ describe('archive trust window', () => {
     expect(isArchive(after, ref)).toBe(false)
     expect(effectiveAt(after, ref)).toBe(3_000)
     expect(isArchive(after, { id: ARCH })).toBe(true)
+    const rewritten = { ...before, updatedAt: 3_000 }
+    expect(isArchive(rewritten, ref)).toBe(false)
+    const moderated = { ...before, moderatedAt: 3_000, p: { ...before.p, modState: 1 } }
+    expect(isArchive(moderated, ref)).toBe(true)
   })
   it('closes replies in locked threads and in threads whose original or current forum is archived', () => {
     const ctx = { archivedForums: new Set(['ARCHIVED']) }

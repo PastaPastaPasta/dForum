@@ -2,7 +2,7 @@
 
 Reference: dash.org/forum runs XenForo 2, with 18,226 threads, 180,544 messages and 9,845 members at its last public snapshot.
 
-| dash.org/forum | dForum (contract v3) | notes |
+| dash.org/forum | dForum (contract v4) | notes |
 | --- | --- | --- |
 | Categories, forums, sub-forums, link nodes | ✅ categories, forums, sub-forums (`parentForumId`), archived (read-only) forums | Link nodes are not imported |
 | Forum index with counts and last post | ✅ rolled up across sub-forums, updated live | |

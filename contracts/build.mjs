@@ -101,6 +101,16 @@ const THREAD_ID = (moderated) => ({
 });
 const FORUM_REF_REQUIRED = ['$createdAt', '$updatedAt', 'forumId', 'title'];
 
+// Archive provenance can't change after creation, so closing the trust window (or a leaked archivist
+// key) can't rewrite who wrote an imported post or when.
+const ARCHIVE_IMMUTABLE = ['origId', 'origAuthor', 'origAuthorId', 'origCreatedAt'];
+
+// A reference is re-checked on replace only when a rule reads through it. This rule makes every
+// create and every edit read the thread, so a lock freezes existing posts and reactions too.
+// (Booleans read as 1/0 in rules; a moderator-deleted thread keeps `locked`.)
+const THREAD_OPEN = { threadOpen: { equal: [{ ifAbsent: [{ referenced: ['threadId', 'locked'] }, 0] }, 0] } };
+const WHEN_LOCKED = { equal: ['$old.locked', 1] };
+
 // ---- document types ----------------------------------------------------------
 
 function forumSettingsType() {
@@ -244,9 +254,10 @@ function threadType(mode) {
     type: 'object',
     canBeDeleted: false,
     documentsMutable: true,
-    immutable: ['forumId'],
+    // A locked thread's title and tags are frozen along with its posts.
+    immutable: ['forumId', ...ARCHIVE_IMMUTABLE, ...(moderated ? [{ property: 'title', when: WHEN_LOCKED }, { property: 'tags', when: WHEN_LOCKED }] : [])],
     ...(moderated
-      ? { moderatorAbilities: { delete: true, deleteKeepsFields: ['forumId'], changeFields: ['sticky', 'locked', 'modState', 'modNote', 'movedToForumId', 'modFlags'] } }
+      ? { moderatorAbilities: { delete: true, deleteKeepsFields: ['forumId', 'locked', 'origId'], changeFields: ['sticky', 'locked', 'modState', 'modNote', 'movedToForumId', 'modFlags'] } }
       : {}),
     properties: props,
     required: FORUM_REF_REQUIRED,
@@ -295,9 +306,13 @@ function postType(mode) {
     type: 'object',
     canBeDeleted: false,
     documentsMutable: true,
-    immutable: ['threadId', 'forumId', 'replyToId'],
+    immutable: ['threadId', 'forumId', 'replyToId', ...ARCHIVE_IMMUTABLE],
     ...(moderated
-      ? { moderatorAbilities: { delete: true, deleteKeepsFields: ['threadId', 'forumId'], changeFields: ['modState', 'modNote', 'modFlags'] } }
+      ? {
+        // origId survives a moderator delete so a re-run importer can tell a removed post from a missing one.
+        moderatorAbilities: { delete: true, deleteKeepsFields: ['threadId', 'forumId', 'origId'], changeFields: ['modState', 'modNote', 'modFlags'] },
+        propertyConstraints: THREAD_OPEN,
+      }
       : {}),
     properties: props,
     required: ['$createdAt', '$updatedAt', 'threadId', 'forumId', 'body'],
@@ -308,6 +323,7 @@ function postType(mode) {
 
 function reactionType(mode) {
   let positionCursor = 0;
+  const moderated = mode !== 'none';
   return {
     type: 'object',
     // Un-reacting replaces kind with 0 instead of deleting, so every change moves $updatedAt and
@@ -327,9 +343,13 @@ function reactionType(mode) {
         position: positionCursor++,
       },
       postOwnerId: { type: 'identifier', position: positionCursor++ },
-      threadId: { type: 'identifier', position: positionCursor++ },
+      threadId: moderated
+        ? { ...THREAD_ID(true), refersTo: { type: 'moderatedDocument', documentType: 'thread', where: { locked: NOT_TRUE } }, position: positionCursor++ }
+        : { type: 'identifier', position: positionCursor++ },
       kind: int(0, 63, positionCursor++),
     },
+    // No reacting to your own posts; in moderated modes a lock also freezes reaction toggles.
+    propertyConstraints: { notSelf: { notEqual: ['postOwnerId', '$ownerId'] }, ...(moderated ? THREAD_OPEN : {}) },
     required: ['$createdAt', '$updatedAt', 'postId', 'postOwnerId', 'threadId', 'kind'],
     additionalProperties: false,
     indices: [
@@ -383,7 +403,8 @@ function profileType(mode) {
   let positionCursor = 0;
   const moderated = mode !== 'none';
   const props = {
-    displayName: string(1, 40, positionCursor++),
+    // No control, zero-width or bidi-override characters (they let a name impersonate another).
+    displayName: string(1, 40, positionCursor++, { pattern: '^[^\\x00-\\x1F\\x7F\\x{200B}-\\x{200F}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}\\x{FEFF}]+$' }),
     bio: string(0, 1000, positionCursor++),
     signature: string(0, 300, positionCursor++),
     avatarUrl: httpsUrl(300, positionCursor++),
@@ -527,7 +548,7 @@ export function buildContract({ moderation = 'team', deployer = null }) {
       ? 'dForum: a forum on Dash Platform, unmoderated (nothing removable at consensus).'
       : moderation === 'network'
         ? 'dForum: a forum on Dash Platform, elected moderation (testnet only, not for production).'
-        : 'dForum v3: a forum on Dash Platform, owned and moderated by the deployer team.',
+        : 'dForum v4: a forum on Dash Platform, owned and moderated by the deployer team.',
     config,
     documentSchemas,
     keywords: ['forum', 'community', 'dash-platform'],
