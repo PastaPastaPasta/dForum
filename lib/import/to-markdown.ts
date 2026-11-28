@@ -3,6 +3,7 @@
  * renders with skipHtml) and relies on remark-breaks, so a single newline is a line break.
  */
 import { parse, HTMLElement, TextNode, type Node } from 'node-html-parser'
+import { legacySmilies, withoutCode } from './smilies.ts'
 
 export interface MarkdownOptions {
   baseUrl: string
@@ -18,11 +19,6 @@ const SMILIES: Record<string, string> = {
   ':censored:': '🤬', ':cautious:': '🤨', ':sick': '🤢',
 }
 
-/** Codes from the forum's older software that survive as plain text in old posts. */
-const LEGACY_CODES: Record<string, string> = {
-  grin: '😁', tongue: '😛', smile: '🙂', wink: '😉', cry: '😢', mad: '😠', cool: '😎', eek: '😳', rolleyes: '🙄', confused: '😕', oops: '😳',
-}
-const LEGACY_RE = new RegExp(`(^|[\\s(])\\\\?:(${Object.keys(LEGACY_CODES).join('|')}):(?=$|[\\s.,!?)])`, 'gm')
 
 const BLOCK_TAGS = new Set(['div', 'p', 'section', 'article', 'center', 'figure', 'aside', 'header', 'footer'])
 
@@ -211,11 +207,8 @@ function renderNode(node: Node, o: MarkdownOptions, atLineStart: boolean): strin
 
 export function xfHtmlToMarkdown(html: string, opts: MarkdownOptions): string {
   const root = parse(html, { comment: false, blockTextElements: { script: false, style: false, noscript: false } })
-  return renderChildren(root, opts)
-    // Code (fenced or inline) keeps its text as written.
-    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
-    .map((part, i) => (i % 2 ? part : part.replace(LEGACY_RE, (_, pre: string, code: string) => `${pre}${LEGACY_CODES[code]}`)))
-    .join('')
+  // Code (fenced or inline) keeps its text as written.
+  return withoutCode(renderChildren(root, opts), legacySmilies)
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

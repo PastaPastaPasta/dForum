@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react'
 import type { ThreadFile } from '@/lib/forum/types'
 import { isHidden, isRetracted, str } from '@/lib/forum/model'
 import { useLive } from '@/lib/live/overlay'
-import { useWatches } from '@/lib/watch'
+import { unwatch, useWatches } from '@/lib/watch'
+import { POSTS_PER_PAGE } from '@/lib/forum/types'
 
 export function Watched({ snapshotAt }: { snapshotAt: number }) {
   const watches = useWatches()
@@ -35,9 +36,12 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
           {list.map((w) => {
             const unread = Math.max(0, w.total - w.seen)
             return (
-              <li key={w.id} className="flex items-center gap-3 px-4 py-3">
-                <Link href={`/t/${w.id}/`} className={`min-w-0 flex-1 truncate ${unread ? 'font-semibold' : ''} hover:text-dash`}>{w.title}</Link>
+              <li key={w.id} className="flex items-center gap-3 px-4 py-2">
+                {/* Unread threads open on the page holding the first new reply. */}
+                <Link href={unread && w.seen >= POSTS_PER_PAGE ? `/t/${w.id}/page/${Math.floor(w.seen / POSTS_PER_PAGE) + 1}/` : `/t/${w.id}/`}
+                  className={`tap-y min-w-0 flex-1 truncate ${unread ? 'font-semibold' : ''} hover:text-dash`}>{w.title}</Link>
                 {unread > 0 && <span className="rounded-full bg-dash px-2 text-xs font-semibold text-dash-ink tabnum">{unread} new</span>}
+                <button type="button" className="btn-ghost text-sm" onClick={() => unwatch(w.id)} aria-label={`Stop watching ${w.title}`}>Unwatch</button>
               </li>
             )
           })}

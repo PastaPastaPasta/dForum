@@ -128,7 +128,7 @@ export function LastPostCell({ last, nameOf }: { last: LastPost; nameOf: (id: st
     <div className="flex min-w-0 items-center gap-2.5">
       <Avatar seed={last.authorId + (last.archiveAuthor ?? '')} name={name} size={32} archive={!!last.archiveAuthor} />
       <div className="min-w-0 text-sm">
-        <Link prefetch={false} href={`/t/${last.threadId}/${last.postId !== last.threadId ? `#post-${last.postId}` : ''}`} className="block truncate font-medium hover:text-dash">
+        <Link prefetch={false} href={`/t/${last.threadId}/${last.postId !== last.threadId ? `#post-${last.postId}` : ''}`} className="tap-y block truncate font-medium hover:text-dash">
           {last.threadTitle || 'New reply'}
         </Link>
         <p className="truncate text-ink-2"><Time at={last.at} />, <AuthorLink id={last.authorId} name={name} archiveAuthor={last.archiveAuthor} className="text-ink-2" /></p>

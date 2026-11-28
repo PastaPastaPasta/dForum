@@ -24,16 +24,17 @@ export function WhatsNew({ threads, ctx, names, forumTitles }: {
     byId.set(t.id, doc ? { ...t, title: str(doc, 'title') ?? t.title, forumId: threadForumId(doc), locked: isLocked(doc), tags: threadTags(doc) } : { ...t })
   }
   for (const t of newThreads(live, lc)) {
+    if (byId.has(t.id)) continue
     byId.set(t.id, {
       id: t.id, forumId: threadForumId(t), title: str(t, 'title') ?? '', tags: threadTags(t), ownerId: t.ownerId, archiveAuthor: archiveAuthor(t, archive),
-      createdAt: effectiveAt(t, archive), sticky: false, locked: isLocked(t), replies: -1, reactions: 0, lastPostAt: effectiveAt(t, archive), lastPostAuthorId: t.ownerId,
+      createdAt: effectiveAt(t, archive), sticky: false, locked: isLocked(t), replies: -1, reactions: 0, lastPostAt: effectiveAt(t, archive), lastPostAuthorId: t.ownerId, lastPostArchiveAuthor: archiveAuthor(t, archive),
     })
   }
   for (const { post: p, thread } of newPosts(live, lc)) {
     const s = byId.get(thread.id)
     if (!s) continue
     s.replies += 1
-    if (effectiveAt(p, archive) > s.lastPostAt) { s.lastPostAt = effectiveAt(p, archive); s.lastPostAuthorId = p.ownerId; s.lastPostArchiveAuthor = archiveAuthor(p, archive); s.lastPostId = p.id }
+    if (effectiveAt(p, archive) >= s.lastPostAt) { s.lastPostAt = effectiveAt(p, archive); s.lastPostAuthorId = p.ownerId; s.lastPostArchiveAuthor = archiveAuthor(p, archive); s.lastPostId = p.id }
   }
   // New threads start at -1: their opening post arrives among the new posts.
   const list = sortThreadSummaries([...byId.values()].map((t) => ({ ...t, sticky: false, replies: Math.max(0, t.replies) }))).slice(0, 50)

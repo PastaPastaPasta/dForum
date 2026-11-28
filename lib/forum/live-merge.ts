@@ -161,6 +161,7 @@ export function mergeForumThreads(
         id: t.id, forumId, title: str(t, 'title') ?? '', tags: threadTags(t), ownerId: t.ownerId,
         archiveAuthor: archiveAuthor(t, ctx.archive), createdAt: effectiveAt(t, ctx.archive), sticky: t.p.sticky === true,
         locked: isLocked(t), replies: -1, posts: 0, reactions: 0, lastPostAt: effectiveAt(t, ctx.archive), lastPostAuthorId: t.ownerId,
+        lastPostArchiveAuthor: archiveAuthor(t, ctx.archive),
         ...(isArchive(t, ctx.archive) && num(t, 'origId') !== undefined ? { origId: num(t, 'origId') } : {}),
       })
     }

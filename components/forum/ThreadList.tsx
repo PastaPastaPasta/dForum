@@ -56,13 +56,13 @@ export function ThreadList({ threads, nameOf, showForum, forumTitle, emptyText =
                 {t.tags.map((tag) => <Link prefetch={false} key={tag} href={`/tags/${tag}/`} className="tap rounded bg-sunk px-1.5 text-xs leading-5 hover:text-dash">{tag}</Link>)}
               </p>
             </div>
-            <dl className="col-start-2 flex gap-4 text-sm md:col-start-auto md:grid md:grid-cols-[1fr_auto] md:gap-x-2 md:gap-y-0">
+            <dl className="col-start-2 flex gap-4 text-sm md:col-start-auto md:grid md:grid-cols-[auto_auto] md:justify-end md:gap-x-2 md:gap-y-0">
               <dt className="text-ink-2">Replies</dt><dd className="tabnum">{fmt.format(t.replies)}</dd>
               <dt className="text-ink-2">Reactions</dt><dd className="tabnum">{fmt.format(t.reactions)}</dd>
             </dl>
             <div className="col-start-2 text-sm md:col-start-auto md:text-right">
               <span className="text-ink-2 md:hidden">Last reply </span>
-              <Link prefetch={false} href={lastHref} className="text-ink-2 hover:text-dash"><Time at={t.lastPostAt} /></Link>
+              <Link prefetch={false} href={lastHref} className="tap-y text-ink-2 hover:text-dash"><Time at={t.lastPostAt} /></Link>
               <p className="truncate"><AuthorLink id={t.lastPostAuthorId} name={lastName} archiveAuthor={t.lastPostArchiveAuthor} className="text-ink-2" /></p>
             </div>
           </li>

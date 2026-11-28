@@ -61,7 +61,7 @@ export function HomeSidebar({ site, names, ctx }: { site: SiteFile; names: Recor
                 <li key={l.postId} className="flex gap-2.5 px-4 py-2.5">
                   <Avatar seed={l.authorId + (l.archiveAuthor ?? '')} name={name} size={28} archive={!!l.archiveAuthor} />
                   <div className="min-w-0 text-sm">
-                    <Link href={`/t/${l.threadId}/#post-${l.postId}`} className="line-clamp-2 font-medium hover:text-dash">{l.threadTitle || 'New reply'}</Link>
+                    <Link href={`/t/${l.threadId}/#post-${l.postId}`} className="tap-y line-clamp-2 font-medium hover:text-dash">{l.threadTitle || 'New reply'}</Link>
                     <p className="text-ink-2"><AuthorLink id={l.authorId} name={name} archiveAuthor={l.archiveAuthor} className="text-ink-2" />, <Time at={l.at} /></p>
                   </div>
                 </li>

@@ -68,7 +68,7 @@ export const Composer = forwardRef<ComposerHandle, {
             <w.icon className="h-4 w-4" />
           </button>
         ))}
-        <button type="button" className="btn-ghost ml-auto text-sm" aria-pressed={preview} onClick={() => setPreview((p) => !p)}>
+        <button type="button" className="btn-ghost ml-auto text-sm" onClick={() => setPreview((p) => !p)}>
           {preview ? <><Pencil className="h-4 w-4" />Write</> : <><Eye className="h-4 w-4" />Preview</>}
         </button>
       </div>
@@ -82,7 +82,7 @@ export const Composer = forwardRef<ComposerHandle, {
       )}
       <div className="flex flex-wrap items-center gap-3 border-t border-rule px-3 py-2">
         <p className="text-xs text-ink-2">Markdown supported. Posts are public and stored on Dash Platform.</p>
-        <span className={`ml-auto text-xs tabnum ${over ? 'font-semibold text-danger' : 'text-ink-2'}`}>{over ? `Too long by ${(bytes - BODY_MAX_BYTES).toLocaleString('en-US')} characters` : bytes > BODY_MAX_BYTES * 0.8 ? `${Math.round((bytes / BODY_MAX_BYTES) * 100)}% of the length limit` : ''}</span>
+        <span className={`ml-auto text-xs tabnum ${over ? 'font-semibold text-danger' : 'text-ink-2'}`}>{over ? `Too long: remove about ${(bytes - BODY_MAX_BYTES).toLocaleString('en-US')} characters` : bytes > BODY_MAX_BYTES * 0.8 ? `${Math.round((bytes / BODY_MAX_BYTES) * 100)}% of the length limit` : ''}</span>
         {onCancel && <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>Cancel</button>}
         <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={busy || disabled || over || !value.trim()}>
           {busy ? (submitLabel.startsWith('Save') ? 'Saving…' : 'Posting…') : submitLabel}

@@ -95,6 +95,7 @@ export default function SettingsPage() {
         {state === 'loading' && <p role="status" className="text-ink-2"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading your profile from Dash Platform…</p>}
         {state === 'error' && <p role="alert" className="text-danger">Couldn&apos;t load your profile from Dash Platform, so editing is paused to avoid overwriting it. Reload the page to try again.</p>}
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void save() }}>
+          <KeyNotice />
           <fieldset disabled={state !== 'ready'} className="space-y-4 disabled:opacity-60">
           {FIELDS.map((f) => (
             <label key={f.key} className="block">
@@ -107,7 +108,6 @@ export default function SettingsPage() {
               {'hint' in f && f.hint && <span className="mt-1 block text-xs text-ink-2">{f.hint}</span>}
             </label>
           ))}
-          <KeyNotice />
           <div className="flex flex-wrap items-center gap-3">
             <button className="btn btn-primary" disabled={saving || state === 'loading' || keyState !== 'ready'}>{saving ? 'Saving…' : 'Save profile'}</button>
             <Link href={`/u/${session.identityId}/`} className="link text-sm">View your profile</Link>

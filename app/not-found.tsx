@@ -2,6 +2,8 @@ import { liveContext, site } from '@/lib/server/site-data'
 import { archiveRef } from '@/lib/forum/model'
 import { LiveFallback } from '@/components/site/LiveFallback'
 
+export const metadata = { title: 'Page not found', robots: { index: false } }
+
 export default function NotFound() {
   const s = site()
   return <LiveFallback ctx={liveContext()} snapshotAt={s.snapshotAt} archive={archiveRef(s.settings)} sourceUrl={s.settings.archiveSourceUrl}

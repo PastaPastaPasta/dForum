@@ -22,6 +22,12 @@ function save(next: Watches) {
 }
 
 const EMPTY: Watches = {}
+
+export function unwatch(threadId: string) {
+  const next = { ...load() }
+  delete next[threadId]
+  save(next)
+}
 export function useWatches(): Watches {
   return useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb) }, load, () => EMPTY)
 }

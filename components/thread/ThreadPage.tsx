@@ -115,6 +115,11 @@ export function ThreadPage(props: ThreadPageProps) {
     const opening = page === 1 ? posts.find((p) => p.ownerId === thread.ownerId) : undefined
     return !opening || (!isHidden(opening) && !isRetracted(opening))
   }, [thread, props.thread, fetched.posts, livePosts, archive, page, posts])
+  // Threads newer than the static index render on the 404 page; give the tab the thread's title.
+  const liveTitle = !props.thread && thread && listable ? str(thread, 'title') : undefined
+  useEffect(() => {
+    if (liveTitle) document.title = document.title.replace(/^[^|]*\|/, `${liveTitle} |`)
+  }, [liveTitle])
   const newElsewhere = page < pages ? livePosts.filter((p) => p.createdAt > snapshotAt && !props.postIndex.includes(p.id.slice(0, ID_PREFIX))).length : 0
 
   const reactionDocs = useMemo(() => mergeDocs(threadReactions ?? [], live.reactions.filter((r) => str(r, 'threadId') === threadId)), [threadReactions, live.reactions, threadId])
@@ -272,7 +277,7 @@ export function ThreadPage(props: ThreadPageProps) {
           </h1>
         )}
         </div>
-        <button type="button" onClick={() => { setJustWatched(!watch.watching); watch.toggle() }} aria-pressed={watch.watching} className="btn btn-quiet shrink-0" data-pagefind-ignore>
+        <button type="button" onClick={() => { setJustWatched(!watch.watching); watch.toggle() }} className="btn btn-quiet shrink-0" data-pagefind-ignore>
           {watch.watching ? <><EyeOff aria-hidden className="h-4 w-4" />Unwatch</> : <><Eye aria-hidden className="h-4 w-4" />Watch</>}
         </button>
         </div>

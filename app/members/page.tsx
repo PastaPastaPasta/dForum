@@ -28,7 +28,7 @@ export default function Members() {
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {staff.map((m) => (
               <li key={m.id} className="panel flex items-center gap-3 p-3">
-                <Avatar seed={m.id} name={m.name || m.id} src={m.avatarUrl} size={44} />
+                <Avatar seed={m.id} name={m.name || memberLabel(m.id)} src={m.avatarUrl} size={44} />
                 <div className="min-w-0"><Link href={`/u/${m.id}/`} className="block truncate font-semibold hover:text-dash">{m.name || memberLabel(m.id)}</Link><p className="text-sm text-dash">{roles[m.id]}</p></div>
               </li>
             ))}
@@ -40,15 +40,15 @@ export default function Members() {
         <div className="panel overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-rule text-left text-ink-2">
-              <tr><th className="px-4 py-2 font-medium">Member</th><th className="px-4 py-2 text-right font-medium">Messages</th><th className="px-4 py-2 text-right font-medium">Threads</th><th className="px-4 py-2 text-right font-medium">Reactions</th><th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Joined</th></tr>
+              <tr><th className="px-4 py-2 font-medium">Member</th><th className="px-4 py-2 text-right font-medium">Messages</th><th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Threads</th><th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Reactions</th><th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Joined</th></tr>
             </thead>
             <tbody className="divide-y divide-rule">
               {list.slice(0, 200).map((m) => (
                 <tr key={m.id}>
-                  <td className="px-4 py-2"><Link href={`/u/${m.id}/`} className="flex items-center gap-2.5 hover:text-dash"><Avatar seed={m.id} name={m.name || m.id} src={m.avatarUrl} size={28} /><span className="truncate font-medium">{m.name || memberLabel(m.id)}</span></Link></td>
+                  <td className="px-4 py-2"><Link href={`/u/${m.id}/`} className="flex items-center gap-2.5 hover:text-dash"><Avatar seed={m.id} name={m.name || memberLabel(m.id)} src={m.avatarUrl} size={28} /><span className="truncate font-medium">{m.name || memberLabel(m.id)}</span></Link></td>
                   <td className="px-4 py-2 text-right tabnum">{m.posts.toLocaleString('en-US')}</td>
-                  <td className="px-4 py-2 text-right tabnum">{m.threads.toLocaleString('en-US')}</td>
-                  <td className="px-4 py-2 text-right tabnum">{m.reactionsReceived.toLocaleString('en-US')}</td>
+                  <td className="hidden px-4 py-2 text-right tabnum sm:table-cell">{m.threads.toLocaleString('en-US')}</td>
+                  <td className="hidden px-4 py-2 text-right tabnum sm:table-cell">{m.reactionsReceived.toLocaleString('en-US')}</td>
                   <td className="hidden px-4 py-2 text-right text-ink-2 sm:table-cell">{m.joinedAt ? joined.format(m.joinedAt) : ''}</td>
                 </tr>
               ))}

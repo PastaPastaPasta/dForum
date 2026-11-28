@@ -29,8 +29,12 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
   const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle')
   const live = useLive(snapshotAt)
   const seq = useRef(0)
-  // Read once: landing with ?q= shouldn't open a phone keyboard over the results.
-  const [initialQuery] = useState(() => (typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('q') ?? ''))
+  const input = useRef<HTMLInputElement>(null)
+  // Focus the box only on an empty search with a mouse or trackpad: never pop a phone keyboard over
+  // results, and never in the static HTML (autofocus there fires before the page knows the query).
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).get('q') && matchMedia('(pointer: fine)').matches) input.current?.focus()
+  }, [])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -86,7 +90,7 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
       <form role="search" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-2 sm:flex-row">
         <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-field bg-sheet px-3 focus-within:border-dash focus-within:outline focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-dash">
           <SearchIcon aria-hidden className="h-4 w-4 text-ink-2" />
-          <input autoFocus={!initialQuery} type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search threads and posts" aria-label="Search terms" className="h-10 min-w-0 flex-1 bg-transparent outline-none focus-visible:outline-none" />
+          <input ref={input} type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search threads and posts" aria-label="Search terms" className="h-10 min-w-0 flex-1 bg-transparent outline-none focus-visible:outline-none" />
         </label>
         <select className="field sm:w-auto" value={forum} onChange={(e) => setForum(e.target.value)} aria-label="Forum">
           <option value="">All forums</option>
@@ -105,13 +109,13 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
       )}
       {state === 'error' && <p role="alert" className="text-danger">The search index couldn&apos;t load. Try again after reloading the page.</p>}
       {shownHits && (
-        <section aria-live="polite" className="space-y-2">
-          <p className="text-sm text-ink-2">{state === 'loading' ? 'Searching…' : `${shownHits.length === 30 ? 'Top 30' : shownHits.length} thread${shownHits.length === 1 ? '' : 's'}`}</p>
+        <section aria-label="Results" className="space-y-2">
+          <p role="status" className="text-sm text-ink-2">{state === 'loading' ? 'Searching…' : `${shownHits.length === 30 ? 'Top 30' : shownHits.length} thread${shownHits.length === 1 ? '' : 's'}`}</p>
           {shownHits.length > 0 ? (
             <ul className="panel divide-y divide-rule">
               {shownHits.map((h) => (
                 <li key={h.url} className="px-4 py-3">
-                  <a href={h.url} className="font-medium hover:text-dash">{h.title}</a>
+                  <h2 className="text-base font-medium"><a href={h.url} className="hover:text-dash">{h.title}</a></h2>
                   {h.forum && <p className="text-xs text-ink-2">{h.forum}</p>}
                   {/* Pagefind excerpts are escaped text with <mark> highlights only. */}
                   {h.subs.length === 0 && <p className="mt-1 text-sm text-ink-2 [&_mark]:bg-dash/20 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: markOnly(h.excerpt) }} />}
