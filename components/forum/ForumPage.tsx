@@ -34,21 +34,33 @@ export function ForumPage({ forum, crumbs, subforums, threads, page, pages, name
   const movedIn = page === 1 ? movedInThreads(live, forum.id, lc).filter((t) => !threads.some((s) => s.id === t.id)) : []
   const movedKey = movedIn.map((t) => t.id).join()
   const [movedFiles, setMovedFiles] = useState<Record<string, ThreadFile>>({})
+  const [retry, setRetry] = useState(0)
   useEffect(() => {
     for (const id of movedKey ? movedKey.split(',') : []) {
       if (movedFiles[id]) continue
       fetch(`/data/v2/thread/${id}.json`).then((r) => (r.ok ? (r.json() as Promise<ThreadFile>) : null))
-        .then((f) => { if (f) setMovedFiles((m) => ({ ...m, [id]: f })) }).catch(() => undefined)
+        .then((f) => { if (f) setMovedFiles((m) => ({ ...m, [id]: f })) })
+        .catch(() => { setTimeout(() => setRetry((n) => n + 1), 15_000) })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movedKey])
+  }, [movedKey, retry])
   const movedSummaries = movedIn.flatMap((t) => {
     const f = movedFiles[t.id]
-    return f ? [summarizeThread(t, threadPosts(t, f.posts, ctx.archive), f.reactions, ctx.archive)] : []
+    // The file may be newer than this page's snapshot (a deploy mid-session): later posts are counted
+    // by the live delta, so keep only what the snapshot covers.
+    const posts = f?.posts.filter((p) => p.createdAt <= ctx.snapshotAt)
+    // Only threads the snapshot had in another forum: one that was here already (pinned, say) is on
+    // its static page.
+    if (!f || !posts || f.forumId === forum.id) return []
+    return [summarizeThread(t, threadPosts(t, posts, ctx.archive), f.reactions, ctx.archive)]
   })
   const merged = mergeForumThreads([...threads, ...movedSummaries], forum.id, live, lc, page === 1)
   // New threads and bumped ones surface on page 1; later pages keep their static order.
-  const shown = page === 1 ? sortThreadSummaries(merged).slice(0, Math.max(THREADS_PER_PAGE, threads.length)) : merged
+  // Moved-in threads are kept on page 1 even past the cut: no static page of this forum lists them.
+  const movedIds = new Set(movedSummaries.map((s) => s.id))
+  const sorted = page === 1 ? sortThreadSummaries(merged) : merged
+  const cut = Math.max(THREADS_PER_PAGE, threads.length)
+  const shown = page === 1 ? [...sorted.slice(0, cut), ...sorted.slice(cut).filter((s) => movedIds.has(s.id))] : merged
   const ids = shown.flatMap((t) => [t.ownerId, t.lastPostAuthorId])
   const nameOf = useNames(names, ids, live.profiles)
   const activity = forumActivity(live, lc)

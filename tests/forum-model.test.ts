@@ -190,9 +190,14 @@ describe('live delta', () => {
     expect(deltaChanges({ threads: [spam], posts: [...early, bump], heads }).threadGone(spam.id)).toBe(true)
   })
   it('lists older threads moved into a forum once their heads are loaded, and waits on truncated polls', () => {
-    const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
+    const moved = { ...oldThread, moderatedAt: 1200, p: { ...oldThread.p, movedToForumId: 'G' } }
     expect(movedInThreads({ threads: [moved], posts: [oldOpen] }, 'G', ctx)).toHaveLength(0)
     expect(movedInThreads({ threads: [moved], posts: [oldOpen], heads: { OLD: Infinity } }, 'G', ctx)).toHaveLength(1)
+    // Moved back to its original forum (movedToForumId cleared) after the snapshot.
+    const back = { ...oldThread, moderatedAt: 1200 }
+    expect(movedInThreads({ threads: [back], posts: [oldOpen], heads: { OLD: Infinity } }, 'F', ctx)).toHaveLength(1)
+    // Moved long before the snapshot: not a candidate.
+    expect(movedInThreads({ threads: [{ ...moved, moderatedAt: 500 }], posts: [oldOpen], heads: { OLD: Infinity } }, 'G', ctx)).toHaveLength(0)
     expect(newThreads({ threads: [t], posts: [open], truncated: true }, ctx)).toHaveLength(0)
   })
   it('treats a cap-exhausted head load as no evidence: listings stand, new replies wait', () => {

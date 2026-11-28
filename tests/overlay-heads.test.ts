@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RawDoc } from '@/lib/forum/types'
 import { deltaChanges, newPosts } from '@/lib/forum/live-merge'
 
@@ -53,5 +53,20 @@ describe('overlay heads', () => {
     expect(Object.keys(state.heads)).toHaveLength(61)
     expect(newPosts(state, { snapshotAt: SNAP })).toHaveLength(61)
     expect(deltaChanges(state).threadGone('LATE')).toBe(false)
+  })
+})
+
+describe('overlay scan', () => {
+  beforeEach(() => { vi.resetModules(); store.posts = []; store.threads = [] })
+  it('catches up after a burst larger than one capped poll (no overlap livelock)', async () => {
+    store.threads.push(doc('BURST', 'archivist', SNAP + 1, { forumId: 'F', title: 'burst' }))
+    for (let i = 0; i < 1500; i++) store.posts.push(doc(`B${String(i).padStart(4, '0')}`, 'archivist', SNAP + 1000 + i * 40, { threadId: 'BURST', forumId: 'F', body: 'b' }))
+    const overlay = await import('@/lib/live/overlay')
+    overlay.useLive(SNAP)
+    hook.sub?.(() => undefined)
+    for (let i = 0; i < 4; i++) await overlay.refreshLive()
+    const state = hook.get?.() as { posts: RawDoc[]; truncated: boolean }
+    expect(state.posts.filter((p) => p.id.startsWith('B'))).toHaveLength(1500)
+    expect(state.truncated).toBe(false)
   })
 })

@@ -142,12 +142,13 @@ export function newThreads(delta: DeltaDocs, ctx: LiveContext): RawDoc[] {
   })
 }
 
-/** Older threads a moderator moved into `forumId` since the snapshot (listed there live), when the
- * listable rule can be applied to them. Their summaries come from their static thread files. */
+/** Older threads now in `forumId` that a moderator changed since the snapshot: moved in, or moved
+ * back to their original forum. Candidates only (the caller skips ones its static page lists); the
+ * listable rule applies. Their summaries come from their static thread files. */
 export function movedInThreads(delta: DeltaDocs, forumId: string, ctx: LiveContext): RawDoc[] {
   const grouped = postsByThread(delta.posts)
-  return delta.threads.filter((t) => t.createdAt <= ctx.snapshotAt && str(t, 'movedToForumId') === forumId
-    && listableLive(t, grouped.get(t.id) ?? [], delta, ctx.snapshotAt, ctx.archive))
+  return delta.threads.filter((t) => t.createdAt <= ctx.snapshotAt && (t.moderatedAt ?? 0) > ctx.snapshotAt
+    && threadForumId(t) === forumId && listableLive(t, grouped.get(t.id) ?? [], delta, ctx.snapshotAt, ctx.archive))
 }
 
 /** New posts since the snapshot that may be shown, with their threads. */
