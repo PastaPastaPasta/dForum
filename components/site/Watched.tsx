@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import type { ThreadFile } from '@/lib/forum/types'
-import { isHidden, isRetracted, str } from '@/lib/forum/model'
+import { newPosts } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { unwatch, useWatches } from '@/lib/watch'
 import { POSTS_PER_PAGE } from '@/lib/forum/types'
@@ -25,7 +25,10 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids.join()])
-  const fresh = (id: string) => live.posts.filter((p) => str(p, 'threadId') === id && p.createdAt > snapshotAt && !isHidden(p) && !isRetracted(p)).length
+  // New replies the forum would show (listable threads only), per thread.
+  const freshCounts = new Map<string, number>()
+  for (const { thread } of newPosts(live, { snapshotAt })) freshCounts.set(thread.id, (freshCounts.get(thread.id) ?? 0) + 1)
+  const fresh = (id: string) => freshCounts.get(id) ?? 0
   // The page holding the first new reply, capped at the last page the static index built (newer
   // replies show on that last page live).
   const firstNewPage = (id: string, seen: number, unread: number) => {

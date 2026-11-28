@@ -46,8 +46,12 @@ const cursors = new Map<string, number>()
 // Threads whose first posts have been loaded (see refreshLive).
 const headsFetched = new Map<string, number>()
 const headsPending = new Set<string>()
+// Bumped when `since` changes, so a poll started before can't write back stale cursors.
+let generation = 0
 const HEAD_WORKERS = 6
 const HEAD_PAGE = 100
+const HEAD_FIRST_PAGE = 5
+const HEAD_DEADLINE_MS = 10_000
 const HEAD_MAX_PAGES = 5
 
 /** A thread's posts from the first up to its owner's first post (the opening post). The cutoff is that
@@ -57,7 +61,9 @@ async function loadHead(thread: RawDoc): Promise<{ docs: RawDoc[]; cutoff: numbe
   const docs: RawDoc[] = []
   let startAfter: string | undefined
   for (let i = 0; i < HEAD_MAX_PAGES; i++) {
-    const page = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: HEAD_PAGE, startAfter })
+    // The opening post is nearly always first: a small first page, then full pages.
+    const limit = i === 0 ? HEAD_FIRST_PAGE : HEAD_PAGE
+    const page = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit, startAfter })
     docs.push(...page.docs)
     const opening = page.docs.find((p) => p.ownerId === thread.ownerId)
     if (opening) return { docs, cutoff: opening.createdAt }
@@ -112,6 +118,7 @@ export function refreshLive(): Promise<void> {
   if (!since) return Promise.resolve()
   if (inflight) return inflight
   if (state.status === 'idle') set({ status: 'loading' })
+  const myGeneration = generation
   inflight = (async () => {
     try {
       const [threads, posts, reactions, profiles] = await Promise.all([
@@ -135,20 +142,26 @@ export function refreshLive(): Promise<void> {
         const id = str(p, 'threadId')
         if (id && !headsFetched.has(id)) headsPending.add(id)
       }
+      // A moved thread is listed live in its new forum, which needs its listability too.
+      for (const t of threads.docs) if (str(t, 'movedToForumId') && !headsFetched.has(t.id)) headsPending.add(t.id)
       const cutoffs = new Map<string, number>()
       const heads: RawDoc[] = []
       const queue: string[] = []
       for (const id of headsPending) {
         const t = threadById.get(id)
         // Created after `since`: every post of it is in this delta already (unless the scan was capped).
-        if (t && t.createdAt > since && !posts.truncated) cutoffs.set(id, Infinity)
+        if (t && t.createdAt > since) { if (!posts.truncated) cutoffs.set(id, Infinity) } // else: next poll
         else if (t) queue.push(id)
         else headsPending.delete(id) // thread gone (moderator delete): nothing to judge
       }
       await Promise.all(Array.from({ length: Math.min(HEAD_WORKERS, queue.length) }, async () => {
         for (let id = queue.shift(); id; id = queue.shift()) {
           try {
-            const got = await loadHead(threadById.get(id) as RawDoc)
+            // A stalled query must not hold every other update: give up after the deadline, retry next poll.
+            const got = await Promise.race([
+              loadHead(threadById.get(id) as RawDoc),
+              new Promise<never>((_, reject) => setTimeout(() => reject(new Error('head deadline')), HEAD_DEADLINE_MS)),
+            ])
             heads.push(...got.docs)
             cutoffs.set(id, got.cutoff)
           } catch {
@@ -156,9 +169,12 @@ export function refreshLive(): Promise<void> {
           }
         }
       }))
+      // `start` moved `since` while this poll ran: its results and cursors belong to the old range.
+      if (generation !== myGeneration) return
       set({
         status: 'live',
-        threads: allThreads,
+        // Merged against the current state: a local write (injectLocal) may have landed meanwhile.
+        threads: mergeDocs(state.threads, allThreads),
         posts: mergeDocs(state.posts, [...posts.docs, ...heads]),
         heads: Object.fromEntries([...headsFetched, ...cutoffs]),
         reactions: mergeDocs(state.reactions, reactions.docs),
@@ -191,6 +207,7 @@ function start(snapshotAt: number) {
   const from = Math.max(0, snapshotAt - OVERLAP_MS)
   if (since && since <= from) return
   since = from
+  generation++
   cursors.clear()
   void refreshLive()
   if (!timer) {

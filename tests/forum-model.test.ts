@@ -3,7 +3,7 @@ import type { RawDoc } from '@/lib/forum/types'
 import {
   cleanShortText, compareIds, countReactions, effectiveAt, isArchive, mergeDocs, resolveForumTree, summarizeThread, threadPosts, sortThreadSummaries, excerpt,
 } from '@/lib/forum/model'
-import { acceptsReplies, deltaChanges, forumActivity, mergeForumThreads, newPosts, newThreads } from '@/lib/forum/live-merge'
+import { acceptsReplies, deltaChanges, forumActivity, mergeForumThreads, movedInThreads, newPosts, newThreads } from '@/lib/forum/live-merge'
 import { isUnread } from '@/lib/seen'
 import { splitBody, byteLength } from '@/lib/forum/actions'
 import { normalizeTagInput } from '@/lib/forum/tags'
@@ -188,6 +188,12 @@ describe('live delta', () => {
     const heads = { [spam.id]: 105 }
     expect(newPosts({ threads: [spam], posts: [...early, bump], heads }, ctx)).toHaveLength(0)
     expect(deltaChanges({ threads: [spam], posts: [...early, bump], heads }).threadGone(spam.id)).toBe(true)
+  })
+  it('lists older threads moved into a forum once their heads are loaded, and waits on truncated polls', () => {
+    const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
+    expect(movedInThreads({ threads: [moved], posts: [oldOpen] }, 'G', ctx)).toHaveLength(0)
+    expect(movedInThreads({ threads: [moved], posts: [oldOpen], heads: { OLD: Infinity } }, 'G', ctx)).toHaveLength(1)
+    expect(newThreads({ threads: [t], posts: [open], truncated: true }, ctx)).toHaveLength(0)
   })
   it('ignores live posts in hidden or unknown threads', () => {
     expect(newPosts({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [reply] }, ctx)).toHaveLength(0)

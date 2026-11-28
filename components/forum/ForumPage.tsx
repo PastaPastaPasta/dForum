@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { PenSquare, Archive } from 'lucide-react'
-import type { ForumView, ThreadSummary } from '@/lib/forum/types'
+import { useEffect, useState } from 'react'
+import type { ForumView, ThreadFile, ThreadSummary } from '@/lib/forum/types'
 import { THREADS_PER_PAGE } from '@/lib/forum/types'
-import { sortThreadSummaries } from '@/lib/forum/model'
-import { forumActivity, mergeForumThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
+import { sortThreadSummaries, summarizeThread, threadPosts } from '@/lib/forum/model'
+import { forumActivity, mergeForumThreads, movedInThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { useSession } from '@/lib/session'
@@ -29,7 +30,23 @@ export function ForumPage({ forum, crumbs, subforums, threads, page, pages, name
   const { session } = useSession()
   const live = useLive(ctx.snapshotAt)
   const lc = toLiveContext(ctx)
-  const merged = mergeForumThreads(threads, forum.id, live, lc, page === 1)
+  // Threads moved here since the snapshot: summarised from their static files and listed live.
+  const movedIn = page === 1 ? movedInThreads(live, forum.id, lc).filter((t) => !threads.some((s) => s.id === t.id)) : []
+  const movedKey = movedIn.map((t) => t.id).join()
+  const [movedFiles, setMovedFiles] = useState<Record<string, ThreadFile>>({})
+  useEffect(() => {
+    for (const id of movedKey ? movedKey.split(',') : []) {
+      if (movedFiles[id]) continue
+      fetch(`/data/v2/thread/${id}.json`).then((r) => (r.ok ? (r.json() as Promise<ThreadFile>) : null))
+        .then((f) => { if (f) setMovedFiles((m) => ({ ...m, [id]: f })) }).catch(() => undefined)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [movedKey])
+  const movedSummaries = movedIn.flatMap((t) => {
+    const f = movedFiles[t.id]
+    return f ? [summarizeThread(t, threadPosts(t, f.posts, ctx.archive), f.reactions, ctx.archive)] : []
+  })
+  const merged = mergeForumThreads([...threads, ...movedSummaries], forum.id, live, lc, page === 1)
   // New threads and bumped ones surface on page 1; later pages keep their static order.
   const shown = page === 1 ? sortThreadSummaries(merged).slice(0, Math.max(THREADS_PER_PAGE, threads.length)) : merged
   const ids = shown.flatMap((t) => [t.ownerId, t.lastPostAuthorId])

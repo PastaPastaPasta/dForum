@@ -80,6 +80,7 @@ Readers are the snapshot, the build and the browser. They all use the same funct
 - **Opening post:** the owner's earliest post by effective date, then `$createdAt`, then `$id` bytes. A thread is listed when that post exists, is not hidden and is not retracted, and the thread itself is not hidden.
 - **Hidden** means `modState` is set. Hidden posts stay in the thread as placeholders, so numbering and permalinks are stable. Hidden threads and profiles drop out of every listing, page and feed.
 - **Locked** means `locked` is `true`. Consensus refuses new replies (above); the app also closes the composer, edits and reactions.
+- **Live judgement:** the browser applies the same listable rule to live data. A thread older than the snapshot is judged once its posts up to the owner's first one (by chain order) are loaded, and only on those; until then, or if that post is more than 500 posts in, it fails closed. One known divergence: in an archive thread whose first imported post lost archive trust (edited after the window closed), the snapshot orders by original dates and the live view by chain order, so the live view may hide replies the snapshot shows (never the reverse).
 - **Moved:** a thread's forum is `movedToForumId` when set, otherwise `forumId`.
 - **Edited** means `$updatedAt > $createdAt`. A moderator change does not mark a post edited.
 - **Sub-forums:** a parent is honored only if it exists, is in the same category and forms no cycle.

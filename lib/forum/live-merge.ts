@@ -134,9 +134,17 @@ export function newThreads(delta: DeltaDocs, ctx: LiveContext): RawDoc[] {
     // The same rule the snapshot applies: the thread and its opening post are visible.
     const view = threadPosts(t, grouped.get(t.id) ?? [], ctx.archive)
     if (!view.listable || !view.opening) return false
-    if (t.createdAt > ctx.snapshotAt) return true
+    if (t.createdAt > ctx.snapshotAt) return !delta.truncated
     return t.createdAt > ctx.snapshotAt - STRADDLE_MS && view.opening.createdAt > ctx.snapshotAt
   })
+}
+
+/** Older threads a moderator moved into `forumId` since the snapshot (listed there live), when the
+ * listable rule can be applied to them. Their summaries come from their static thread files. */
+export function movedInThreads(delta: DeltaDocs, forumId: string, ctx: LiveContext): RawDoc[] {
+  const grouped = postsByThread(delta.posts)
+  return delta.threads.filter((t) => t.createdAt <= ctx.snapshotAt && str(t, 'movedToForumId') === forumId
+    && listableLive(t, grouped.get(t.id) ?? [], delta, ctx.snapshotAt, ctx.archive))
 }
 
 /** New posts since the snapshot that may be shown, with their threads. */
