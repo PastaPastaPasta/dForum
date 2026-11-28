@@ -45,8 +45,27 @@ function set(next: Partial<LiveState>) {
 const cursors = new Map<string, number>()
 // Threads whose first posts have been loaded (see refreshLive).
 const headsFetched = new Map<string, number>()
-const HEADS_PER_POLL = 40
-const HEAD_POSTS = 5
+const headsPending = new Set<string>()
+const HEAD_WORKERS = 6
+const HEAD_PAGE = 100
+const HEAD_MAX_PAGES = 5
+
+/** A thread's posts from the first up to its owner's first post (the opening post). The cutoff is that
+ * post's createdAt; Infinity when the thread ended first (all posts loaded, no opening post); the last
+ * loaded post's when the cap ran out first (the opening post is then out of reach: fails closed). */
+async function loadHead(thread: RawDoc): Promise<{ docs: RawDoc[]; cutoff: number }> {
+  const docs: RawDoc[] = []
+  let startAfter: string | undefined
+  for (let i = 0; i < HEAD_MAX_PAGES; i++) {
+    const page = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: HEAD_PAGE, startAfter })
+    docs.push(...page.docs)
+    const opening = page.docs.find((p) => p.ownerId === thread.ownerId)
+    if (opening) return { docs, cutoff: opening.createdAt }
+    if (!page.full || !page.last) return { docs, cutoff: Infinity }
+    startAfter = page.last
+  }
+  return { docs, cutoff: docs.length ? docs[docs.length - 1].createdAt : Infinity }
+}
 const STEP_OVERLAP_MS = 2 * 60_000
 const MAX_PAGES = 10
 
@@ -108,16 +127,35 @@ export function refreshLive(): Promise<void> {
         allThreads.push(...page.docs)
       }
       // A live post counts only while its thread is listable (opening post present and visible), the
-      // same rule as the snapshot, so the overlay needs each such thread's first posts too. Fetched
-      // once per thread; later moderation of them arrives through the $moderatedAt scan.
-      const heads: RawDoc[] = []
-      const cutoffs = new Map<string, number>()
-      const needHeads = [...new Set(posts.docs.map((p) => str(p, 'threadId')).filter((id): id is string => !!id && !headsFetched.has(id)))]
-      for (const id of needHeads.slice(0, HEADS_PER_POLL)) {
-        const page = await queryPage('post', { where: [['threadId', '==', id]], orderBy: [['$createdAt', 'asc']], limit: HEAD_POSTS })
-        heads.push(...page.docs)
-        cutoffs.set(id, page.docs.length < HEAD_POSTS ? Infinity : page.docs[page.docs.length - 1].createdAt)
+      // same rule as the snapshot, so the overlay needs each such thread's posts up to its opening
+      // post. Loaded once per thread, all within this poll (no partial state is ever shown); later
+      // moderation of them arrives through the $moderatedAt scan.
+      const threadById = new Map(allThreads.map((t) => [t.id, t]))
+      for (const p of posts.docs) {
+        const id = str(p, 'threadId')
+        if (id && !headsFetched.has(id)) headsPending.add(id)
       }
+      const cutoffs = new Map<string, number>()
+      const heads: RawDoc[] = []
+      const queue: string[] = []
+      for (const id of headsPending) {
+        const t = threadById.get(id)
+        // Created after `since`: every post of it is in this delta already (unless the scan was capped).
+        if (t && t.createdAt > since && !posts.truncated) cutoffs.set(id, Infinity)
+        else if (t) queue.push(id)
+        else headsPending.delete(id) // thread gone (moderator delete): nothing to judge
+      }
+      await Promise.all(Array.from({ length: Math.min(HEAD_WORKERS, queue.length) }, async () => {
+        for (let id = queue.shift(); id; id = queue.shift()) {
+          try {
+            const got = await loadHead(threadById.get(id) as RawDoc)
+            heads.push(...got.docs)
+            cutoffs.set(id, got.cutoff)
+          } catch {
+            // Left pending: retried next poll. Until then the thread is judged unknown (fails closed).
+          }
+        }
+      }))
       set({
         status: 'live',
         threads: allThreads,
@@ -129,8 +167,7 @@ export function refreshLive(): Promise<void> {
         updatedAt: Date.now(),
       })
       for (const [key, value] of [...threads.next, ...posts.next, ...reactions.next, ...profiles.next]) cursors.set(key, value)
-      for (const [id, cutoff] of cutoffs) headsFetched.set(id, cutoff)
-      if (needHeads.length > HEADS_PER_POLL) setTimeout(() => void refreshLive(), 1500)
+      for (const [id, cutoff] of cutoffs) { headsFetched.set(id, cutoff); headsPending.delete(id) }
       // A capped poll resumes from its cursors right away until it has caught up.
       if (state.truncated) setTimeout(() => void refreshLive(), 1500)
     } catch {

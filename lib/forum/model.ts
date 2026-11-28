@@ -61,7 +61,9 @@ export const num = (doc: RawDoc | undefined, key: string): number | undefined =>
 // spaces, fillers and tag characters. Short public strings (names, titles) lose them, so nobody can
 // pose as another member or reorder a title. Emoji joiners (U+200D) stay.
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800]/gu
-const KEEP = new Set(['\u200D', '\uFE0F']) // emoji joiner and emoji presentation
+// Kept: emoji joiner and presentation selector, and the zero-width non-joiner that Persian, Kurdish
+// and Indic spellings need.
+const KEEP = new Set(['\u200D', '\uFE0F', '\u200C'])
 const SHORT_TEXT = ['displayName', 'title', 'customTitle', 'location', 'origAuthor', 'role'] as const
 
 /** Strips invisible characters from the short text fields of a document's properties, in place. */
@@ -71,7 +73,7 @@ export function cleanShortText(p: Record<string, unknown>): Record<string, unkno
     if (typeof v !== 'string') continue
     const cleaned = v.replace(INVISIBLE, (c) => (KEEP.has(c) ? c : '')).replace(/\s+/g, ' ').trim()
     // Nothing readable left (only fillers or joiners): treat as empty, so the fallback label shows.
-    p[k] = /[\p{L}\p{N}\p{S}]/u.test(cleaned) ? cleaned : ''
+    p[k] = /[\p{L}\p{N}\p{S}\p{P}]/u.test(cleaned) ? cleaned : ''
   }
   return p
 }

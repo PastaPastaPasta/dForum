@@ -26,6 +26,11 @@ export interface PostActions {
   onReport(post: RawDoc, reason: number, note: string): Promise<boolean>
 }
 
+/** "https://host/" for a source URL, or undefined when it doesn't parse (owner-set, so be lenient). */
+function originOf(url: string): string | undefined {
+  try { return new URL(url).origin + '/' } catch { return undefined }
+}
+
 const joinedFmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 
 export function PostCard({ post, n, threadId, name, member, role, archive, sourceUrl, reactions, mine, me, actions }: {
@@ -120,7 +125,7 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
               onCancel={() => setEditing(false)}
               onSubmit={async () => { if (await actions.onEdit(post, draft)) setEditing(false) }} />
           ) : (
-            <Markdown source={postBody(post)} attachmentsFrom={imported && sourceUrl ? new URL(sourceUrl).origin + '/' : undefined} />
+            <Markdown source={postBody(post)} attachmentsFrom={imported && sourceUrl ? originOf(sourceUrl) : undefined} />
           )}
           {member?.signature && !hidden && !retracted && !editing && (
             <div className="mt-4 border-t border-rule pt-2 text-sm text-ink-2"><Markdown source={member.signature} className="post-body !font-sans !text-sm" /></div>

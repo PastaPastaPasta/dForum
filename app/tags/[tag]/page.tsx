@@ -1,3 +1,4 @@
+import { archiveRef } from '@/lib/forum/model'
 import { forumFile, memberNames, site } from '@/lib/server/site-data'
 import { sortThreadSummaries } from '@/lib/forum/model'
 import { TagThreads } from '@/components/forum/TagThreads'
@@ -15,7 +16,7 @@ export default function Page({ params }: { params: { tag: string } }) {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Threads tagged <span className="rounded bg-sunk px-2">{params.tag}</span></h1>
-      <TagThreads threads={threads} names={memberNames(threads.flatMap((t) => [t.ownerId, t.lastPostAuthorId]))} forumTitles={Object.fromEntries(s.forums.map((f) => [f.id, f.title]))} />
+      <TagThreads threads={threads} names={memberNames(threads.flatMap((t) => [t.ownerId, t.lastPostAuthorId]))} forumTitles={Object.fromEntries(s.forums.map((f) => [f.id, f.title]))} snapshotAt={s.snapshotAt} archive={archiveRef(s.settings)} />
     </div>
   )
 }

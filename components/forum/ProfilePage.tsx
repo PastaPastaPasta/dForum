@@ -6,6 +6,7 @@ import { Globe, MapPin } from 'lucide-react'
 import type { MemberView, UserFile } from '@/lib/forum/types'
 import { isHidden, str } from '@/lib/forum/model'
 import { useLive } from '@/lib/live/overlay'
+import { deltaChanges } from '@/lib/forum/live-merge'
 import { useNames } from '@/lib/live/names'
 import { memberLabel } from '@/lib/forum/model'
 import { useSession } from '@/lib/session'
@@ -26,6 +27,7 @@ export function ProfilePage({ id, file, role, snapshotAt, forumTitles }: {
   const live = useLive(snapshotAt)
   const { session } = useSession()
   const liveProfile = live.profiles.find((p) => p.ownerId === id)
+  const changes = deltaChanges(live)
   const member: MemberView = useMemo(() => {
     const base: MemberView = file?.member ?? { id, name: '', joinedAt: 0, posts: 0, threads: 0, reactionsReceived: 0 }
     if (!liveProfile) return base
@@ -67,13 +69,13 @@ export function ProfilePage({ id, file, role, snapshotAt, forumTitles }: {
       </section>
       <section aria-labelledby="threads-h" className="space-y-2">
         <h2 id="threads-h" className="text-lg font-semibold">Threads started</h2>
-        <ThreadList threads={file?.threads ?? []} nameOf={nameOf} showForum forumTitle={(f) => forumTitles[f]} emptyText="No threads yet." />
+        <ThreadList threads={(file?.threads ?? []).filter((t) => !changes.threadGone(t.id))} nameOf={nameOf} showForum forumTitle={(f) => forumTitles[f]} emptyText="No threads yet." />
       </section>
       <section aria-labelledby="posts-h" className="space-y-2">
         <h2 id="posts-h" className="text-lg font-semibold">Recent posts</h2>
         {file?.posts.length ? (
           <ul className="panel divide-y divide-rule">
-            {file.posts.map((p) => (
+            {file.posts.filter((p) => !changes.threadGone(p.threadId) && !changes.postGone(p.postId)).map((p) => (
               <li key={p.postId} className="px-4 py-3">
                 <Link href={`/t/${p.threadId}/#post-${p.postId}`} className="font-medium hover:text-dash">{p.threadTitle}</Link>
                 <p className="mt-0.5 text-sm text-ink-2 line-clamp-2">{p.excerpt}</p>

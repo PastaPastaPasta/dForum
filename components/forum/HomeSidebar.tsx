@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import type { SiteFile } from '@/lib/forum/types'
+import { useMemo } from 'react'
+import type { RawDoc, SiteFile } from '@/lib/forum/types'
 import { archiveRef, excerpt, postBody, str, archiveAuthor, effectiveAt } from '@/lib/forum/model'
 import { deltaChanges, newPosts, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
@@ -17,21 +18,25 @@ type Latest = SiteFile['latestPosts'][number]
 export function HomeSidebar({ site, names, ctx }: { site: SiteFile; names: Record<string, string>; ctx: LiveContextProps }) {
   const { session, ready } = useSession()
   const live = useLive(site.snapshotAt)
-  const archive = archiveRef(site.settings)
-  const fresh: Latest[] = newPosts(live, toLiveContext(ctx)).map(({ post: p, thread }) => ({
-    postId: p.id, threadId: thread.id, threadTitle: str(thread, 'title') ?? '', at: effectiveAt(p, archive),
-    authorId: p.ownerId, archiveAuthor: archiveAuthor(p, archive), forumId: str(thread, 'forumId') ?? '', excerpt: excerpt(postBody(p), 140),
-  }))
-  // Static entries drop out as soon as the live delta shows their thread or post hidden.
-  const changes = deltaChanges(live, archive)
-  const still = site.latestPosts
-    .filter((l) => !changes.threadGone(l.threadId) && !changes.postGone(l.postId))
-    .map((l) => { const t = changes.thread(l.threadId); return t ? { ...l, threadTitle: str(t, 'title') ?? l.threadTitle } : l })
-  const seen = new Set<string>()
-  const latest = [...fresh, ...still]
-    .sort((a, b) => b.at - a.at)
-    .filter((p) => (seen.has(p.threadId) ? false : (seen.add(p.threadId), true)))
-    .slice(0, 8)
+  const archive = useMemo(() => archiveRef(site.settings), [site.settings])
+  // Excerpts are built only for the eight shown: during a backfill the delta holds thousands of posts.
+  const latest = useMemo(() => {
+    const fresh: Array<Latest & { source?: RawDoc }> = newPosts(live, toLiveContext(ctx)).map(({ post: p, thread }) => ({
+      source: p, postId: p.id, threadId: thread.id, threadTitle: str(thread, 'title') ?? '', at: effectiveAt(p, archive),
+      authorId: p.ownerId, archiveAuthor: archiveAuthor(p, archive), forumId: str(thread, 'forumId') ?? '', excerpt: '',
+    }))
+    // Static entries drop out as soon as the live delta shows their thread or post hidden.
+    const changes = deltaChanges(live, archive)
+    const still = site.latestPosts
+      .filter((l) => !changes.threadGone(l.threadId) && !changes.postGone(l.postId))
+      .map((l) => { const t = changes.thread(l.threadId); return t ? { ...l, threadTitle: str(t, 'title') ?? l.threadTitle } : l })
+    const seen = new Set<string>()
+    return [...fresh, ...(still as Array<Latest & { source?: RawDoc }>)]
+      .sort((a, b) => b.at - a.at)
+      .filter((p) => (seen.has(p.threadId) ? false : (seen.add(p.threadId), true)))
+      .slice(0, 8)
+      .map(({ source, ...l }): Latest => (source ? { ...l, excerpt: excerpt(postBody(source), 140) } : l))
+  }, [live, ctx, site.latestPosts, archive])
   const nameOf = useNames(names, latest.map((l) => l.authorId), live.profiles)
 
   return (

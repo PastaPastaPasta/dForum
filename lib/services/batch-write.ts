@@ -99,7 +99,7 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
         // A stale nonce can mean an earlier send of this same transition landed (the SDK and this
         // loop both resend). Give a lagging node time to show it before reporting a refusal, so the
         // caller never signs a second copy of a write that went through.
-        if (STALE_NONCE.test(errText(e))) {
+        if (STALE_NONCE.test(errText(e)) && !/too far in (the )?future/i.test(errText(e))) {
           let ok = false
           for (let i = 0; i < 12 && !ok; i++) {
             await new Promise((r) => setTimeout(r, 2500))
