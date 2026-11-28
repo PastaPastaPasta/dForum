@@ -28,7 +28,8 @@ function listableLive(t: RawDoc, posts: RawDoc[], delta: DeltaDocs, snapshotAt: 
   // Newer threads are complete in the delta, unless the last poll was capped: then wait (fail closed).
   if (snapshotAt !== undefined && t.createdAt > snapshotAt) return !delta.truncated && threadPosts(t, posts, archive).listable
   const cutoff = delta.heads?.[t.id]
-  if (cutoff === undefined) return false
+  // Not loaded, or the opening post lies past the load cap: fail closed.
+  if (cutoff === undefined || Number.isNaN(cutoff)) return false
   const view = threadPosts(t, posts.filter((p) => p.createdAt <= cutoff), archive)
   return view.listable
 }
@@ -105,7 +106,9 @@ export function deltaChanges(delta: DeltaDocs, archive?: ArchiveRef): DeltaChang
       if (isHidden(t)) return true
       // Static listings came from the snapshot: drop one only on evidence, i.e. once its first posts
       // are loaded and fail the rule.
-      if (delta.heads?.[id] === undefined) return false
+      // (A cap-exhausted load, NaN, is no evidence either: the snapshot's listing stands.)
+      const cutoff = delta.heads?.[id]
+      if (cutoff === undefined || Number.isNaN(cutoff)) return false
       if (!gone.has(id)) gone.set(id, !listableLive(t, grouped.get(id) ?? [], delta, undefined, archive))
       return gone.get(id) as boolean
     },

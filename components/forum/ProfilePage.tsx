@@ -17,17 +17,18 @@ import { ThreadList } from './ThreadList'
 
 const joined = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 
-export function ProfilePage({ id, file, role, snapshotAt, forumTitles }: {
+export function ProfilePage({ id, file, role, snapshotAt, forumTitles, archive }: {
   id: string
   file: UserFile | null
   role?: string
   snapshotAt: number
+  archive?: import('@/lib/forum/model').ArchiveRef
   forumTitles: Record<string, string>
 }) {
   const live = useLive(snapshotAt)
   const { session } = useSession()
   const liveProfile = live.profiles.find((p) => p.ownerId === id)
-  const changes = deltaChanges(live)
+  const changes = deltaChanges(live, archive)
   const member: MemberView = useMemo(() => {
     const base: MemberView = file?.member ?? { id, name: '', joinedAt: 0, posts: 0, threads: 0, reactionsReceived: 0 }
     if (!liveProfile) return base

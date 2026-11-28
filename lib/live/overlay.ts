@@ -49,6 +49,9 @@ const headsPending = new Set<string>()
 // Bumped when `since` changes, so a poll started before can't write back stale cursors.
 let generation = 0
 const HEAD_WORKERS = 6
+// Bounded per poll so a flood of touched threads can't delay every update; the rest stay pending
+// (judged as unknown, which fails closed) and load over the next polls.
+const HEADS_PER_POLL = 120
 const HEAD_PAGE = 100
 const HEAD_FIRST_PAGE = 5
 const HEAD_DEADLINE_MS = 10_000
@@ -60,17 +63,22 @@ const HEAD_MAX_PAGES = 5
 async function loadHead(thread: RawDoc): Promise<{ docs: RawDoc[]; cutoff: number }> {
   const docs: RawDoc[] = []
   let startAfter: string | undefined
+  // Imported threads order by original date, not chain order, so their opening post can be any of
+  // the archivist's posts: load the whole thread (up to the cap).
+  const archive = thread.p.origId !== undefined
   for (let i = 0; i < HEAD_MAX_PAGES; i++) {
     // The opening post is nearly always first: a small first page, then full pages.
     const limit = i === 0 ? HEAD_FIRST_PAGE : HEAD_PAGE
     const page = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit, startAfter })
     docs.push(...page.docs)
-    const opening = page.docs.find((p) => p.ownerId === thread.ownerId)
+    const opening = archive ? undefined : page.docs.find((p) => p.ownerId === thread.ownerId)
     if (opening) return { docs, cutoff: opening.createdAt }
     if (!page.full || !page.last) return { docs, cutoff: Infinity }
     startAfter = page.last
   }
-  return { docs, cutoff: docs.length ? docs[docs.length - 1].createdAt : Infinity }
+  // Cap reached before the opening post: no evidence either way (NaN). New replies stay hidden; the
+  // snapshot's own listing of the thread stands.
+  return { docs, cutoff: NaN }
 }
 const STEP_OVERLAP_MS = 2 * 60_000
 const MAX_PAGES = 10
@@ -151,7 +159,7 @@ export function refreshLive(): Promise<void> {
         const t = threadById.get(id)
         // Created after `since`: every post of it is in this delta already (unless the scan was capped).
         if (t && t.createdAt > since) { if (!posts.truncated) cutoffs.set(id, Infinity) } // else: next poll
-        else if (t) queue.push(id)
+        else if (t && queue.length < HEADS_PER_POLL) queue.push(id)
         else headsPending.delete(id) // thread gone (moderator delete): nothing to judge
       }
       await Promise.all(Array.from({ length: Math.min(HEAD_WORKERS, queue.length) }, async () => {
@@ -184,8 +192,8 @@ export function refreshLive(): Promise<void> {
       })
       for (const [key, value] of [...threads.next, ...posts.next, ...reactions.next, ...profiles.next]) cursors.set(key, value)
       for (const [id, cutoff] of cutoffs) { headsFetched.set(id, cutoff); headsPending.delete(id) }
-      // A capped poll resumes from its cursors right away until it has caught up.
-      if (state.truncated) setTimeout(() => void refreshLive(), 1500)
+      // A capped poll, or heads still pending, resumes right away until it has caught up.
+      if (state.truncated || (headsPending.size && cutoffs.size)) setTimeout(() => void refreshLive(), 1500)
     } catch {
       set({ status: state.status === 'live' ? 'live' : 'offline' })
     } finally {

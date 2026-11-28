@@ -61,7 +61,7 @@ export function ThreadPage(props: ThreadPageProps) {
   const [replyTo, setReplyTo] = useState<string | undefined>()
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [fetched, setFetched] = useState<{ thread: RawDoc | null; posts: RawDoc[]; state: 'idle' | 'loading' | 'done' | 'missing' | 'error' }>(
+  const [fetched, setFetched] = useState<{ thread: RawDoc | null; posts: RawDoc[]; truncated?: boolean; state: 'idle' | 'loading' | 'done' | 'missing' | 'error' }>(
     { thread: null, posts: [], state: props.thread ? 'done' : 'idle' })
   const [threadReactions, setThreadReactions] = useState<RawDoc[] | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -75,7 +75,7 @@ export function ThreadPage(props: ThreadPageProps) {
     let alive = true
     setFetched((f) => ({ ...f, state: 'loading' }))
     Promise.all([getDoc('thread', threadId), queryAll('post', { where: [['threadId', '==', threadId]], orderBy: [['$createdAt', 'asc']] }, 20)])
-      .then(([t, p]) => alive && setFetched({ thread: t, posts: p.docs, state: t ? 'done' : 'missing' }))
+      .then(([t, p]) => alive && setFetched({ thread: t, posts: p.docs, truncated: p.truncated, state: t ? 'done' : 'missing' }))
       .catch(() => alive && setFetched((f) => ({ ...f, state: 'error' })))
     return () => { alive = false }
   }, [props.thread, threadId])
@@ -111,13 +111,14 @@ export function ThreadPage(props: ThreadPageProps) {
   // threads are checked in full; static ones through page 1, where the opening post is.
   const listable = useMemo(() => {
     if (!thread || isHidden(thread)) return false
-    if (!props.thread) return threadPosts(thread, mergeDocs(fetched.posts, livePosts), archive).listable
+    // A thread too long to load in full can't be judged here: fail closed (it isn't listed anywhere).
+    if (!props.thread) return !fetched.truncated && threadPosts(thread, mergeDocs(fetched.posts, livePosts), archive).listable
     // Later pages don't hold the opening post; the live delta has it when it was moderated since.
     const opening = page === 1
       ? posts.find((p) => p.ownerId === thread.ownerId)
       : livePosts.find((p) => p.id.slice(0, ID_PREFIX) === props.postIndex[0])
     return !opening || (!isHidden(opening) && !isRetracted(opening))
-  }, [thread, props.thread, props.postIndex, fetched.posts, livePosts, archive, page, posts])
+  }, [thread, props.thread, props.postIndex, fetched.posts, fetched.truncated, livePosts, archive, page, posts])
   // Threads newer than the static index render on the 404 page; give the tab the thread's title.
   const liveTitle = !props.thread && thread && listable ? str(thread, 'title') : undefined
   const siteSuffix = useRef<string | null>(null)

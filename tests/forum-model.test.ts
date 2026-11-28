@@ -195,6 +195,10 @@ describe('live delta', () => {
     expect(movedInThreads({ threads: [moved], posts: [oldOpen], heads: { OLD: Infinity } }, 'G', ctx)).toHaveLength(1)
     expect(newThreads({ threads: [t], posts: [open], truncated: true }, ctx)).toHaveLength(0)
   })
+  it('treats a cap-exhausted head load as no evidence: listings stand, new replies wait', () => {
+    expect(deltaChanges({ threads: [oldThread], posts: [reply], heads: { OLD: NaN } }).threadGone('OLD')).toBe(false)
+    expect(newPosts({ threads: [oldThread], posts: [reply], heads: { OLD: NaN } }, ctx)).toHaveLength(0)
+  })
   it('ignores live posts in hidden or unknown threads', () => {
     expect(newPosts({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [reply] }, ctx)).toHaveLength(0)
     expect(newPosts({ threads: [], posts: [reply] }, ctx)).toHaveLength(0)

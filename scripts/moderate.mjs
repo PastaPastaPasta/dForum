@@ -54,13 +54,20 @@ try {
       const thread = post && (await sdk.documents.get(contractId, 'thread', post.threadId))?.toJSON();
       if (thread && thread.modState == null) {
         let opening = null;
+        const all = [];
         let startAfter;
         for (let i = 0; i < 5 && !opening; i++) {
           const res = await sdk.documents.query({ dataContractId: contractId, documentTypeName: 'post', where: [['threadId', '==', thread.$id]], orderBy: [['$createdAt', 'asc']], limit: 100, ...(startAfter ? { startAfter } : {}) });
           const docs = [...res.values()].filter(Boolean).map((d) => d.toJSON());
-          opening = docs.find((d) => d.$ownerId === thread.$ownerId) ?? null;
+          all.push(...docs);
+          // Imported threads order by original date: read the whole thread for those.
+          if (thread.origId == null) opening = docs.find((d) => d.$ownerId === thread.$ownerId) ?? null;
           if (docs.length < 100) break;
           startAfter = docs[docs.length - 1].$id;
+        }
+        if (thread.origId != null) {
+          const own = all.filter((d) => d.$ownerId === thread.$ownerId).sort((a, b) => (a.origCreatedAt ?? a.$createdAt) - (b.origCreatedAt ?? b.$createdAt));
+          opening = own[0] ?? null;
         }
         if (!opening || opening.$id === id) {
           await sdk.contracts.moderatorChangeDocumentFields({ identity, contractId, documentTypeName: 'thread', documentId: thread.$id, fields: { modState: 1 }, signer, reason: reason ?? { text: 'Opening post deleted' } });

@@ -1,3 +1,4 @@
+import { archiveRef } from '@/lib/forum/model'
 import type { Metadata } from 'next'
 import { members, site, userFile } from '@/lib/server/site-data'
 import { rolesFor } from '@/lib/server/thread-route'
@@ -15,5 +16,5 @@ export function generateMetadata({ params }: { params: { id: string } }): Metada
 export default function Page({ params }: { params: { id: string } }) {
   const s = site()
   return <ProfilePage id={params.id} file={userFile(params.id)} role={rolesFor()[params.id]} snapshotAt={s.snapshotAt}
-    forumTitles={Object.fromEntries(s.forums.map((f) => [f.id, f.title]))} />
+    forumTitles={Object.fromEntries(s.forums.map((f) => [f.id, f.title]))} archive={archiveRef(s.settings)} />
 }
