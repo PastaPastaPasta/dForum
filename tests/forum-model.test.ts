@@ -1,0 +1,127 @@
+import { describe, expect, it } from 'vitest'
+import type { RawDoc } from '@/lib/forum/types'
+import {
+  compareIds, countReactions, effectiveAt, isArchive, mergeDocs, resolveForumTree, summarizeThread, threadPosts, sortThreadSummaries, excerpt,
+} from '@/lib/forum/model'
+import { forumActivity, mergeForumThreads, newThreads } from '@/lib/forum/live-merge'
+import { splitBody, byteLength } from '@/lib/forum/actions'
+import { normalizeTagInput } from '@/lib/forum/tags'
+
+const ARCH = 'ARCHIVISTxxxxxxxxxxxxxxxxxxxxxxxxxxxx1'
+let seq = 0
+const id = () => `${'1'.repeat(3)}${(++seq).toString().padStart(4, '2')}${'A'.repeat(33)}`
+const doc = (ownerId: string, createdAt: number, p: Record<string, unknown>, extra: Partial<RawDoc> = {}): RawDoc =>
+  ({ id: id(), ownerId, revision: 1, createdAt, updatedAt: createdAt, p, ...extra })
+
+describe('ordering and provenance', () => {
+  it('compares base58 ids by byte value, not by string', () => {
+    expect(compareIds('2', 'z')).toBeLessThan(0)
+    expect(compareIds('11', '2')).toBeLessThan(0)
+    expect(compareIds('zz', 'zz')).toBe(0)
+  })
+  it('trusts archive fields only from the archive owner', () => {
+    const forged = doc('mallory', 5000, { origCreatedAt: 1, origAuthor: 'satoshi' })
+    const real = doc(ARCH, 5000, { origCreatedAt: 1, origAuthor: 'satoshi' })
+    expect(isArchive(forged, ARCH)).toBe(false)
+    expect(effectiveAt(forged, ARCH)).toBe(5000)
+    expect(isArchive(real, ARCH)).toBe(true)
+    expect(effectiveAt(real, ARCH)).toBe(1)
+    expect(isArchive(real, undefined)).toBe(false)
+  })
+})
+
+describe('thread visibility', () => {
+  const thread = doc('alice', 100, { title: 'Hello', forumId: 'F' })
+  it('lists a thread whose opening post is the owner’s earliest visible post', () => {
+    const noise = doc('bob', 50, { threadId: thread.id, body: 'before' })
+    const open = doc('alice', 110, { threadId: thread.id, body: 'hi' })
+    const reply = doc('bob', 120, { threadId: thread.id, body: 'yo' })
+    const view = threadPosts(thread, [reply, noise, open], ARCH)
+    expect(view.listable).toBe(true)
+    expect(view.posts.map((p) => p.p.body)).toEqual(['hi', 'yo'])
+  })
+  it('hides threads whose opening post is hidden, retracted or missing, and drops posts after the lock', () => {
+    expect(threadPosts(thread, [doc('bob', 110, { threadId: thread.id, body: 'x' })], ARCH).listable).toBe(false)
+    expect(threadPosts(thread, [doc('alice', 110, { threadId: thread.id, body: 'x', modState: 1 })], ARCH).listable).toBe(false)
+    expect(threadPosts(thread, [doc('alice', 110, { threadId: thread.id, body: 'x', retracted: true })], ARCH).listable).toBe(false)
+    const locked = { ...thread, p: { ...thread.p, lockedAt: 130 } }
+    const posts = [doc('alice', 110, { threadId: thread.id, body: 'a' }), doc('bob', 140, { threadId: thread.id, body: 'late' })]
+    expect(threadPosts(locked, posts, ARCH).posts.map((p) => p.p.body)).toEqual(['a'])
+  })
+  it('orders archive posts by their original date even when imported out of order', () => {
+    const t = doc(ARCH, 1000, { title: 'Old', forumId: 'F', origCreatedAt: 10, origId: 1, origAuthor: 'x' })
+    const second = doc(ARCH, 1001, { threadId: t.id, body: 'second', origCreatedAt: 20, origAuthor: 'y' })
+    const first = doc(ARCH, 1002, { threadId: t.id, body: 'first', origCreatedAt: 10, origAuthor: 'x' })
+    const view = threadPosts(t, [second, first], ARCH)
+    expect(view.opening?.p.body).toBe('first')
+    const s = summarizeThread(t, view, {}, ARCH)
+    expect(s).toMatchObject({ createdAt: 10, replies: 1, lastPostAt: 20, archiveAuthor: 'x', lastPostArchiveAuthor: 'y' })
+  })
+})
+
+describe('merging and counting', () => {
+  it('keeps the newest revision and the latest moderation of the same revision', () => {
+    const a = doc('u', 1, { body: 'v1' })
+    const b = { ...a, revision: 2, p: { body: 'v2' } }
+    const c = { ...b, moderatedAt: 9, p: { body: 'v2', modState: 1 } }
+    expect(mergeDocs([a], [b])[0].p.body).toBe('v2')
+    expect(mergeDocs([b], [c])[0].p.modState).toBe(1)
+    expect(mergeDocs([c], [a])[0].revision).toBe(2)
+  })
+  it('counts reactions per post and kind', () => {
+    const r = (postId: string, kind: number) => doc('x', 1, { postId, kind })
+    expect(countReactions([r('p', 1), r('p', 1), r('p', 2), r('q', 1)])).toEqual({ p: { 1: 2, 2: 1 }, q: { 1: 1 } })
+  })
+  it('resolves sub-forums and ignores cycles or cross-category parents', () => {
+    const f = (fid: string, cat: string, parent?: string) => ({ id: fid, categoryId: cat, parentForumId: parent, slug: fid, title: fid, sort: 0, archived: false, threadCount: 0, postCount: 0 })
+    const tree = resolveForumTree([f('a', 'c'), f('b', 'c', 'a'), f('x', 'c', 'y'), f('y', 'c', 'x'), f('z', 'd', 'a'), f('o', 'gone')], [{ id: 'c', slug: 'c', title: 'c', sort: 0 }, { id: 'd', slug: 'd', title: 'd', sort: 0 }])
+    const parent = Object.fromEntries(tree.map((t) => [t.id, t.parentForumId]))
+    expect(parent).toEqual({ a: undefined, b: 'a', x: undefined, y: undefined, z: undefined })
+  })
+  it('sorts pinned first, then by latest activity', () => {
+    const s = (sid: string, sticky: boolean, lastPostAt: number) => ({ id: sid, sticky, lastPostAt }) as never
+    expect(sortThreadSummaries([s('a', false, 5), s('b', true, 1), s('c', false, 9)]).map((x: { id: string }) => x.id)).toEqual(['b', 'c', 'a'])
+  })
+})
+
+describe('live delta', () => {
+  const snapshotAt = 1000
+  const t = doc('alice', 1500, { title: 'New', forumId: 'F' })
+  const open = doc('alice', 1501, { threadId: t.id, forumId: 'F', body: 'hi' })
+  const reply = doc('bob', 1600, { threadId: 'OLD', forumId: 'F', body: 'reply' })
+  const old = { id: 'OLD', forumId: 'F', title: 'Old', tags: [], ownerId: 'carol', createdAt: 10, sticky: false, locked: false, replies: 3, reactions: 0, lastPostAt: 500, lastPostAuthorId: 'carol' }
+  it('adds new threads only once their opening post is visible', () => {
+    expect(newThreads({ threads: [t], posts: [] }, snapshotAt)).toHaveLength(0)
+    expect(newThreads({ threads: [t], posts: [open] }, snapshotAt)).toHaveLength(1)
+  })
+  it('bumps forum counts and the thread list', () => {
+    const a = forumActivity({ threads: [t], posts: [open, reply] }, snapshotAt)
+    expect(a.get('F')).toMatchObject({ threads: 1, posts: 2 })
+    const list = mergeForumThreads([old], 'F', { threads: [t], posts: [open, reply] }, snapshotAt)
+    expect(list.find((x) => x.id === 'OLD')).toMatchObject({ replies: 4, lastPostAt: 1600, lastPostAuthorId: 'bob' })
+    expect(list.find((x) => x.id === t.id)).toMatchObject({ replies: 0, title: 'New' })
+  })
+  it('drops threads that were hidden or moved away since the snapshot', () => {
+    const hidden = { ...doc('carol', 5, { title: 'Old', forumId: 'F', modState: 1 }), id: 'OLD' }
+    expect(mergeForumThreads([old], 'F', { threads: [hidden], posts: [] }, snapshotAt)).toHaveLength(0)
+    const moved = { ...doc('carol', 5, { title: 'Old', forumId: 'F', movedToForumId: 'G' }), id: 'OLD' }
+    expect(mergeForumThreads([old], 'F', { threads: [moved], posts: [] }, snapshotAt)).toHaveLength(0)
+  })
+})
+
+describe('write helpers', () => {
+  it('splits bodies into two 5120-byte parts on code-point boundaries', () => {
+    expect(splitBody('short')).toEqual({ body: 'short' })
+    const text = '€'.repeat(3000)
+    const parts = splitBody(text)
+    expect(byteLength(parts.body)).toBeLessThanOrEqual(5120)
+    expect(parts.body + parts.body2).toBe(text)
+    expect(() => splitBody('x'.repeat(10241))).toThrow(/too long/)
+  })
+  it('normalizes tags', () => {
+    expect(normalizeTagInput('Dash Platform, wallet,, WALLET, a, b, c, d')).toEqual(['dash-platform', 'wallet', 'a', 'b', 'c'])
+  })
+  it('makes plain excerpts', () => {
+    expect(excerpt('> quote\n**bold** [link](https://x) `code`\n```\nblock\n```', 100)).toBe('bold link code')
+  })
+})

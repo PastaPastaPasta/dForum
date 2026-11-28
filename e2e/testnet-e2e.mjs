@@ -1,0 +1,212 @@
+/**
+ * Full testnet scenario against a running build (E2E_SITE) with the yappr test-wallet responder.
+ * Personas (contracts/deployments/testnet.json): 92 bob, 93 carol (moderator), 94 mallory.
+ *
+ *   node e2e/testnet-e2e.mjs            (from the repo root; needs .env.local for carol's key)
+ *
+ * Writes evidence screenshots to E2E_SHOTS (default /work/tmp/shots/e2e) and a JSON summary.
+ */
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { chromium } from '/work/scratch/dforum-tools/node_modules/playwright-core/index.mjs'
+import { CDP, SITE, log, login } from './helpers.mjs'
+import { deriveIdentityKeys } from '../scripts/derive-identities.mjs'
+
+const SHOTS = process.env.E2E_SHOTS ?? '/work/tmp/shots/e2e'
+mkdirSync(SHOTS, { recursive: true })
+const RUN = new Date().toISOString().slice(5, 16).replace(/[-T:]/g, '')
+const result = { run: RUN, steps: [] }
+let shotN = 0
+
+const browser = await chromium.connectOverCDP(CDP)
+async function persona(name) {
+  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } })
+  const page = await ctx.newPage()
+  page.on('pageerror', (e) => log(name, 'pageerror', e.message.slice(0, 200)))
+  page.on('dialog', (d) => { log(name, 'confirm:', d.message().slice(0, 120)); void d.accept() })
+  page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) log(name, 'console', m.text().slice(0, 200)) })
+  return { name, ctx, page }
+}
+async function shot(p, label) {
+  const file = `${SHOTS}/${String(++shotN).padStart(2, '0')}-${p.name}-${label}.png`
+  await p.page.screenshot({ path: file, fullPage: true })
+  return file
+}
+async function step(label, fn) {
+  const t0 = Date.now()
+  log('▶', label)
+  try {
+    const detail = await fn()
+    result.steps.push({ label, ok: true, ms: Date.now() - t0, ...(detail ? { detail } : {}) })
+    log('✓', label, `${((Date.now() - t0) / 1000).toFixed(1)}s`)
+    return detail
+  } catch (e) {
+    for (const p of [bob, carol, mallory]) await p?.page.screenshot({ path: `${SHOTS}/FAIL-${p.name}.png`, fullPage: true }).catch(() => undefined)
+    result.steps.push({ label, ok: false, ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 500) })
+    log('✗', label, String(e?.message ?? e).slice(0, 300))
+    throw e
+  }
+}
+const WRITE_TIMEOUT = 120_000
+
+let bob, carol, mallory
+bob = await persona('bob')
+carol = await persona('carol')
+mallory = await persona('mallory')
+let threadUrl, threadId, spamThreadId
+
+try {
+  await step('bob logs in with Dash (App Connect v2 via test wallet)', () => login(bob.page, 92, { shots: `${SHOTS}/00-bob` }))
+  await step('bob saves a profile', async () => {
+    await bob.page.goto(`${SITE}/settings/`)
+    await bob.page.getByLabel('Display name').fill(`Bob ${RUN}`)
+    await bob.page.getByLabel('Location').fill('Testnet')
+    await bob.page.getByLabel('About you').fill('I test **dForum** on testnet.')
+    await bob.page.getByLabel('Signature').fill('Bob, testnet persona')
+    await bob.page.getByRole('button', { name: 'Save profile' }).click()
+    await bob.page.getByText('Profile saved to Dash Platform.').waitFor({ timeout: WRITE_TIMEOUT })
+    return shot(bob, 'profile-saved')
+  })
+  await step('bob starts a thread', async () => {
+    await bob.page.goto(`${SITE}/new/?forum=introductions`)
+    await bob.page.getByLabel('Title').fill(`Hello from bob ${RUN}`)
+    await bob.page.getByLabel('Tags').fill('introductions, testnet')
+    await bob.page.getByLabel('Opening post').fill(`Hi all. This thread was written by the **testnet e2e run ${RUN}**.\n\n- markdown lists work\n- so do [links](https://www.dash.org)\n\n> and quotes`)
+    await bob.page.getByRole('button', { name: 'Post thread' }).click()
+    await bob.page.waitForURL(/\/t\/[1-9A-HJ-NP-Za-km-z]{40,44}\/?$/, { timeout: WRITE_TIMEOUT })
+    threadUrl = bob.page.url()
+    threadId = threadUrl.match(/\/t\/([^/]+)/)[1]
+    await bob.page.getByRole('heading', { name: `Hello from bob ${RUN}` }).waitFor({ timeout: 60_000 })
+    return { threadId, shot: await shot(bob, 'thread-created') }
+  })
+  await step('bob replies and edits the reply', async () => {
+    await bob.page.getByLabel('Write a reply').fill('A first reply, to be edited.')
+    await bob.page.getByRole('button', { name: 'Post reply' }).click()
+    const found = bob.page.locator('article').filter({ hasText: 'A first reply, to be edited.' })
+    await found.waitFor({ timeout: WRITE_TIMEOUT })
+    const reply = bob.page.locator(`article#${await found.getAttribute('id')}`)
+    await reply.getByRole('button', { name: 'Edit' }).click()
+    await reply.getByLabel('Edit post').fill('A first reply, **edited** on chain.')
+    await reply.getByRole('button', { name: 'Save changes' }).click()
+    await bob.page.locator('article').filter({ hasText: 'edited on chain' }).waitFor({ timeout: WRITE_TIMEOUT })
+    return shot(bob, 'reply-edited')
+  })
+  await step('carol logs in, reacts and quote-replies', async () => {
+    await login(carol.page, 93)
+    await carol.page.goto(threadUrl)
+    const opening = carol.page.locator('article').first()
+    await opening.waitFor({ timeout: 60_000 })
+    await opening.getByRole('button', { name: 'React' }).click()
+    await carol.page.getByRole('menuitemradio', { name: 'Like' }).click()
+    await opening.getByRole('button', { name: /Like: 1/ }).waitFor({ timeout: WRITE_TIMEOUT })
+    await opening.getByRole('button', { name: 'Quote' }).click()
+    await carol.page.getByLabel('Write a reply').press('End')
+    await carol.page.getByLabel('Write a reply').pressSequentially('Welcome, bob!')
+    await carol.page.getByRole('button', { name: 'Post reply' }).click()
+    await carol.page.locator('article').filter({ hasText: 'Welcome, bob!' }).waitFor({ timeout: WRITE_TIMEOUT })
+    return shot(carol, 'reacted-quoted')
+  })
+  await step('mallory posts spam', async () => {
+    await login(mallory.page, 94)
+    await mallory.page.goto(threadUrl)
+    await mallory.page.getByLabel('Write a reply').fill(`BUY CHEAP COINS at scam.example ${RUN}`)
+    await mallory.page.getByRole('button', { name: 'Post reply' }).click()
+    await mallory.page.locator('article').filter({ hasText: 'BUY CHEAP COINS' }).waitFor({ timeout: WRITE_TIMEOUT })
+    await mallory.page.goto(`${SITE}/new/?forum=forum-feedback`)
+    await mallory.page.getByLabel('Title').fill(`Free money ${RUN}`)
+    await mallory.page.getByLabel('Opening post').fill('Send 1 DASH, get 2 back.')
+    await mallory.page.getByRole('button', { name: 'Post thread' }).click()
+    await mallory.page.waitForURL(/\/t\/[1-9A-HJ-NP-Za-km-z]{40,44}\/?$/, { timeout: WRITE_TIMEOUT })
+    spamThreadId = mallory.page.url().match(/\/t\/([^/]+)/)[1]
+    return { spamThreadId, shot: await shot(mallory, 'spam-posted') }
+  })
+  await step('bob sees alerts and reports the spam reply', async () => {
+    await bob.page.goto(`${SITE}/alerts/`)
+    await bob.page.getByText('reacted').first().waitFor({ timeout: 90_000 })
+    await shot(bob, 'alerts')
+    await bob.page.goto(threadUrl)
+    const spam = bob.page.locator('article').filter({ hasText: 'BUY CHEAP COINS' })
+    await spam.waitFor({ timeout: 90_000 })
+    await spam.getByRole('button', { name: 'Report' }).click()
+    await spam.getByLabel('Reason').selectOption('1')
+    await spam.getByLabel('Details').fill('Scam link')
+    await spam.getByRole('button', { name: 'Send report' }).click()
+    await spam.getByRole('button', { name: 'Reported' }).waitFor({ timeout: WRITE_TIMEOUT })
+    return shot(bob, 'reported')
+  })
+  const carolKey = deriveIdentityKeys(3).find((k) => k.securityLevel === 'CRITICAL' && k.purpose === 'AUTHENTICATION').wif
+  await step('carol unlocks the moderation console', async () => {
+    await carol.page.bringToFront()
+    await carol.page.goto(`${SITE}/moderation/`)
+    await carol.page.getByLabel('CRITICAL key (WIF)').fill(carolKey)
+    await carol.page.getByRole('button', { name: 'Unlock console' }).click()
+    await carol.page.getByText(/Signing as/).waitFor({ timeout: 60_000 })
+  })
+  await step('carol hides the reported post from the report queue', async () => {
+    const report = carol.page.locator('li').filter({ hasText: 'BUY CHEAP COINS' }).first()
+    await report.waitFor({ timeout: 90_000 })
+    await shot(carol, 'report-queue')
+    await report.getByRole('button', { name: 'Hide post' }).click()
+    await carol.page.getByText('Hide post and resolve: done').waitFor({ timeout: WRITE_TIMEOUT })
+    return shot(carol, 'report-resolved')
+  })
+  await step('carol pins and locks bob’s thread', async () => {
+    await carol.page.getByRole('button', { name: 'Content' }).click()
+    await carol.page.getByLabel('Thread or post link').fill(threadUrl)
+    await carol.page.getByRole('button', { name: 'Find' }).click()
+    await carol.page.getByTestId('moderation-target').filter({ hasText: `Hello from bob ${RUN}` }).waitFor({ timeout: 60_000 })
+    await carol.page.getByRole('button', { name: 'Pin' }).click()
+    await carol.page.getByText('Pin: done').waitFor({ timeout: WRITE_TIMEOUT })
+    await carol.page.getByRole('button', { name: 'Lock', exact: true }).click()
+    await carol.page.getByText('Lock: done').waitFor({ timeout: WRITE_TIMEOUT })
+    return shot(carol, 'pinned-locked')
+  })
+  await step('carol moves then hides mallory’s spam thread', async () => {
+    await carol.page.getByLabel('Thread or post link').fill(`${SITE}/t/${spamThreadId}/`)
+    await carol.page.getByRole('button', { name: 'Find' }).click()
+    await carol.page.getByTestId('moderation-target').filter({ hasText: `Free money ${RUN}` }).waitFor({ timeout: 60_000 })
+    await carol.page.getByLabel('Move to forum').selectOption({ label: 'Announcements' })
+    await carol.page.getByRole('button', { name: 'Move' }).click()
+    await carol.page.getByText('Move thread: done').waitFor({ timeout: WRITE_TIMEOUT })
+    await carol.page.getByRole('button', { name: 'Hide', exact: true }).click()
+    await carol.page.getByText('Hide: done').waitFor({ timeout: WRITE_TIMEOUT })
+  })
+  await step('carol bans mallory', async () => {
+    await carol.page.getByRole('button', { name: 'Members' }).click()
+    await carol.page.getByLabel('Member identity id').fill('5T9NKrPoBWrEDgyGfSHqaqDSKeTkHMr3otusqaxGmbyP')
+    await carol.page.getByRole('button', { name: 'Look up' }).click()
+    await carol.page.getByPlaceholder(/Reason/).fill('Spam and scam links')
+    await carol.page.getByRole('button', { name: 'Ban', exact: true }).click()
+    await carol.page.getByText('Ban: done').waitFor({ timeout: WRITE_TIMEOUT })
+    await carol.page.getByText(/banned/).first().waitFor({ timeout: 30_000 })
+    await shot(carol, 'banned')
+    await carol.page.getByRole('button', { name: 'Audit log' }).click()
+    await carol.page.getByText(/report actioned|hidden/).first().waitFor({ timeout: 60_000 })
+    return shot(carol, 'audit-log')
+  })
+  await step('the network refuses mallory’s next post', async () => {
+    await mallory.page.goto(`${SITE}/new/?forum=forum-feedback`)
+    await mallory.page.getByLabel('Title').fill(`Banned attempt ${RUN}`)
+    await mallory.page.getByLabel('Opening post').fill('This should be refused by consensus.')
+    await mallory.page.getByRole('button', { name: 'Post thread' }).click()
+    const alert = mallory.page.locator('p[role=alert]').filter({ hasText: /\S/ })
+    await alert.waitFor({ timeout: WRITE_TIMEOUT })
+    const text = await alert.innerText()
+    if (!/banned|suspended/i.test(text)) throw new Error(`unexpected refusal text: ${text}`)
+    await shot(mallory, 'ban-refused')
+    if (/\/t\//.test(mallory.page.url())) throw new Error('banned write succeeded')
+    return { refusal: text.slice(0, 200) }
+  })
+  await step('bob sees the locked thread with the spam hidden', async () => {
+    await bob.page.goto(threadUrl)
+    await bob.page.getByText('This post was hidden by a moderator.').waitFor({ timeout: 90_000 })
+    await bob.page.getByText('This thread is locked').waitFor({ timeout: 30_000 })
+    return shot(bob, 'thread-after-moderation')
+  })
+} finally {
+  result.threadId = threadId
+  result.spamThreadId = spamThreadId
+  writeFileSync(`${SHOTS}/result.json`, JSON.stringify(result, null, 2))
+  for (const p of [bob, carol, mallory]) await p.ctx.close().catch(() => undefined)
+  await browser.close()
+}
+console.log(JSON.stringify(result, null, 1))

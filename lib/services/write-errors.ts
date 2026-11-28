@@ -55,16 +55,35 @@ export function classifyWriteError(err: unknown): AppConnectErrorClassification 
   return classifyAppConnectError(code)
 }
 
+/** Best human-readable text for any thrown value (wasm SDK errors are not Error instances). */
+export function errorText(err: unknown): string {
+  if (typeof err === 'string') return err
+  if (err && typeof err === 'object') {
+    const e = err as { message?: unknown; kind?: unknown; code?: unknown; toString?: () => string }
+    const msg = typeof e.message === 'string' && e.message ? e.message : ''
+    if (msg) return typeof e.code === 'number' && !msg.includes(String(e.code)) ? `${msg} (code ${e.code})` : msg
+    const str = typeof e.toString === 'function' ? e.toString() : ''
+    if (str && str !== '[object Object]') return str
+  }
+  return 'The write failed for an unknown reason.'
+}
+
 /** The actionable copy for a failed write, plus whether the session should be torn down. */
 export function writeFailureMessage(err: unknown): {
   message: string
   classification: AppConnectErrorClassification | null
   sessionLogout: boolean
 } {
+  const text = errorText(err)
+  if (/is banned on contract|code 41107/i.test(text)) {
+    return { message: 'Moderators have banned your identity from posting on this forum.', classification: null, sessionLogout: false }
+  }
+  if (/suspended/i.test(text) && /contract/i.test(text)) {
+    return { message: 'Your identity is suspended on this forum for now. Try again after the suspension ends.', classification: null, sessionLogout: false }
+  }
   const classification = classifyWriteError(err)
   if (!classification) {
-    const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : 'error'
-    return { message: raw, classification: null, sessionLogout: false }
+    return { message: errorText(err), classification: null, sessionLogout: false }
   }
   switch (classification.action) {
     case 'logout':
@@ -81,7 +100,7 @@ export function writeFailureMessage(err: unknown): {
       }
     default:
       return {
-        message: err instanceof Error ? err.message : 'Write failed.',
+        message: errorText(err),
         classification,
         sessionLogout: false,
       }

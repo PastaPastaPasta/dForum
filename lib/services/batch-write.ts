@@ -25,7 +25,12 @@ export interface BatchWriteArgs {
   nonce: bigint
   authKeyWif: string
   identityKey: IdentityPublicKey
+  /** After an ambiguous failure: did the write land anyway? */
+  landed?: (documentId: string) => Promise<boolean>
 }
+
+const TRANSIENT = /Tenderdash is not available|\(code 14\)|UNAVAILABLE|Deadline expired|timed out|no available (addresses|nodes)|connection (refused|reset)|transport error/i
+const errText = (e: unknown) => String((e as { message?: unknown })?.message ?? e)
 
 /**
  * Builds, signs and broadcasts the batched write, waiting for the proof.
@@ -45,11 +50,18 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
   if (documentOwnerId && documentOwnerId !== args.ownerId) {
     throw new Error('Batched write owner does not match the document owner')
   }
-  const { BatchedTransition, BatchTransition, DocumentCreateTransition, DocumentReplaceTransition, PrivateKey } = await import('@dashevo/wasm-sdk')
-  const transition =
-    args.kind === 'create'
-      ? new DocumentCreateTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()
-      : new DocumentReplaceTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()
+  const { BatchedTransition, BatchTransition, DocumentCreateTransition, DocumentReplaceTransition, PrivateKey } = await import('@dashevo/evo-sdk')
+  let transition
+  if (args.kind === 'create') {
+    transition = new DocumentCreateTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()
+  } else {
+    // The document carries the new revision; some SDK builds bump it again inside the
+    // transition constructor, so pin it to what the chain expects (current + 1).
+    const replace = new DocumentReplaceTransition({ document: args.document, identityContractNonce: args.nonce })
+    const wanted = args.document.revision
+    if (wanted !== undefined && replace.revision !== wanted) replace.revision = wanted
+    transition = replace.toDocumentTransition()
+  }
   const batched = new BatchedTransition(transition)
   const stateTransition: StateTransition = BatchTransition.fromBatchedTransitions([batched], args.ownerId, 0).toStateTransition()
   stateTransition.setIdentityContractNonce(args.nonce)
@@ -62,8 +74,18 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
   }
 
   const sdk = await getSdk()
+  const documentId = args.document.id?.toBase58?.() ?? ''
   try {
-    await sdk.stateTransitions.broadcastAndWait(stateTransition)
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await sdk.stateTransitions.broadcastAndWait(stateTransition)
+        break
+      } catch (e) {
+        if (documentId && args.landed && (await args.landed(documentId).catch(() => false))) break
+        if (attempt >= 3 || !TRANSIENT.test(errText(e))) throw e
+        await new Promise((r) => setTimeout(r, 1500 * attempt))
+      }
+    }
   } finally {
     stateTransition.free()
   }

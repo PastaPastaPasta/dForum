@@ -1,1176 +1,398 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { ExternalLink, EyeOff, Lock, Pin, ShieldCheck, Trash2, ArrowRightLeft, Eye, Unlock, Flag, Gavel, ScrollText, Search } from 'lucide-react'
+import type { RawDoc } from '@/lib/forum/types'
+import { excerpt, isHidden, num, postBody, shortId, str, threadForumId } from '@/lib/forum/model'
+import { REPORT_REASONS } from '@/lib/forum/actions'
+import { getDoc, queryAll, queryPage } from '@/lib/live/platform'
+import { refreshLive } from '@/lib/live/overlay'
+import { useNames } from '@/lib/live/names'
+import { useModeratorKey } from '@/lib/moderation/use-moderator-key'
 import {
-  Shield, Ban, Undo2, Clock, AlertTriangle, Trash2, Bell, BellOff, Loader2, ShieldCheck,
-  Eye, EyeOff, Pin, Lock, Unlock, KeyRound, Search, RefreshCw, ShieldAlert, ExternalLink,
-} from 'lucide-react'
-import { queryRaw, get } from '@/lib/services/document-service'
-import {
-  prepareModerator, validateCriticalKey, getRoster, moderationStatus,
-  banUser, unbanUser, suspendUser, unsuspendUser, warnUser, clearWarnings,
-  changeDocumentFields, deleteDocument, type ModerationIdentity, type Roster,
+  type ModerationIdentity, banUser, changeDocumentFields, clearWarnings, deleteDocument, moderationStatus, suspendUser, unbanUser, unsuspendUser, warnUser,
 } from '@/lib/services/moderation-service'
-import { earliestOwnerPost } from '@/lib/services/orphan'
-import { CONTRACT_ID, NETWORK, STORAGE_KEY_PREFIX } from '@/lib/constants'
-import { shortId, formatDate, formatRelativeTime, codePointSlice } from '@/lib/utils'
-import { hostIsLocal, hostIsCanonical, canonicalHost } from '@/lib/host'
-import { redactWif } from '@/lib/redact'
-import { useFrameBuster } from '@/lib/use-frame-buster'
+import { writeFailureMessage } from '@/lib/services/write-errors'
 import { useSession } from '@/lib/session'
+import { LOGIN_AVAILABLE, canonicalHost, hostIsCanonical } from '@/lib/host'
+import { useFrameBuster } from '@/lib/use-frame-buster'
+import { redactWif } from '@/lib/redact'
+import { Time } from '@/components/ui/Time'
 
-// The CRITICAL key lives only in this tab's memory — never in storage, never
-// written anywhere except the platform's request. “Dropped from app state”,
-// not a guarantee about memory: JS strings can't be zeroed, and the WASM
-// signer is freed on wipe (free()) and on navigation.
-const CRITICAL_ID_STORAGE = `${STORAGE_KEY_PREFIX}:moderator:identityId`
-const DOC_PAGE_SIZE = 12
-const IDLE_WIPE_MS = 10 * 60 * 1000
-
-interface StatusData {
-  banned?: boolean
-  banReason?: { text: string } | null
-  suspendedUntil?: bigint | null
-  suspensionReason?: { text: string } | null
-  warnings?: Array<{ reason?: { text: string } | null; createdAtEpoch?: number }>
-}
-
-interface ModeratableDoc {
-  id: string
-  type: 'thread' | 'post'
-  title: string
-  ownerId: string
-  createdAt: number
-  sticky?: boolean | null
-  lockedAt?: number | null
-  modState?: number | null
-}
+type Tab = 'reports' | 'content' | 'members' | 'log'
+type ForumOption = { id: string; title: string }
 
 export default function ModerationPage() {
+  const frame = useFrameBuster()
+  const [host, setHost] = useState('')
+  useEffect(() => setHost(location.hostname), [])
+  if (frame === 'unknown' || !host) return <p role="status" className="py-16 text-center text-ink-2">Loading…</p>
+  if (frame === 'framed') return <Gate title="Open this page in its own tab" body="The moderation console holds a signing key, so it never runs inside a frame." />
+  if (!LOGIN_AVAILABLE || !hostIsCanonical(host)) {
+    return <Gate title="Moderation is not available here" body={`Moderators sign in on ${canonicalHost()}. Other copies of this site are read only.`} />
+  }
+  return <Console />
+}
+
+function Gate({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="panel mx-auto max-w-md p-8 text-center">
+      <h1 className="text-xl font-semibold">{title}</h1>
+      <p className="mt-2 text-ink-2">{body}</p>
+    </div>
+  )
+}
+
+function Console() {
+  const { session } = useSession()
+  const key = useModeratorKey()
   const [identityId, setIdentityId] = useState('')
   const [wif, setWif] = useState('')
-  const [admin, setAdmin] = useState<ModerationIdentity | null>(null)
-  const [validating, setValidating] = useState(false)
-  const [validation, setValidation] = useState<{ ok: boolean; reason?: string } | null>(null)
+  const [tab, setTab] = useState<Tab>('reports')
+  const [forums, setForums] = useState<ForumOption[]>([])
+  const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
 
-  const { session } = useSession()
-  const [host, setHost] = useState('')
-  const [roster, setRoster] = useState<Roster | null>(null)
-  const [rosterError, setRosterError] = useState(false)
-  const freshRosterLandedRef = useRef(false)
-  const [targetId, setTargetId] = useState('')
-  const [status, setStatus] = useState<StatusData | null>(null)
-  const pendingFreeRef = useRef(false)
-  const [statusLoading, setStatusLoading] = useState(false)
-  const [banReason, setBanReason] = useState('')
-  const [warnReason, setWarnReason] = useState('')
-  const [suspendHours, setSuspendHours] = useState('24')
-  const [suspendReason, setSuspendReason] = useState('')
-  const [actionBusy, setActionBusy] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
-  const [statusForId, setStatusForId] = useState<string | null>(null)
-
-  const [docs, setDocs] = useState<ModeratableDoc[]>([])
-  const [docsLoading, setDocsLoading] = useState(true)
-  const [docsError, setDocsError] = useState(false)
-  const [docActionBusy, setDocActionBusy] = useState<string | null>(null)
-  const [threadsAfter, setThreadsAfter] = useState<string | null>(null)
-  const [postsAfter, setPostsAfter] = useState<string | null>(null)
-  const [threadsMore, setThreadsMore] = useState(true)
-  const [postsMore, setPostsMore] = useState(true)
-  const [lookupId, setLookupId] = useState('')
-  const [lookupBusy, setLookupBusy] = useState(false)
-  const [lookupDoc, setLookupDoc] = useState<ModeratableDoc | null>(null)
-  const [lookupError, setLookupError] = useState<string | null>(null)
-
-  const [wipedNotice, setWipedNotice] = useState<string | null>(null)
-  const signerRef = useRef<{ free(): void } | null>(null)
-  const wipeGenRef = useRef(0)
-  const mountedRef = useRef(true)
-  const inFlightRef = useRef(0)
-  const pendingWipeRef = useRef<string | null>(null)
-  const frameState = useFrameBuster()
-
-  // Internal wipe: bump the wipe generation, free the signer, zero all state.
-  // Never shows a notice (used by unmount cleanup where no one is watching).
-  // If moderator calls are in flight, the WIF and admin state are dropped
-  // now but the signer is only freed once the last call settles — freeing it
-  // mid-flight would corrupt the SDK's WASM state for the whole session.
-  const internalWipe = useCallback((reason?: string) => {
-    wipeGenRef.current += 1
-    if (inFlightRef.current > 0) {
-      // The wipe intent is recorded unconditionally — a key the user explicitly
-      // cleared must be released too, not only on idle-wipe/pagehide. The
-      // notice is shown only for deliberate wipes with a reason.
-      pendingFreeRef.current = true
-      if (reason != null) pendingWipeRef.current = reason
-      setWif('')
-      setAdmin(null)
-      setValidation(null)
-      setValidating(false)
-      setStatus(null)
-      setStatusForId(null)
-      setActionSuccess(null)
-      return
-    }
-    try { signerRef.current?.free() } catch { /* already freed */ }
-    signerRef.current = null
-    setWif('')
-    setAdmin(null)
-    setValidation(null)
-    setValidating(false)
-    setStatus(null)
-    setStatusForId(null)
-    setActionSuccess(null)
+  useEffect(() => { if (session && !identityId) setIdentityId(session.identityId) }, [session, identityId])
+  useEffect(() => {
+    queryAll('forum', { orderBy: [['slug', 'asc']] }).then((r) => setForums(r.docs.map((f) => ({ id: f.id, title: str(f, 'title') ?? f.id })))).catch(() => undefined)
   }, [])
 
-  // Signing out while the console is armed must drop the key material —
-  // the moderation console holds a CRITICAL key.
-  const prevSessionRef = useRef(session)
-  useEffect(() => {
-    if (prevSessionRef.current && !session) {
-      internalWipe('cleared on sign-out')
-      sessionStorage.removeItem(CRITICAL_ID_STORAGE)
-    }
-    prevSessionRef.current = session
-  }, [session, internalWipe])
-
-  // Decrement the in-flight counter after an action settles; when the last
-  // call returns, honour the deferred free.
-  const finishInFlight = useCallback(() => {
-    inFlightRef.current = Math.max(0, inFlightRef.current - 1)
-    if (inFlightRef.current !== 0) return
-    if (pendingFreeRef.current) {
-      try { signerRef.current?.free() } catch { /* already freed */ }
-      signerRef.current = null
-      pendingFreeRef.current = false
-    }
-    if (pendingWipeRef.current != null) {
-      const reason = pendingWipeRef.current
-      pendingWipeRef.current = null
-      internalWipe()
-      if (mountedRef.current) setWipedNotice(reason)
-    }
-  }, [internalWipe])
-
-  // Run a moderator action under an in-flight lease. The WIF and admin state
-  // are nulled by an external wipe immediately; the signer is freed only when
-  // the last lease ends.
-  const trackInFlight = useCallback((fn: () => Promise<void>) => {
-    inFlightRef.current += 1
-    return (async () => {
-      try { await fn() } finally { finishInFlight() }
-    })()
-  }, [finishInFlight])
-
-  // User-facing wipe — also explains why the key was cleared.
-  const wipe = useCallback((reason: string) => {
-    if (inFlightRef.current > 0) {
-      // Defer: the signer goes away when the last call settles (see
-      // internalWipe); the notice shows at that point.
-      internalWipe(reason)
-      return
-    }
-    internalWipe()
-    if (mountedRef.current) setWipedNotice(reason)
-  }, [internalWipe])
-
-  useEffect(() => {
-    mountedRef.current = true
-    // A pending navigation wipe belongs to the unmounted instance — never
-    // let a consuming call from THIS mount inherit it.
-    pendingWipeRef.current = null
-    // Read the host after hydration — during prerender there is no window.
-    setHost(typeof window !== 'undefined' ? window.location.hostname : '')
+  const act = useCallback(async (label: string, fn: () => Promise<unknown>, confirmText?: string) => {
+    if (confirmText && !confirm(confirmText)) return false
+    setBusy(label)
+    setFlash(null)
+    key.touch()
     try {
-      const storedId = sessionStorage.getItem(CRITICAL_ID_STORAGE)
-      if (storedId) setIdentityId(storedId)
-    } catch { /* ignore */ }
-    const onPageHide = () => wipe('cleared when the tab closed')
-    const onBeforeUnload = () => wipe('cleared before the tab closed')
-    // The console is a CRITICAL-key surface: the tab being hidden wipes the
-    // key rather than letting it linger.
-    const onVisibility = () => { if (document.visibilityState === 'hidden') wipe('cleared when the tab was hidden') }
-    window.addEventListener('pagehide', onPageHide)
-    window.addEventListener('beforeunload', onBeforeUnload)
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      mountedRef.current = false
-      window.removeEventListener('pagehide', onPageHide)
-      window.removeEventListener('beforeunload', onBeforeUnload)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Idle auto-wipe: drop the key after 10 minutes without interaction.
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const reset = () => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => wipe('cleared after 10 minutes of inactivity'), IDLE_WIPE_MS)
-    }
-    reset()
-    const onActivity = () => reset()
-    window.addEventListener('pointerdown', onActivity)
-    window.addEventListener('keydown', onActivity)
-    return () => {
-      if (timer) clearTimeout(timer)
-      window.removeEventListener('pointerdown', onActivity)
-      window.removeEventListener('keydown', onActivity)
-    }
-  }, [wipe])
-
-  // Wipe on unmount and invalidate in-flight actions. If a call is still
-  // in flight at unmount, the signer is freed once that call settles — never
-  // mid-flight (see internalWipe).
-  useEffect(() => {
-    return () => {
-      // Only a navigation while a call is still in flight needs the pending
-      // wipe — a plain unmount would leave the ref armed for the next mount
-      // and the first action after hydration would wipe the key mid-flight.
-      if (inFlightRef.current > 0) pendingWipeRef.current = pendingWipeRef.current ?? 'cleared on navigation'
-      internalWipe()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const bailIfWiped = useCallback((gen: number) => gen !== wipeGenRef.current || !mountedRef.current, [])
-
-  const loadDocs = useCallback(async (append = false) => {
-    setDocsLoading(true)
-    setDocsError(false)
-    try {
-      const fetchThreads = !append || threadsMore
-      const fetchPosts = !append || postsMore
-      const [threadsRaw, postsRaw] = await Promise.all([
-        fetchThreads
-          ? queryRaw('thread', {
-              orderBy: [['$createdAt', 'desc']],
-              limit: DOC_PAGE_SIZE,
-              ...(append && threadsAfter ? { startAfter: threadsAfter } : {}),
-            })
-          : Promise.resolve({ docs: [], rawCount: 0, lastId: null }),
-        fetchPosts
-          ? queryRaw('post', {
-              orderBy: [['$createdAt', 'desc']],
-              limit: DOC_PAGE_SIZE,
-              ...(append && postsAfter ? { startAfter: postsAfter } : {}),
-            })
-          : Promise.resolve({ docs: [], rawCount: 0, lastId: null }),
-      ])
-      const threads = threadsRaw.docs
-      const posts = postsRaw.docs
-      const mapped: ModeratableDoc[] = [
-        ...threads.map((t) => ({
-          id: t.id,
-          type: 'thread' as const,
-          title: (t.properties.title as string) ?? '(untitled)',
-          ownerId: t.ownerId || '',
-          createdAt: t.createdAt,
-          sticky: Boolean(t.properties.sticky),
-          lockedAt: (t.properties.lockedAt as number | null) ?? null,
-          modState: (t.properties.modState as number | null) ?? null,
-        })),
-        ...posts.map((p) => ({
-          id: p.id,
-          type: 'post' as const,
-          title: (codePointSlice((p.properties.body as string) ?? '', 90) || '(empty)'),
-          ownerId: p.ownerId || '',
-          createdAt: p.createdAt,
-          modState: (p.properties.modState as number | null) ?? null,
-        })),
-      ]
-      if (fetchThreads) {
-        setThreadsAfter(threadsRaw.lastId ?? (threads.length ? threads[threads.length - 1].id : threadsAfter))
-        // rawCount is the honest "more exists" — a normalized-doc shortfall
-        // must not look like "no more pages".
-        setThreadsMore(threadsRaw.rawCount === DOC_PAGE_SIZE && threadsRaw.lastId != null)
-      }
-      if (fetchPosts) {
-        setPostsAfter(postsRaw.lastId ?? (posts.length ? posts[posts.length - 1].id : postsAfter))
-        setPostsMore(postsRaw.rawCount === DOC_PAGE_SIZE && postsRaw.lastId != null)
-      }
-      setDocs((prev) => (append ? [...prev, ...mapped] : mapped))
-    } catch {
-      setDocsError(true)
-      if (!append) setDocs([])
-    } finally {
-      setDocsLoading(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadsAfter, postsAfter, threadsMore, postsMore])
-
-  useEffect(() => {
-    getRoster()
-      .then((r) => {
-        if (!mountedRef.current) return
-        if (freshRosterLandedRef.current) return // a forced fresh read already landed — keep it
-        setRoster(r); setRosterError(false)
-      })
-      .catch(() => {
-        if (!mountedRef.current) return
-        if (freshRosterLandedRef.current) return
-        setRoster(null); setRosterError(true)
-      })
-    loadDocs()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  async function retryRoster() {
-    setRosterError(false)
-    try {
-      const r = await getRoster()
-      if (mountedRef.current) setRoster(r)
-    } catch {
-      if (mountedRef.current) { setRoster(null); setRosterError(true) }
-    }
-  }
-
-  const identityTrim = identityId.trim()
-  const isOwner = Boolean(roster?.ownerId && identityTrim && roster.ownerId === identityTrim)
-  const isAppointed = Boolean(roster?.appointed.includes(identityTrim))
-  const isModerator = isOwner || isAppointed
-
-  const hostIsCanon = hostIsCanonical(host)
-  const localhost = hostIsLocal(host)
-
-  async function handleValidate() {
-    if (!hostIsCanon) return // hard refusal on non-canonical hosts (H1)
-    if (inFlightRef.current > 0) return // a moderator lease is in flight — do not start a second sign path
-    if (!identityId.trim() || !wif.trim()) return
-    const gen = wipeGenRef.current
-    const identity = identityId.trim()
-    const key = wif.trim()
-    setValidating(true)
-    setValidation(null)
-    try {
-      sessionStorage.setItem(CRITICAL_ID_STORAGE, identity)
-      const result = await validateCriticalKey(identity, key)
-      if (bailIfWiped(gen)) return // wiped mid-validation — bail
-      setValidation(result)
-      if (!result.ok) {
-        setAdmin(null)
-        return
-      }
-      // Roster check — fail closed: a fresh, forced fetch; missing or errored
-      // reads refuse rather than trust the cached roster.
-      const freshRoster = await getRoster(true).catch(() => null)
-      if (bailIfWiped(gen)) return
-      if (!freshRoster || !freshRoster.ownerId) {
-        setValidation({ ok: false, reason: 'Could not read the contract roster — refusing to sign. Retry in a moment.' })
-        setAdmin(null)
-        return
-      }
-      freshRosterLandedRef.current = true
-      setRoster(freshRoster)
-      const ownerNow = freshRoster.ownerId === identity
-      const memberNow = freshRoster.appointed.includes(identity)
-      if (ownerNow && !localhost) {
-        setValidation({ ok: false, reason: 'The owner key is refused on non-localhost hosts — the owner keeps a full contract-authority key offline. Use an appointed moderator identity, or run this console on localhost.' })
-        setAdmin(null)
-        return
-      }
-      if (!ownerNow && !memberNow) {
-        setValidation({ ok: false, reason: 'This identity is not the owner or an appointed moderator of the contract.' })
-        setAdmin(null)
-        return
-      }
-      // Free the previous signer before installing a new one — a re-validate
-      // must not leak a live WASM handle.
-      try { signerRef.current?.free() } catch { /* already freed */ }
-      signerRef.current = null
-      const prepared = await prepareModerator(identity, key)
-      if (bailIfWiped(gen)) {
-        try { prepared.signer.free() } catch { /* freed */ }
-        return // wiped mid-prepare — drop the signer we just built
-      }
-      // The WIF never leaves this memory path — drop it immediately.
-      setWif('')
-      signerRef.current = prepared.signer
-      setAdmin(prepared)
-      setValidation({ ok: true })
+      await fn()
+      setFlash({ ok: true, text: `${label}: done. It is on chain now; the static pages update within the hour.` })
+      void refreshLive()
+      return true
     } catch (e) {
-      if (bailIfWiped(gen)) return
-      setValidation({ ok: false, reason: redactWif(e instanceof Error ? e.message : 'Validation failed') })
-      setAdmin(null)
+      setFlash({ ok: false, text: `${label} failed: ${redactWif(writeFailureMessage(e).message)}` })
+      return false
     } finally {
-      if (!bailIfWiped(gen)) setValidating(false)
+      setBusy(null)
     }
-  }
+  }, [key])
 
-  async function handleClearAdmin() {
-    // In the middle of an action, "clear" must only drop the WIF and
-    // admin state — the signer is released when the in-flight call settles
-    // (finishInFlight). It is not safe to free mid-flight.
-    internalWipe()
-    setWipedNotice(null)
-    sessionStorage.removeItem(CRITICAL_ID_STORAGE)
-    setIdentityId('')
-    setTargetId('')
-  }
-
-  async function refreshStatus() {
-    if (!targetId.trim()) return
-    const gen = wipeGenRef.current
-    setStatusLoading(true)
-    setActionError(null)
-    try {
-      const s = await moderationStatus(targetId.trim())
-      if (bailIfWiped(gen)) return
-      setStatus(s as unknown as StatusData)
-      setStatusForId(targetId.trim())
-    } catch (e) {
-      if (bailIfWiped(gen)) return
-      setStatus(null)
-      setActionError(redactWif(e instanceof Error ? e.message : 'Could not fetch status'))
-    } finally {
-      setStatusLoading(false)
-    }
-  }
-
-  function act(busyKey: string, fn: () => Promise<void>, confirm?: string, success?: string) {
-    if (confirm && !window.confirm(confirm)) return
-    const gen = wipeGenRef.current
-    setActionBusy(busyKey)
-    setActionError(null)
-    setActionSuccess(null)
-    void trackInFlight(async () => {
-      try {
-        await fn()
-        if (bailIfWiped(gen)) return
-        await refreshStatus()
-        if (bailIfWiped(gen)) return
-        if (success) setActionSuccess(success)
-      } catch (e) {
-        if (bailIfWiped(gen)) return
-        setActionError(redactWif(e instanceof Error ? e.message : 'Action failed'))
-      } finally {
-        setActionBusy(null)
-      }
-    })
-  }
-
-  /** Read the post so we can see whether it is its thread's opening post. */
-  async function openingPostOf(postId: string): Promise<{ threadId: string; opening: { id: string } | null } | null> {
-    const post = await get('post', postId)
-    if (!post) return null
-    const threadId = (post.properties as Record<string, unknown>).threadId as string | undefined
-    if (!threadId) return null
-    const thread = await get('thread', threadId)
-    if (!thread || !thread.ownerId) return null
-    const opening = await earliestOwnerPost(threadId, thread.ownerId, thread.createdAt)
-    return { threadId, opening: opening ? { id: opening.id } : null }
-  }
-
-  function toggleSticky(doc: ModeratableDoc) {
-    if (!admin) return
-    const gen = wipeGenRef.current
-    if (!window.confirm(`${doc.sticky ? 'Unpin' : 'Pin'} this thread?`)) return
-    setDocActionBusy(`${doc.id}:sticky`)
-    setActionError(null)
-    void trackInFlight(async () => {
-      try {
-        await changeDocumentFields(admin, 'thread', doc.id, { sticky: doc.sticky ? null : true }, 'sticky toggle')
-        if (bailIfWiped(gen)) return
-        setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, sticky: doc.sticky ? null : true } : d)))
-        setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, sticky: doc.sticky ? null : true } : prev))
-      } catch (e) {
-        if (bailIfWiped(gen)) return
-        setActionError(redactWif(e instanceof Error ? e.message : 'Sticky toggle failed'))
-      } finally {
-        setDocActionBusy(null)
-      }
-    })
-  }
-
-  function toggleLock(doc: ModeratableDoc) {
-    if (!admin) return
-    const gen = wipeGenRef.current
-    const locked = doc.lockedAt != null
-    if (!window.confirm(locked ? 'Unlock this thread? Replies can be posted again.' : 'Lock this thread? No new posts will be shown from now on.')) return
-    setDocActionBusy(`${doc.id}:lock`)
-    setActionError(null)
-    void trackInFlight(async () => {
-      try {
-        const lockedAt = locked ? null : Date.now()
-        await changeDocumentFields(admin, 'thread', doc.id, { lockedAt }, locked ? 'thread unlock' : 'thread lock')
-        if (bailIfWiped(gen)) return
-        setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, lockedAt } : d)))
-        setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, lockedAt } : prev))
-      } catch (e) {
-        if (bailIfWiped(gen)) return
-        setActionError(redactWif(e instanceof Error ? e.message : 'Lock toggle failed'))
-      } finally {
-        setDocActionBusy(null)
-      }
-    })
-  }
-
-  function toggleHide(doc: ModeratableDoc) {
-    if (!admin) return
-    const gen = wipeGenRef.current
-    const hiding = doc.modState == null
-    const label = doc.type === 'post' ? 'post' : 'thread'
-    if (!window.confirm(
-      hiding
-        ? doc.type === 'post'
-          ? `Hide this post? If it is the opening post the whole thread hides with it — the thread also needs an explicit unhide to come back. It disappears from live view immediately; the static page and search index keep serving it until the next snapshot rebuild (≤1h).`
-          : `Hide this ${label}? It disappears from live view immediately; the static page and search index keep serving it until the next snapshot rebuild (≤1h).`
-        : doc.type === 'post'
-          ? `Unhide this post? If it was the thread's opening post, the thread stays hidden — unhide the thread separately to bring the thread back.`
-          : `Unhide this ${label}? It will be shown again.`,
-    )) return
-    setDocActionBusy(`${doc.id}:hide`)
-    setActionError(null)
-    void trackInFlight(async () => {
-      try {
-        const hidden = doc.modState != null
-        // Hide opening posts with modState AND hide the thread too — a deletable
-        // opening post would be re-hidden by the author and the thread would
-        // reappear with a different opening post.
-        if (hiding && doc.type === 'post') {
-          const info = await openingPostOf(doc.id).catch(() => 'unverified' as const)
-          if (bailIfWiped(gen)) return
-          // Refuse rather than hide an opening post (or a plain post) the
-          // caller cannot vouch for.
-          if (info === 'unverified') {
-            setActionError('Could not verify this post — refusing the hide. Try again.')
-            setDocActionBusy(null)
-            return
-          }
-          if (info && info.opening?.id === doc.id) {
-            await changeDocumentFields(admin, 'thread', info.threadId, { modState: 1 }, 'thread hidden (opening post hidden)')
-            if (bailIfWiped(gen)) return
-            setDocs((prev) => prev.map((d) => (d.id === info.threadId ? { ...d, modState: 1 } : d)))
-            setLookupDoc((prev) => (prev && prev.id === info.threadId ? { ...prev, modState: 1 } : prev))
-          }
-        }
-        await changeDocumentFields(admin, doc.type, doc.id, { modState: hidden ? null : 1 }, hidden ? `${label} unhide` : `${label} hide`)
-        if (bailIfWiped(gen)) return
-        setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, modState: hidden ? null : 1 } : d)))
-        setLookupDoc((prev) => (prev && prev.id === doc.id ? { ...prev, modState: hidden ? null : 1 } : prev))
-      } catch (e) {
-        if (bailIfWiped(gen)) return
-        setActionError(redactWif(e instanceof Error ? e.message : 'Hide toggle failed'))
-      } finally {
-        setDocActionBusy(null)
-      }
-    })
-  }
-
-  function deleteDoc(doc: ModeratableDoc) {
-    if (!admin) return
-    const gen = wipeGenRef.current
-    // Set the busy flag before the lookup — a double-click must not run the
-    // guard and the delete twice.
-    setDocActionBusy(`${doc.id}:delete`)
-    setActionError(null)
-    void trackInFlight(async () => {
-      try {
-        // A moderator can keep hiding an opening post; deleting it would let the
-        // author's next reply become the opening post and the thread would
-        // re-list. Refuse, and say how to hide instead.
-        if (doc.type === 'post') {
-          const info = await openingPostOf(doc.id).catch(() => 'unverified' as const)
-          if (bailIfWiped(gen)) return
-          if (info === 'unverified') {
-            setActionError('Could not verify this post — refusing the delete. Try again.')
-            setDocActionBusy(null)
-            return
-          }
-          if (info && info.opening?.id === doc.id) {
-            setActionError('This is the thread\'s opening post — hide it instead of deleting it (a deleted opening post would let the thread reappear with a new opening post).')
-            setDocActionBusy(null)
-            return
-          }
-        }
-        if (!window.confirm(`Delete this ${doc.type}? It is removed from live view — the chain keeps only a short reference (no contents), and the prerendered static page can keep serving until the next snapshot rebuild. This cannot be undone.`)) {
-          setDocActionBusy(null)
-          return
-        }
-        await deleteDocument(admin, doc.type, doc.id, 'moderator delete')
-        if (bailIfWiped(gen)) return
-        setDocs((prev) => prev.filter((d) => d.id !== doc.id))
-        setLookupDoc((prev) => (prev && prev.id === doc.id ? null : prev))
-        setActionSuccess('Document deleted.')
-      } catch (e) {
-        if (bailIfWiped(gen)) return
-        setActionError(redactWif(e instanceof Error ? e.message : 'Delete failed'))
-      } finally {
-        setDocActionBusy(null)
-      }
-    })
-  }
-
-  async function lookupDocument() {
-    if (!lookupId.trim()) return
-    const gen = wipeGenRef.current
-    setLookupBusy(true)
-    setLookupError(null)
-    setLookupDoc(null)
-    try {
-      const thread = await get('thread', lookupId.trim())
-      if (bailIfWiped(gen)) return
-      if (thread) {
-        setLookupDoc({
-          id: thread.id,
-          type: 'thread',
-          title: (thread.properties.title as string) ?? '(untitled)',
-          ownerId: thread.ownerId || '',
-          createdAt: thread.createdAt,
-          sticky: Boolean(thread.properties.sticky),
-          lockedAt: (thread.properties.lockedAt as number | null) ?? null,
-          modState: (thread.properties.modState as number | null) ?? null,
-        })
-        return
-      }
-      const post = await get('post', lookupId.trim())
-      if (bailIfWiped(gen)) return
-      if (post) {
-        setLookupDoc({
-          id: post.id,
-          type: 'post',
-          title: (codePointSlice((post.properties.body as string) ?? '', 90) || '(empty)'),
-          ownerId: post.ownerId || '',
-          createdAt: post.createdAt,
-          modState: (post.properties.modState as number | null) ?? null,
-        })
-        return
-      }
-      setLookupError('No thread or post with that ID on the contract.')
-    } catch (e) {
-      if (bailIfWiped(gen)) return
-      setLookupError(redactWif(e instanceof Error ? e.message : 'Could not fetch the document'))
-    } finally {
-      setLookupBusy(false)
-    }
-  }
-
-  const canOperate = Boolean(admin) && isModerator
-  const targetStale = Boolean(targetId.trim()) && statusForId !== targetId.trim()
-  // Actions act on the target — they must not run until a fresh status read
-  // for THIS target has landed (the status may be for a different identity).
-  const staleBlocker = targetStale
-
-  // Suspend hours: integer, 1–8760 (one year).
-  const suspendHoursNum = Number(suspendHours)
-  const suspendHoursValid = Number.isInteger(suspendHoursNum) && suspendHoursNum >= 1 && suspendHoursNum <= 8760
-  const adminIdentityId = identityTrim
-  // Consensus forbids moderating documents (or identities) the moderator owns.
-  const ownsDoc = (doc: ModeratableDoc) => Boolean(admin && adminIdentityId && doc.ownerId === adminIdentityId)
-  const isSelfTarget = Boolean(admin && adminIdentityId && targetId.trim() === adminIdentityId)
-
-  // Nothing renders until the frame check has run — a framed first paint
-  // must not leak the console.
-  if (frameState === 'unknown') {
+  if (!key.moderator) {
     return (
-      <>
-        <main id="main" tabIndex={-1} className="flex-1 flex items-center justify-center">
-          <span className="sr-only" role="status">Loading…</span>
-        </main>
-      </>
+      <div className="mx-auto max-w-lg space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Moderation</h1>
+        <form className="panel space-y-3 p-5" onSubmit={(e) => { e.preventDefault(); const w = wif; setWif(''); void key.unlock(identityId.trim(), w) }}>
+          <p className="text-sm text-ink-2">Moderation actions are signed with your identity&apos;s CRITICAL key. It stays in this tab and is cleared when you lock the console, hide the tab, or stay idle for 10 minutes.</p>
+          <label className="block text-sm font-medium">Moderator identity
+            <input className="field mt-1 font-mono text-sm" value={identityId} onChange={(e) => setIdentityId(e.target.value)} required autoComplete="off" />
+          </label>
+          <label className="block text-sm font-medium">CRITICAL key (WIF)
+            <input className="field mt-1 font-mono text-sm" type="password" value={wif} onChange={(e) => setWif(e.target.value)} required autoComplete="off" spellCheck={false} />
+          </label>
+          <button className="btn btn-primary" disabled={key.busy}>{key.busy ? 'Checking…' : 'Unlock console'}</button>
+          {key.error && <p role="alert" className="text-sm text-danger">{key.error}</p>}
+          {key.notice && <p role="status" className="text-sm text-ink-2">{key.notice}</p>}
+        </form>
+      </div>
     )
   }
 
+  const props = { act, busy, forums, moderatorId: key.moderator.identityId }
   return (
-    <>
-      <main id="main" tabIndex={-1} className="flex-1">
-        <section className="border-b border-rule">
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center justify-center w-11 h-11 rounded-xl bg-dash/15 text-dash shrink-0"><Shield className="w-5 h-5" /></span>
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Moderator console</h1>
-                <p className="text-sm text-ink-2">
-                  Centralized, team-based moderation · <span className="font-mono">{NETWORK}</span> · {roster?.mode ? `${roster.mode} mode` : rosterError ? 'mode unavailable' : 'mode loading…'} · {shortId(CONTRACT_ID, 16)}
-                </p>
-                {roster?.mode === 'network' && (
-                  <p className="mt-1 text-xs text-archive">Network (elected) mode is a testnet-only configuration — never a production default.</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Moderation</h1>
+        <span className="flex items-center gap-1.5 rounded-md bg-live/10 px-2 py-1 text-sm text-live"><ShieldCheck className="h-4 w-4" />Signing as {shortId(key.moderator.identityId)}</span>
+        <button type="button" className="btn btn-quiet ml-auto" onClick={key.lock}><Lock className="h-4 w-4" />Lock console</button>
+      </div>
+      <nav className="flex gap-1 border-b border-rule" aria-label="Moderation sections">
+        {([['reports', 'Reports', Flag], ['content', 'Content', Search], ['members', 'Members', Gavel], ['log', 'Audit log', ScrollText]] as const).map(([t, label, Icon]) => (
+          <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? 'page' : undefined}
+            className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium ${tab === t ? 'border-dash text-ink' : 'border-transparent text-ink-2 hover:text-ink'}`}>
+            <Icon className="h-4 w-4" />{label}
+          </button>
+        ))}
+      </nav>
+      {flash && <p role={flash.ok ? 'status' : 'alert'} className={`rounded-md px-3 py-2 text-sm ${flash.ok ? 'bg-live/10 text-live' : 'bg-danger/10 text-danger'}`}>{flash.text}</p>}
+      <ModeratorContext.Provider value={key.moderator}>
+        {tab === 'reports' && <Reports {...props} />}
+        {tab === 'content' && <Content {...props} />}
+        {tab === 'members' && <Members {...props} />}
+        {tab === 'log' && <AuditLog />}
+      </ModeratorContext.Provider>
+    </div>
+  )
+}
 
-        {frameState === 'framed' ? (
-          <FramedNotice what="the moderation console" />
-        ) : !hostIsCanon && host ? (
-          <NonCanonicalRefuse />
-        ) : (
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-            <section className="rounded-2xl border border-rule bg-sheet p-5 ">
-              <div className="flex items-center gap-2 flex-wrap">
-                <KeyRound className="w-4 h-4 text-dash" />
-                <h2 className="font-semibold">Admin key (CRITICAL)</h2>
-                {admin && (
-                  <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-live/40 bg-live/10 px-3 py-1 text-xs text-live">
-                    <ShieldCheck className="w-3.5 h-3.5" /> Valid CRITICAL key
-                  </span>
-                )}
-              </div>
-              <p className="mt-2 text-sm text-ink-2">
-                Moderation is signed with a <strong>CRITICAL</strong> key from your moderator identity — the session key (HIGH) cannot moderate.
-                Your WIF is kept in this tab&apos;s memory only. The <strong>owner</strong> holds full contract authority and is refused on non-localhost hosts — keep it offline; use an appointed moderator identity here.
-              </p>
-              <div className="mt-4 grid sm:grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs text-ink-2">Moderator identity ID</span>
-                  <input
-                    value={identityId}
-                    disabled={validating || actionBusy != null || docActionBusy != null}
-                    onChange={(e) => {
-                      wipeGenRef.current += 1
-                      try { signerRef.current?.free() } catch { /* freed */ }
-                      signerRef.current = null
-                      setIdentityId(e.target.value)
-                      setValidation(null)
-                      setAdmin(null)
-                    }}
-                    placeholder="6Dft…"
-                    className="mt-1 w-full rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs text-ink-2">CRITICAL key WIF</span>
-                  <input
-                    type="password"
-                    value={wif}
-                    disabled={validating || actionBusy != null || docActionBusy != null}
-                    onChange={(e) => {
-                      wipeGenRef.current += 1
-                      try { signerRef.current?.free() } catch { /* freed */ }
-                      signerRef.current = null
-                      setWif(e.target.value)
-                      setValidation(null)
-                      setAdmin(null)
-                    }}
-                    placeholder="L…"
-                    className="mt-1 w-full rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
-                    autoComplete="one-time-code"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    spellCheck={false}
-                  />
-                </label>
-              </div>
-              {!localhost && host && (
-                <p className="mt-3 text-xs text-ink-2">
-                  The owner key is refused on this host — it is kept offline for contract updates. Appointed moderators sign on this host.
-                </p>
-              )}
-              <div className="mt-3 flex items-center gap-3 flex-wrap">
-                <button
-                  onClick={handleValidate}
-                  disabled={validating || actionBusy != null || docActionBusy != null || !identityId.trim() || !wif.trim() || !hostIsCanon || !host}
-                  className="btn btn-primary px-4 py-2 text-sm font-semibold"
-                >
-                  {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                  Validate &amp; sign in as admin
-                </button>
-                {(identityId || wif) && (
-                  <button
-                    onClick={handleClearAdmin}
-                    disabled={actionBusy != null || docActionBusy != null}
-                    className="btn btn-quiet"
-                  >
-                    Clear admin
-                  </button>
-                )}
-              </div>
-              {validation && !validation.ok && (
-                <p role="alert" className="mt-3 text-sm text-danger">✗ {redactWif(validation.reason ?? 'Validation failed')}</p>
-              )}
-              {validation?.ok && isModerator && (
-                <p role="status" className="mt-3 text-sm text-live">✓ Signed in as a contract moderator ({isOwner ? 'owner' : 'appointed'}).</p>
-              )}
-              {validation?.ok && !isModerator && (
-                <p role="status" className="mt-3 text-sm text-archive">Key valid but <strong>this identity is not the owner or an appointed moderator</strong> of the contract. Actions are disabled — the roster gate blocks them, and the chain would refuse them anyway.</p>
-              )}
-            </section>
+interface PanelProps {
+  act: (label: string, fn: () => Promise<unknown>, confirmText?: string) => Promise<boolean>
+  busy: string | null
+  forums: ForumOption[]
+  moderatorId: string
+}
 
-            {wipedNotice && (
-              <div role="status" className="rounded-xl border border-amber-400/40 bg-amber-400/5 px-4 py-3 text-sm text-archive flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 shrink-0" />
-                <span>Key cleared — {wipedNotice}. Re-enter your CRITICAL key to continue.</span>
-                <button onClick={() => setWipedNotice(null)} className="ml-auto rounded-lg px-2 py-1 text-xs text-ink-2 hover:text-ink hover:bg-sunk transition">Dismiss</button>
-              </div>
-            )}
+const ModeratorContext = createContext<ModerationIdentity | null>(null)
+const useModerator = () => useContext(ModeratorContext)
 
-            {actionError && (
-              <div role="alert" className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{actionError}</span>
-                <button onClick={() => setActionError(null)} className="ml-auto rounded-lg px-2 py-1 text-xs text-ink-2 hover:text-ink hover:bg-sunk transition">Dismiss</button>
-              </div>
-            )}
-            {actionSuccess && (
-              <div role="status" className="rounded-xl border border-live/40 bg-live/10 px-4 py-3 text-sm text-live flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 shrink-0" />
-                <span>{actionSuccess}</span>
-              </div>
-            )}
-
-            <div className="grid lg:grid-cols-2 gap-6">
-              <section className="rounded-2xl border border-rule bg-sheet p-5">
-                <h2 className="font-semibold flex items-center gap-2"><Shield className="w-4 h-4 text-dash" /> Team roster</h2>
-                {roster ? (
-                  <div className="mt-3 space-y-2">
-                    {/* Owner: always the moderator on the chain, but refused
-                        on this host — the owner key is kept offline for contract
-                        updates. Shown as informational, never as an option. */}
-                    <RosterRow label={localhost ? 'Owner (always moderates)' : 'Owner — offline only'} id={roster.ownerId} highlight={isOwner} />
-                    {/* An owner id in the appointed list is the same identity —
-                        do not list it twice. */}
-                    {roster.appointed.filter((id) => id !== roster.ownerId).map((id) => (
-                      <RosterRow key={id} label="Appointed moderator" id={id} highlight={id === identityTrim} />
-                    ))}
-                    {roster.appointed.filter((id) => id !== roster.ownerId).length === 0 && (
-                      <p className="text-xs text-archive">
-                        No appointed moderator can act from this host yet — the contract only has its owner (offline). An appointed moderator must be added by the owner to act here.
-                      </p>
-                    )}
-                    <p className="text-[12px] text-ink-2 pt-1">Appointed moderators are set by the owner in the contract&apos;s moderation config (owner-managed; the change applies to new moderation actions).</p>
-                  </div>
-                ) : rosterError ? (
-                  <div className="mt-3">
-                    <p className="text-sm text-danger">Couldn&apos;t load the roster. Check your connection and retry.</p>
-                    <button onClick={retryRoster} className="mt-2 text-xs text-dash hover:underline">Retry</button>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-ink-2 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading roster…</p>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-rule bg-sheet p-5 flex flex-col">
-                <h2 className="font-semibold flex items-center gap-2"><Search className="w-4 h-4 text-dash" /> Identity status &amp; actions</h2>
-                <div className="mt-3">
-                  <label htmlFor="target-id" className="text-xs text-ink-2">Identity ID to look up</label>
-                  <div className="mt-1 flex gap-2">
-                    <input
-                      id="target-id"
-                      value={targetId}
-                      onChange={(e) => { setTargetId(e.target.value); setStatus(null); setStatusForId(null); setActionSuccess(null) }}
-                      placeholder="identity ID to look up"
-                      className="min-w-0 flex-1 rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
-                      onKeyDown={(e) => e.key === 'Enter' && refreshStatus()}
-                    />
-                    <button
-                      onClick={refreshStatus}
-                      disabled={statusLoading || !targetId.trim()}
-                      className="btn btn-quiet p-2 disabled:opacity-50"
-                      aria-label="Refresh status"
-                    >
-                      {statusLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                    </button>
-                  </div>
+function Reports({ act, busy }: PanelProps) {
+  const [reports, setReports] = useState<RawDoc[] | null>(null)
+  const [posts, setPosts] = useState<Record<string, RawDoc>>({})
+  const [showDone, setShowDone] = useState(false)
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const load = useCallback(async () => {
+    const r = await queryAll('report', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']] }, 5)
+    setReports(r.docs)
+    const ids = [...new Set(r.docs.map((d) => str(d, 'postId')).filter((x): x is string => !!x))]
+    const found: Record<string, RawDoc> = {}
+    for (let i = 0; i < ids.length; i += 100) {
+      const page = await queryPage('post', { where: [['$id', 'in', ids.slice(i, i + 100)]], orderBy: [['$id', 'asc']] }).catch(() => ({ docs: [] as RawDoc[] }))
+      for (const p of page.docs) found[p.id] = p
+    }
+    setPosts(found)
+  }, [])
+  useEffect(() => { void load() }, [load])
+  const names = useNames({}, (reports ?? []).flatMap((r) => [r.ownerId, posts[str(r, 'postId') ?? '']?.ownerId ?? '']).filter(Boolean))
+  const m = useModerator()
+  if (!reports) return <p role="status" className="text-ink-2">Loading reports from Dash Platform…</p>
+  const open = reports.filter((r) => num(r, 'status') === undefined)
+  const list = showDone ? reports : open
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-3 text-sm">
+        <p className="text-ink-2">{open.length} open of {reports.length} reports</p>
+        <label className="ml-auto flex items-center gap-2"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />Show resolved</label>
+        <button type="button" className="btn btn-quiet" onClick={() => void load()}>Refresh</button>
+      </div>
+      {list.length === 0 && <p className="panel px-4 py-6 text-center text-ink-2">No open reports.</p>}
+      <ul className="space-y-3">
+        {list.map((r) => {
+          const post = posts[str(r, 'postId') ?? '']
+          const reason = REPORT_REASONS.find((x) => x.value === num(r, 'reason'))?.label ?? 'Other'
+          const status = num(r, 'status')
+          return (
+            <li key={r.id} className="panel space-y-2 p-4">
+              <p className="text-sm"><span className="font-semibold">{reason}</span> reported by <Link className="link" href={`/u/${r.ownerId}/`}>{names(r.ownerId)}</Link> <span className="text-ink-2"><Time at={r.createdAt} /></span>
+                {status !== undefined && <span className="ml-2 rounded bg-sunk px-1.5 text-xs">{status === 2 ? 'Actioned' : 'Dismissed'}{str(r, 'resolution') ? `: ${str(r, 'resolution')}` : ''}</span>}</p>
+              {str(r, 'note') && <p className="text-sm text-ink-2">&ldquo;{str(r, 'note')}&rdquo;</p>}
+              {post ? (
+                <blockquote className="rounded-md border border-rule bg-sunk/50 px-3 py-2 text-sm">
+                  <p className="mb-1 text-xs text-ink-2">Post by <Link className="link" href={`/u/${post.ownerId}/`}>{names(post.ownerId)}</Link>{isHidden(post) && ' (hidden)'} · <Link className="link" href={`/t/${str(post, 'threadId')}/#post-${post.id}`}>open</Link></p>
+                  {excerpt(postBody(post), 400)}
+                </blockquote>
+              ) : <p className="text-sm text-ink-2">The reported post was removed.</p>}
+              {status === undefined && m && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input className="field max-w-xs text-sm" placeholder="Resolution note (optional)" maxLength={200} value={notes[r.id] ?? ''} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} />
+                  {post && !isHidden(post) && (
+                    <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => void act('Hide post and resolve', async () => {
+                      await changeDocumentFields(m, 'post', post.id, { modState: 1 }, notes[r.id] ?? '')
+                      await changeDocumentFields(m, 'report', r.id, { status: 2, ...(notes[r.id] ? { resolution: notes[r.id] } : {}) })
+                    }).then((ok) => { if (ok) void load() })}><EyeOff className="h-4 w-4" />Hide post</button>
+                  )}
+                  <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void act('Dismiss report', () =>
+                    changeDocumentFields(m, 'report', r.id, { status: 3, ...(notes[r.id] ? { resolution: notes[r.id] } : {}) })).then((ok) => { if (ok) void load() })}>Dismiss</button>
                 </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
 
-                {status && (
+function parseRef(input: string): { type: 'thread' | 'post'; id: string } | null {
+  const s = input.trim()
+  const post = s.match(/#post-([1-9A-HJ-NP-Za-km-z]{32,44})/)
+  if (post) return { type: 'post', id: post[1] }
+  const thread = s.match(/\/t\/([1-9A-HJ-NP-Za-km-z]{32,44})/)
+  if (thread) return { type: 'thread', id: thread[1] }
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)) return { type: 'thread', id: s }
+  return null
+}
+
+function Content({ act, busy, forums, moderatorId }: PanelProps) {
+  const m = useModerator()
+  const [ref, setRef] = useState('')
+  const [doc, setDoc] = useState<{ type: 'thread' | 'post'; doc: RawDoc } | null>(null)
+  const [thread, setThread] = useState<RawDoc | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [reason, setReason] = useState('')
+  const [moveTo, setMoveTo] = useState('')
+  const [recent, setRecent] = useState<RawDoc[]>([])
+  const names = useNames({}, [doc?.doc.ownerId ?? '', ...recent.map((p) => p.ownerId)].filter(Boolean))
+
+  const [looking, setLooking] = useState(false)
+  const lookup = useCallback(async (input: string) => {
+    setError(null)
+    setDoc(null)
+    setThread(null)
+    setMoveTo('')
+    const r = parseRef(input)
+    if (!r) { setError('Paste a thread link, a post link (with #post-…), or a thread id.'); return }
+    setLooking(true)
+    try {
+    let d = await getDoc(r.type, r.id)
+    let type = r.type
+    if (!d && r.type === 'thread') { d = await getDoc('post', r.id); type = 'post' }
+    if (!d) { setError('No thread or post with that id.'); setDoc(null); return }
+    setThread(type === 'thread' ? d : await getDoc('thread', str(d, 'threadId') ?? ''))
+    setDoc({ type, doc: d })
+    } catch {
+      setError('Could not reach Dash Platform. Try again.')
+    } finally {
+      setLooking(false)
+    }
+  }, [])
+  useEffect(() => {
+    queryPage('post', { where: [['$createdAt', '>', 0]], orderBy: [['$createdAt', 'desc']], limit: 25 }).then((r) => setRecent(r.docs)).catch(() => undefined)
+  }, [])
+
+  const reload = () => doc && lookup(doc.type === 'thread' ? doc.doc.id : `#post-${doc.doc.id}`)
+  const own = doc?.doc.ownerId === moderatorId
+  const fields = (type: 'thread' | 'post', id: string, f: Record<string, unknown>, label: string, confirmText?: string) =>
+    m && act(label, () => changeDocumentFields(m, type, id, f, reason), confirmText).then((ok) => { if (ok) void reload() })
+
+  return (
+    <section className="space-y-4">
+      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); void lookup(ref) }}>
+        <input className="field max-w-xl flex-1 font-mono text-sm" placeholder="Thread or post link" value={ref} onChange={(e) => setRef(e.target.value)} aria-label="Thread or post link" />
+        <button className="btn btn-primary" disabled={looking}>{looking ? 'Finding…' : 'Find'}</button>
+      </form>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {looking && <p role="status" className="text-sm text-ink-2">Loading from Dash Platform…</p>}
+      {doc && (
+        <div className="panel space-y-3 p-4">
+          <p className="text-sm text-ink-2">{doc.type === 'thread' ? 'Thread' : 'Post'} by <Link className="link" href={`/u/${doc.doc.ownerId}/`}>{names(doc.doc.ownerId)}</Link>, <Time at={doc.doc.createdAt} />
+            {isHidden(doc.doc) && <span className="ml-2 rounded bg-danger/10 px-1.5 text-xs text-danger">hidden</span>}</p>
+          <p className="font-medium" data-testid="moderation-target">{doc.type === 'thread' ? str(doc.doc, 'title') : excerpt(postBody(doc.doc), 500)}</p>
+          {thread && <Link className="link text-sm" href={`/t/${thread.id}/`}>Open thread <ExternalLink className="inline h-3.5 w-3.5" /></Link>}
+          {own ? <p className="text-sm text-ink-2">You can&apos;t moderate your own content (the network refuses it).</p> : m && (
+            <>
+              <input className="field text-sm" placeholder="Reason shown in the moderation record (optional)" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+              <div className="flex flex-wrap gap-2">
+                {isHidden(doc.doc)
+                  ? <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void fields(doc.type, doc.doc.id, { modState: null }, 'Unhide')}><Eye className="h-4 w-4" />Unhide</button>
+                  : <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => void fields(doc.type, doc.doc.id, { modState: 1 }, 'Hide', `Hide this ${doc.type}? It disappears from listings and the static index; you can unhide it later.`)}><EyeOff className="h-4 w-4" />Hide</button>}
+                {doc.type === 'thread' && (
                   <>
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                      <StatusPill tone={status.banned ? 'red' : 'neutral'} icon={<Ban className="w-3 h-3" />} label={status.banned ? 'Banned' : 'Not banned'} />
-                      <StatusPill tone={status.suspendedUntil ? 'amber' : 'neutral'} icon={<Clock className="w-3 h-3" />} label={status.suspendedUntil ? `Suspended until ${formatDate(Number(status.suspendedUntil))}` : 'Not suspended'} />
-                      <StatusPill tone={status.warnings?.length ? 'amber' : 'neutral'} icon={<Bell className="w-3 h-3" />} label={`${status.warnings?.length ?? 0} warning${status.warnings?.length === 1 ? '' : 's'}`} />
-                    </div>
-                    {status.banReason?.text && <p className="mt-2 text-xs text-ink-2">Ban reason: {status.banReason.text}</p>}
-
-                    <div className="mt-4 grid sm:grid-cols-2 gap-2">
-                      <TextInput id="ban-reason" label="Ban reason (required)" value={banReason} onChange={setBanReason} />
-                      <TextInput id="suspend-hours" label="Suspend hours" value={suspendHours} onChange={setSuspendHours} type="number" />
-                      <TextInput id="warn-reason" label="Warning reason (required)" value={warnReason} onChange={setWarnReason} />
-                      <TextInput id="suspend-reason" label="Suspend reason (required)" value={suspendReason} onChange={setSuspendReason} />
-                    </div>
-
-                    {!canOperate && (
-                      <p className="mt-3 text-xs text-archive border border-amber-400/30 rounded-lg px-3 py-2">Admin key required — validate it above to enable moderation actions.</p>
-                    )}
-                    {staleBlocker && (
-                      <p className="mt-3 text-xs text-archive border border-amber-400/30 rounded-lg px-3 py-2">Status is stale — the identity changed since this status was loaded. Refresh to see the current state (and act).</p>
-                    )}
-                    {!suspendHoursValid && suspendHours.trim() && (
-                      <p className="mt-3 text-xs text-archive">Suspend duration must be a whole number of hours between 1 and 8760.</p>
-                    )}
-
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <ActionButton
-                        disabled={!canOperate || actionBusy != null || docActionBusy != null || !banReason.trim() || isSelfTarget || staleBlocker}
-                        busy={actionBusy === 'ban'}
-                        icon={<Ban className="w-3.5 h-3.5" />}
-                        label="Ban"
-                        tone="red"
-                        describedBy="ban-reason"
-                        onClick={() => act('ban', () => banUser(admin!, targetId.trim(), banReason.trim()), `Ban ${shortId(targetId.trim(), 12)}? They cannot create content until unbanned.`, 'Ban applied.')}
-                      />
-                      <ActionButton
-                        disabled={!canOperate || actionBusy != null || docActionBusy != null || isSelfTarget || staleBlocker}
-                        busy={actionBusy === 'unban'}
-                        icon={<Undo2 className="w-3.5 h-3.5" />}
-                        label="Unban"
-                        tone="neutral"
-                        onClick={() => act('unban', () => unbanUser(admin!, targetId.trim()), `Unban ${shortId(targetId.trim(), 12)}? They can create content again.`, 'Unban applied.')}
-                      />
-                      <ActionButton
-                        disabled={!canOperate || actionBusy != null || docActionBusy != null || !suspendReason.trim() || !suspendHoursValid || isSelfTarget || staleBlocker}
-                        busy={actionBusy === 'suspend'}
-                        icon={<Clock className="w-3.5 h-3.5" />}
-                        label="Suspend"
-                        tone="amber"
-                        describedBy="suspend-reason"
-                        onClick={() => act('suspend', () => suspendUser(admin!, targetId.trim(), BigInt(Date.now() + Number(suspendHours) * 3600 * 1000), suspendReason.trim()), `Suspend ${shortId(targetId.trim(), 12)} for ${suspendHours}h?`, 'Suspend applied.')}
-                      />
-                      <ActionButton
-                        disabled={!canOperate || actionBusy != null || docActionBusy != null || isSelfTarget || staleBlocker}
-                        busy={actionBusy === 'unsuspend'}
-                        icon={<Unlock className="w-3.5 h-3.5" />}
-                        label="Unsuspend"
-                        tone="neutral"
-                        onClick={() => act('unsuspend', () => unsuspendUser(admin!, targetId.trim()), `Unsuspend ${shortId(targetId.trim(), 12)}? They can create content again.`, 'Unsuspend applied.')}
-                      />
-                      <ActionButton
-                        disabled={!canOperate || actionBusy != null || docActionBusy != null || !warnReason.trim() || isSelfTarget || staleBlocker}
-                        busy={actionBusy === 'warn'}
-                        icon={<Bell className="w-3.5 h-3.5" />}
-                        label="Warn"
-                        tone="amber"
-                        describedBy="warn-reason"
-                        onClick={() => act('warn', () => warnUser(admin!, targetId.trim(), warnReason.trim()), `Warn ${shortId(targetId.trim(), 12)}?`, 'Warning issued.')}
-                      />
-                      <ActionButton
-                        disabled={!canOperate || actionBusy != null || docActionBusy != null || isSelfTarget || staleBlocker}
-                        busy={actionBusy === 'clearWarnings'}
-                        icon={<BellOff className="w-3.5 h-3.5" />}
-                        label="Clear warnings"
-                        tone="neutral"
-                        onClick={() => act('clearWarnings', () => clearWarnings(admin!, targetId.trim()), `Clear all warnings for ${shortId(targetId.trim(), 12)}?`, 'Warnings cleared.')}
-                      />
-                    </div>
+                    <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void fields('thread', doc.doc.id, { sticky: doc.doc.p.sticky === true ? null : true }, doc.doc.p.sticky === true ? 'Unpin' : 'Pin')}><Pin className="h-4 w-4" />{doc.doc.p.sticky === true ? 'Unpin' : 'Pin'}</button>
+                    <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void fields('thread', doc.doc.id, { lockedAt: num(doc.doc, 'lockedAt') !== undefined ? null : Date.now() }, num(doc.doc, 'lockedAt') !== undefined ? 'Unlock' : 'Lock')}>
+                      {num(doc.doc, 'lockedAt') !== undefined ? <><Unlock className="h-4 w-4" />Unlock</> : <><Lock className="h-4 w-4" />Lock</>}
+                    </button>
+                    <span className="flex items-center gap-1">
+                      <select className="field w-auto text-sm" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="Move to forum">
+                        <option value="">Move to…</option>
+                        {forums.filter((f) => f.id !== threadForumId(doc.doc)).map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
+                      </select>
+                      <button type="button" className="btn btn-quiet" disabled={!!busy || !moveTo} onClick={() => void fields('thread', doc.doc.id, { movedToForumId: moveTo === str(doc.doc, 'forumId') ? null : moveTo }, 'Move thread')}><ArrowRightLeft className="h-4 w-4" />Move</button>
+                    </span>
                   </>
                 )}
-                {isSelfTarget && (
-                  <p className="mt-4 text-xs text-archive">The chain refuses to moderate your own identity — pick another identity to moderate.</p>
-                )}
-                {!status && !statusLoading && !isSelfTarget && (
-                  <p className="mt-4 text-sm text-ink-2">Enter an identity ID and press the refresh button to read its status.</p>
-                )}
-              </section>
-            </div>
-
-            <section className="rounded-2xl border border-rule bg-sheet p-5">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="font-semibold flex items-center gap-2"><Pin className="w-4 h-4 text-dash" /> Moderate documents</h2>
-                <span className="text-xs text-ink-2">Recent threads &amp; posts · change fields and deletion are signed by the admin key</span>
-                {docsLoading && <Loader2 className="w-4 h-4 animate-spin text-ink-2" />}
-                {docsError && !docsLoading && (
-                  <button onClick={() => loadDocs()} className="ml-2 text-xs text-dash hover:underline inline-flex items-center gap-1">
-                    <RefreshCw className="w-3 h-3" /> Retry
-                  </button>
-                )}
+                <button type="button" className="btn btn-quiet text-danger" disabled={!!busy} onClick={() => m && void act('Delete', () => deleteDocument(m, doc.type, doc.doc.id, reason),
+                  `Delete this ${doc.type} permanently? Only a record of the deletion stays on chain. Prefer Hide unless the content is illegal.`).then((ok) => { if (ok) void setDoc(null) })}><Trash2 className="h-4 w-4" />Delete</button>
               </div>
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={lookupId}
-                  onChange={(e) => setLookupId(e.target.value)}
-                  placeholder="Look up a thread or post ID…"
-                  aria-label="Look up a thread or post ID"
-                  className="min-w-0 flex-1 rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-sm font-mono focus:border-dash"
-                  onKeyDown={(e) => e.key === 'Enter' && lookupDocument()}
-                />
-                <button
-                  onClick={lookupDocument}
-                  disabled={lookupBusy || !lookupId.trim()}
-                  className="btn btn-quiet gap-2 disabled:opacity-50"
-                >
-                  {lookupBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                  Find
-                </button>
-              </div>
-              {lookupError && <p role="alert" className="mt-2 text-sm text-danger">{lookupError}</p>}
-              {lookupDoc && !docsError && (
-                <DocumentCard doc={lookupDoc} canOperate={canOperate} busy={docActionBusy ?? actionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} />
-              )}
-              {docsError && !docsLoading && !lookupDoc && (
-                <p role="alert" className="mt-3 text-sm text-danger">Couldn&apos;t load recent documents. Check your connection and retry.</p>
-              )}
-              {!canOperate && !docsLoading && (
-                <p className="mt-3 text-xs text-archive border border-amber-400/30 rounded-lg px-3 py-2">Admin key required.</p>
-              )}
-              <div className="mt-4 space-y-2">
-                {docs.length === 0 && !docsLoading && !lookupDoc && (
-                  <p className="text-sm text-ink-2">No documents yet.</p>
-                )}
-                {docs.map((doc) => (
-                  <DocumentCard key={`${doc.type}:${doc.id}`} doc={doc} canOperate={canOperate} busy={docActionBusy ?? actionBusy} ownsDoc={ownsDoc} actions={{ toggleSticky, toggleLock, toggleHide, deleteDoc }} />
-                ))}
-              </div>
-              {(threadsMore || postsMore) && !docsLoading && (threadsAfter || postsAfter) && (
-                <button onClick={() => loadDocs(true)} className="btn btn-quiet mt-3">
-                  <RefreshCw className="w-3.5 h-3.5" /> Load more
-                </button>
-              )}
-            </section>
-
-          </div>
-        )}
-      </main>
-    </>
-  )
-}
-
-function DocumentCard({ doc, canOperate, busy, ownsDoc, actions, highlight }: {
-  doc: ModeratableDoc
-  canOperate: boolean
-  busy: string | null
-  ownsDoc: (doc: ModeratableDoc) => boolean
-  actions: {
-    toggleSticky: (doc: ModeratableDoc) => void
-    toggleLock: (doc: ModeratableDoc) => void
-    toggleHide: (doc: ModeratableDoc) => void
-    deleteDoc: (doc: ModeratableDoc) => void
-  }
-  highlight?: boolean
-}) {
-  const owns = ownsDoc(doc)
-  const isPost = doc.type === 'post'
-  return (
-    <div className={`flex items-center gap-2 sm:gap-3 rounded-xl border px-3 sm:px-4 py-3 flex-wrap ${highlight ? 'border-rule/50 bg-sunk/5' : 'border-rule bg-paper'}`}>
-      <span className={`text-[12px] uppercase tracking-wider rounded px-1.5 py-0.5 border shrink-0 ${isPost ? 'text-live border-emerald-400/30' : 'text-dash border-rule/40'}`}>{doc.type}</span>
-      <div className="min-w-0 flex-1 basis-40">
-        <p className="text-sm truncate">
-          {isPost ? (
-            doc.title
-          ) : (
-            <Link href={`/t/${encodeURIComponent(doc.id)}`} className="text-ink hover:underline">{doc.title}</Link>
+            </>
           )}
-          {doc.modState != null && <span className="ml-2 text-[12px] uppercase tracking-wider text-archive">hidden</span>}
-        </p>
-        <p className="text-xs text-ink-2">
-          {shortId(doc.ownerId, 12)} · {formatRelativeTime(doc.createdAt)}
-          {owns && <span className="block text-[12px] text-archive">own document — the chain refuses self-moderation; these actions are disabled</span>}
-        </p>
-      </div>
-      {!isPost ? (
-        <>
-          <SmallButton active={doc.sticky} icon={<Pin className="w-3.5 h-3.5" />} label={doc.sticky ? 'Unpin' : 'Pin'} disabled={!canOperate || busy != null || owns} busy={busy === `${doc.id}:sticky`} onClick={() => actions.toggleSticky(doc)} />
-          <SmallButton active={doc.lockedAt != null} icon={doc.lockedAt != null ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} label={doc.lockedAt != null ? 'Unlock' : 'Lock'} disabled={!canOperate || busy != null || owns} busy={busy === `${doc.id}:lock`} onClick={() => actions.toggleLock(doc)} />
-          <SmallButton active={doc.modState != null} icon={doc.modState != null ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState != null ? 'Unhide' : 'Hide'} disabled={!canOperate || busy != null || owns} busy={busy === `${doc.id}:hide`} onClick={() => actions.toggleHide(doc)} />
-        </>
-      ) : (
-        <SmallButton active={doc.modState != null} icon={doc.modState != null ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} label={doc.modState != null ? 'Unhide' : 'Hide'} disabled={!canOperate || busy != null || owns} busy={busy === `${doc.id}:hide`} onClick={() => actions.toggleHide(doc)} />
+        </div>
       )}
-      <SmallButton icon={<Trash2 className="w-3.5 h-3.5" />} label="Delete" danger disabled={!canOperate || busy != null || owns} busy={busy === `${doc.id}:delete`} onClick={() => actions.deleteDoc(doc)} />
-    </div>
-  )
-}
-
-function RosterRow({ label, id, highlight }: { label: string; id: string | null; highlight?: boolean }) {
-  if (!id) return null
-  return (
-    <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${highlight ? 'border-live/40 bg-live/5' : 'border-rule bg-paper'}`}>
-      <span className="text-xs text-ink-2">{label}</span>
-      <span className="text-xs font-mono text-ink truncate" title={id}>{highlight ? `${shortId(id, 14)} (you)` : shortId(id, 18)}</span>
-    </div>
-  )
-}
-
-function StatusPill({ tone, icon, label }: { tone: 'red' | 'amber' | 'neutral'; icon: React.ReactNode; label: string }) {
-  const tones = {
-    red: 'border-danger/40 bg-danger/10 text-danger',
-    amber: 'border-amber-400/40 bg-amber-400/10 text-archive',
-    neutral: 'border-rule bg-paper text-ink-2',
-  }
-  return <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${tones[tone]}`}>{icon}{label}</span>
-}
-
-function ActionButton({ disabled, busy, icon, label, tone, describedBy, onClick }: { disabled: boolean; busy: boolean; icon: React.ReactNode; label: string; tone: 'red' | 'amber' | 'neutral'; describedBy?: string; onClick: () => void }) {
-  const tones = {
-    red: 'border-danger/40 text-danger hover:bg-danger/10',
-    amber: 'border-amber-400/40 text-archive hover:bg-amber-400/10',
-    neutral: 'border-rule text-ink-2 hover:text-ink hover:border-dash',
-  }
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      aria-describedby={disabled ? describedBy : undefined}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40 disabled:cursor-not-allowed ${tones[tone]}`}
-    >
-      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
-      {label}
-    </button>
-  )
-}
-
-function SmallButton({ icon, label, active, danger, disabled, busy, onClick }: { icon: React.ReactNode; label: string; active?: boolean | null; danger?: boolean; disabled?: boolean; busy?: boolean; onClick: () => void }) {
-  const cls = danger
-    ? 'border-danger/40 text-danger hover:bg-danger/10'
-    : active
-      ? 'border-rule/60 bg-sunk/10 text-dash'
-      : 'border-rule text-ink-2 hover:text-ink hover:border-dash'
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active === undefined || active === null ? undefined : Boolean(active)}
-      title={active ? `${label} — currently on, click to turn off` : label}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition disabled:opacity-40 disabled:cursor-not-allowed ${cls}`}
-    >
-      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
-      {label}
-    </button>
-  )
-}
-
-function TextInput({ label, value, onChange, type = 'text', id }: { label: string; value: string; onChange: (v: string) => void; type?: string; id?: string }) {
-  return (
-    <label className="block">
-      <span className="text-xs text-ink-2">{label}</span>
-      <input
-        id={id}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-rule bg-paper px-3 py-2 text-base sm:text-xs focus:border-dash"
-      />
-    </label>
-  )
-}
-
-function FramedNotice({ what }: { what: string }) {
-  return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
-      <div className="text-center  max-w-md mx-auto">
-        <ExternalLink className="w-8 h-8 text-dash mx-auto" aria-hidden="true" />
-        <p className="text-sm uppercase tracking-widest text-ink-2 mt-3">In a frame</p>
-        <h1 className="text-2xl font-bold mt-2">Open {what} in its own tab</h1>
-        <p className="text-sm text-ink-2 mt-2">
-          This surface holds key material — it only runs on its own top-level page.
-        </p>
-        <a href={`https://${canonicalHost()}/moderation`} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-2 btn btn-primary px-4 py-2">
-          Open in a new tab <ExternalLink className="w-4 h-4" />
-        </a>
+      <div>
+        <h2 className="mb-2 font-semibold">Latest posts</h2>
+        <ul className="panel divide-y divide-rule">
+          {recent.map((p) => (
+            <li key={p.id} className="flex items-start gap-3 px-4 py-2.5 text-sm">
+              <div className="min-w-0 flex-1">
+                <p className="text-ink-2"><Link className="link" href={`/u/${p.ownerId}/`}>{names(p.ownerId)}</Link>, <Time at={p.createdAt} />{isHidden(p) && ' (hidden)'}</p>
+                <p className="line-clamp-2">{excerpt(postBody(p), 240)}</p>
+              </div>
+              <button type="button" className="btn btn-quiet" onClick={() => { setRef(`#post-${p.id}`); void lookup(`#post-${p.id}`) }}>Review</button>
+            </li>
+          ))}
+        </ul>
       </div>
-    </div>
+    </section>
   )
 }
 
-function NonCanonicalRefuse() {
+function Members({ act, busy, moderatorId }: PanelProps) {
+  const m = useModerator()
+  const [target, setTarget] = useState('')
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof moderationStatus>> | null>(null)
+  const [reason, setReason] = useState('')
+  const [days, setDays] = useState(7)
+  const [error, setError] = useState<string | null>(null)
+  const valid = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target.trim())
+  const load = useCallback(async () => {
+    setError(null)
+    try { setStatus(await moderationStatus(target.trim())) } catch (e) { setError(e instanceof Error ? e.message : 'Could not read the status.') }
+  }, [target])
+  const run = (label: string, fn: () => Promise<unknown>, c?: string) => act(label, fn, c).then((ok) => { if (ok) void load() })
+  const id = target.trim()
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
-      <div className="text-center  max-w-md mx-auto">
-        <ShieldAlert className="w-8 h-8 text-danger mx-auto" aria-hidden="true" />
-        <p className="text-sm uppercase tracking-widest text-ink-2 mt-3">Not available here</p>
-        <h1 className="text-2xl font-bold mt-2">The moderation console is not available on this host</h1>
-        <p className="text-sm text-ink-2 mt-2">
-          This console holds a CRITICAL key — it runs only on <code>{canonicalHost()}</code> (and localhost).
-          On any other origin — including a shared Pages origin — it refuses to load so the key cannot leak.
-        </p>
-        <a href={`https://${canonicalHost()}/moderation`} className="mt-6 inline-flex items-center gap-2 btn btn-primary px-4 py-2">
-          Open on the canonical host <ExternalLink className="w-4 h-4" />
-        </a>
-      </div>
-    </div>
+    <section className="space-y-4">
+      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (valid) void load() }}>
+        <input className="field max-w-xl flex-1 font-mono text-sm" placeholder="Member identity id" value={target} onChange={(e) => { setTarget(e.target.value); setStatus(null) }} aria-label="Member identity id" />
+        <button className="btn btn-primary" disabled={!valid}>Look up</button>
+      </form>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {status && m && (
+        <div className="panel space-y-3 p-4">
+          <p className="text-sm"><Link className="link font-medium" href={`/u/${id}/`}>{shortId(id)}</Link>:{' '}
+            {status.banned ? <span className="text-danger">banned{status.banReason?.text ? ` (${status.banReason.text})` : ''}</span> : 'not banned'},{' '}
+            {status.suspendedUntil ? <>suspended until {new Date(Number(status.suspendedUntil)).toUTCString()}</> : 'not suspended'},{' '}
+            {(status.warnings?.length ?? 0)} warning{status.warnings?.length === 1 ? '' : 's'}</p>
+          {id === moderatorId ? <p className="text-sm text-ink-2">That&apos;s you.</p> : (
+            <>
+              <input className="field text-sm" placeholder="Reason (shown to the member on chain)" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+              <div className="flex flex-wrap items-center gap-2">
+                {status.banned
+                  ? <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Unban', () => unbanUser(m, id))}>Unban</button>
+                  : <button type="button" className="btn btn-danger" disabled={!!busy || !reason.trim()} onClick={() => void run('Ban', () => banUser(m, id, reason.trim()), 'Ban this identity? It can no longer write to this forum until unbanned.')}>Ban</button>}
+                {status.suspendedUntil
+                  ? <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Lift suspension', () => unsuspendUser(m, id))}>Lift suspension</button>
+                  : <span className="flex items-center gap-1"><input type="number" min={1} max={365} className="field w-20 text-sm" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Days" />
+                    <button type="button" className="btn btn-quiet" disabled={!!busy || !reason.trim()} onClick={() => void run('Suspend', () => suspendUser(m, id, BigInt(Date.now() + days * 86_400_000), reason.trim()))}>Suspend {days} days</button></span>}
+                <button type="button" className="btn btn-quiet" disabled={!!busy || !reason.trim()} onClick={() => void run('Warn', () => warnUser(m, id, reason.trim()))}>Warn</button>
+                {(status.warnings?.length ?? 0) > 0 && <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Clear warnings', () => clearWarnings(m, id))}>Clear warnings</button>}
+              </div>
+              <p className="text-xs text-ink-2">Bans and suspensions stop the identity from writing to this forum&apos;s contract; the network enforces them. Ban, suspend and warn need a reason.</p>
+            </>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
+
+function AuditLog() {
+  const [items, setItems] = useState<Array<{ type: string; doc: RawDoc }> | null>(null)
+  useEffect(() => {
+    Promise.all(['thread', 'post', 'profile', 'report'].map((type) =>
+      queryPage(type, { where: [['$moderatedAt', '>', 0]], orderBy: [['$moderatedAt', 'desc']], limit: 50 }).then((r) => r.docs.map((doc) => ({ type, doc }))).catch(() => [])))
+      .then((lists) => setItems(lists.flat().sort((a, b) => (b.doc.moderatedAt ?? 0) - (a.doc.moderatedAt ?? 0))))
+  }, [])
+  const names = useNames({}, (items ?? []).map((i) => i.doc.ownerId))
+  const rows = useMemo(() => items ?? [], [items])
+  if (!items) return <p role="status" className="text-ink-2">Loading the moderation record…</p>
+  return (
+    <section className="space-y-2">
+      <p className="text-sm text-ink-2">Every moderator field change is stamped on chain. Deletions are recorded separately by the network and are not listed here.</p>
+      {rows.length === 0 ? <p className="panel px-4 py-6 text-center text-ink-2">No moderation actions yet.</p> : (
+        <ul className="panel divide-y divide-rule text-sm">
+          {rows.map(({ type, doc }) => (
+            <li key={`${type}-${doc.id}`} className="flex flex-wrap items-baseline gap-x-2 px-4 py-2">
+              <span className="font-medium capitalize">{type}</span>
+              <span className="text-ink-2">by {names(doc.ownerId)}</span>
+              <span>{[isHidden(doc) && 'hidden', doc.p.sticky === true && 'pinned', num(doc, 'lockedAt') !== undefined && 'locked', str(doc, 'movedToForumId') && 'moved',
+                num(doc, 'status') === 2 && 'report actioned', num(doc, 'status') === 3 && 'report dismissed'].filter(Boolean).join(', ') || 'restored'}</span>
+              <span className="ml-auto text-ink-2">{doc.moderatedAt ? <Time at={doc.moderatedAt} /> : null}</span>
+              {type === 'thread' && <Link className="link" href={`/t/${doc.id}/`}>open</Link>}
+              {type === 'post' && <Link className="link" href={`/t/${str(doc, 'threadId')}/#post-${doc.id}`}>open</Link>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+

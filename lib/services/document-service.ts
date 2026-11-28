@@ -30,6 +30,64 @@ export interface DocRef {
 
 const SEQUENCE_MASK = (1n << 40n) - 1n
 
+/** Identifier-typed properties per document type (contracts/build.mjs). Writes must carry them as
+ * 32 raw bytes; reads normalize them to base58. */
+const IDENTIFIER_FIELDS: Record<string, readonly string[]> = {
+  forumSettings: ['archiveOwnerId'],
+  forum: ['categoryId', 'parentForumId'],
+  teamMember: ['memberId'],
+  thread: ['forumId', 'movedToForumId'],
+  post: ['threadId', 'forumId', 'replyToId'],
+  reaction: ['postId', 'postOwnerId', 'threadId'],
+  report: ['postId', 'threadId'],
+}
+
+function identifierBytes(v: string, label: string): Uint8Array {
+  const bytes = bs58.decode(v)
+  if (bytes.length !== 32) throw new Error(`${label} is not a 32-byte identifier`)
+  return bytes
+}
+
+/** Properties in the byte-preserving shape Document.fromObject needs: identifiers as raw bytes. */
+export function toWireProperties(type: string, properties: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(properties)) {
+    if (v === undefined || v === null) continue
+    out[k] = IDENTIFIER_FIELDS[type]?.includes(k) && typeof v === 'string' ? identifierBytes(v, `${type}.${k}`) : v
+  }
+  return out
+}
+
+/**
+ * Builds a WASM Document with Document.fromObject (the constructor round-trips properties
+ * through JSON and turns byte arrays into integer arrays, which consensus rejects). A create
+ * derives its id from entropy + the identity contract nonce, exactly as the transition will.
+ */
+async function buildDocument(input: {
+  type: string
+  ownerId: string
+  properties: Record<string, unknown>
+  revision: bigint
+  nonce: bigint
+  id?: string
+  entropy?: Uint8Array
+}) {
+  const sdk = await getSdk()
+  const { Document, PlatformVersion } = await import('@dashevo/evo-sdk')
+  const platformVersion = new PlatformVersion(sdk.version())
+  const id = input.id ?? bs58.encode(Document.generateId(input.type, input.ownerId, CONTRACT_ID, input.entropy as Uint8Array, input.nonce, platformVersion))
+  return Document.fromObject({
+    $formatVersion: '0',
+    $id: identifierBytes(id, 'document id'),
+    $ownerId: identifierBytes(input.ownerId, 'owner id'),
+    $dataContractId: identifierBytes(CONTRACT_ID, 'contract id'),
+    $type: input.type,
+    $revision: input.revision,
+    ...(input.entropy ? { $entropy: input.entropy } : {}),
+    ...toWireProperties(input.type, input.properties),
+  } as never, platformVersion)
+}
+
 // ---- normalization helpers --------------------------------------------------
 
 /** Convert identifier-like values (Uint8Array, numeric-keyed objects, base58) to base58. */
@@ -84,9 +142,8 @@ function normalizeValue(value: unknown): unknown {
 function normalizeDoc(raw: unknown): DocRef | null {
   if (!raw) return null
   try {
-    const obj = typeof (raw as { toObject?: () => unknown }).toObject === 'function'
-      ? (raw as { toObject: () => Record<string, unknown> }).toObject()
-      : (raw as Record<string, unknown>)
+    const r = raw as { toJSON?: () => Record<string, unknown>; toObject?: () => Record<string, unknown> }
+    const obj = typeof r.toJSON === 'function' ? r.toJSON() : typeof r.toObject === 'function' ? r.toObject() : (raw as Record<string, unknown>)
     if (!obj || typeof obj !== 'object') return null
 
     const id = identifierify(obj.$id ?? obj.id)
@@ -113,7 +170,7 @@ function normalizeDoc(raw: unknown): DocRef | null {
       ownerId,
       dataContractId,
       documentTypeName: String(documentTypeName),
-      revision: revisionRaw !== undefined ? BigInt(typeof revisionRaw === 'bigint' ? revisionRaw : Number(revisionRaw)) : 1n,
+      revision: revisionRaw !== undefined && revisionRaw !== null ? BigInt(typeof revisionRaw === 'bigint' ? revisionRaw : Number(revisionRaw)) : 1n,
       createdAt: createdAtRaw ? Number(createdAtRaw) : 0,
       updatedAt: updatedAtRaw ? Number(updatedAtRaw) : 0,
       properties: props,
@@ -332,21 +389,14 @@ export async function createDocument(
   properties: Record<string, unknown>,
 ): Promise<DocRef> {
   const sdk = await getSdk()
-  const { Document } = await getSdkClasses()
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
   try {
     const entropy = crypto.getRandomValues(new Uint8Array(32))
     const nonce = await freshNonce(identityId)
-    const document = new Document({
-      properties: stripModeratorFields(type, properties),
-      documentTypeName: type,
-      dataContractId: CONTRACT_ID,
-      ownerId: identityId,
-      revision: 1n,
-      entropy,
-      identityContractNonce: nonce,
+    const document = await buildDocument({
+      type, ownerId: identityId, properties: stripModeratorFields(type, properties), revision: 1n, nonce, entropy,
     })
     if (sign.bound) {
       // Contract-bound keys sign batches only (20013 otherwise).
@@ -357,6 +407,7 @@ export async function createDocument(
         nonce,
         authKeyWif,
         identityKey: sign.identityKey as never,
+        landed: async (id) => !!(await get(type, id)),
       })
       const after = await get(type, documentId).catch(() => null)
       return after ?? {
@@ -386,7 +437,6 @@ export async function replaceDocument(
   properties: Record<string, unknown>,
 ): Promise<DocRef> {
   const sdk = await getSdk()
-  const { Document } = await getSdkClasses()
   const sign = await buildSigning(identityId, authKeyWif)
   if (!sign) throw new Error('Signing context unavailable — identity or key not found')
 
@@ -396,17 +446,12 @@ export async function replaceDocument(
     // never set them.
     const updatedProps = buildAuthorUpdate(existing.documentTypeName, existing.properties, properties)
     const nonce = await freshNonce(identityId)
-    const document = new Document({
-      properties: updatedProps,
-      documentTypeName: existing.documentTypeName,
-      dataContractId: CONTRACT_ID,
-      ownerId: identityId,
-      revision: existing.revision + 1n,
-      id: existing.id,
-      identityContractNonce: nonce,
+    const document = await buildDocument({
+      type: existing.documentTypeName, ownerId: identityId, properties: updatedProps, revision: existing.revision + 1n, nonce, id: existing.id,
     })
     if (sign.bound) {
       // Contract-bound keys sign batches only (20013 otherwise).
+      const nextRevision = existing.revision + 1n
       await batchedWrite({
         kind: 'replace',
         document,
@@ -414,6 +459,7 @@ export async function replaceDocument(
         nonce,
         authKeyWif,
         identityKey: sign.identityKey as never,
+        landed: async (id) => ((await get(existing.documentTypeName, id))?.revision ?? 0n) >= nextRevision,
       })
       // The chain wrote the document — a re-read failure is not a write
       // failure. Report honestly: return what the write produced.
