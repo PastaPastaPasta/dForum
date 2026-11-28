@@ -354,15 +354,17 @@ function Content({ act, busy, forums, moderatorId, openMember }: PanelProps) {
                     let opening: RawDoc | null = null
                     const all: RawDoc[] = []
                     let startAfter: string | undefined
+                    let complete = false
                     for (let i = 0; i < 5 && !opening; i++) {
                       const page = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit: 100, startAfter })
                       // Imported threads order by original date: read the whole thread for those.
                       if (thread.p.origId === undefined) opening = threadPosts(thread, page.docs).opening
                       else all.push(...page.docs)
-                      if (!page.full || !page.last) break
+                      if (!page.full || !page.last) { complete = true; break }
                       startAfter = page.last
                     }
-                    if (thread.p.origId !== undefined) opening = threadPosts(thread, all, thread.ownerId).opening
+                    // An imported thread too long to read in full can't be judged: hide it (fail closed).
+                    if (thread.p.origId !== undefined) opening = complete ? threadPosts(thread, all, thread.ownerId).opening : null
                     if (!opening || opening.id === doc.doc.id) {
                       await changeDocumentFields(m, 'thread', thread.id, { modState: 1 }, reason || 'Opening post deleted')
                     }

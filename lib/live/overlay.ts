@@ -7,8 +7,8 @@
  */
 import { useSyncExternalStore } from 'react'
 import type { RawDoc } from '@/lib/forum/types'
-import { mergeDocs, str } from '@/lib/forum/model'
-import { queryPage } from './platform'
+import { isHidden, mergeDocs, str } from '@/lib/forum/model'
+import { getDoc, queryPage } from './platform'
 
 const OVERLAP_MS = 10 * 60_000
 const POLL_MS = 45_000
@@ -59,32 +59,37 @@ const HEAD_DEADLINE_MS = 10_000
 const HEADS_BUDGET_MS = 20_000
 const HEAD_MAX_PAGES = 6 // 5 + 5 × 100 posts
 
-/** A thread's posts from the first up to its owner's first post (the opening post). The cutoff is that
- * post's createdAt; Infinity when the thread ended first (all posts loaded, no opening post); the last
- * loaded post's when the cap ran out first (the opening post is then out of reach: fails closed). */
+/** A thread's opening post (its owner's first post), found by paging the thread. Only that post is
+ * kept (the rule needs nothing else, and heads stay in memory all session). The cutoff is its
+ * createdAt; Infinity when the thread ended without one (no opening post: unlisted); NaN when the
+ * cap ran out first (no evidence: new replies wait, the snapshot's listing stands). Imported threads
+ * order by original date, so for those the whole thread is read and the earliest by that date wins;
+ * past the cap they fall back to their chain-first post. */
 async function loadHead(thread: RawDoc, stop: { aborted: boolean }): Promise<{ docs: RawDoc[]; cutoff: number }> {
-  const docs: RawDoc[] = []
-  let startAfter: string | undefined
-  // Imported threads order by original date, not chain order, so their opening post can be any of
-  // the archivist's posts: load the whole thread (up to the cap).
   const archive = thread.p.origId !== undefined
+  let best: RawDoc | undefined
+  let first: RawDoc | undefined
+  let startAfter: string | undefined
   for (let i = 0; i < HEAD_MAX_PAGES; i++) {
     if (stop.aborted) throw new Error('aborted')
     // The opening post is nearly always first: a small first page, then full pages.
     const limit = i === 0 ? HEAD_FIRST_PAGE : HEAD_PAGE
     const page = await queryPage('post', { where: [['threadId', '==', thread.id]], orderBy: [['$createdAt', 'asc']], limit, startAfter })
-    docs.push(...page.docs)
-    const opening = archive ? undefined : page.docs.find((p) => p.ownerId === thread.ownerId)
-    if (opening) return { docs, cutoff: opening.createdAt }
-    if (!page.full || !page.last) return { docs, cutoff: Infinity }
+    first ??= page.docs[0]
+    for (const p of page.docs) {
+      if (p.ownerId !== thread.ownerId) continue
+      if (!archive) return { docs: [p], cutoff: p.createdAt }
+      if (!best || origAt(p) < origAt(best)) best = p
+    }
+    if (!page.full || !page.last) return best ? { docs: [best], cutoff: Infinity } : { docs: [], cutoff: Infinity }
     startAfter = page.last
   }
-  // Cap reached. An imported thread (the archivist owns every post) falls back to its chain-first post,
-  // which is its opening post unless history was imported out of order. Otherwise the opening post is
-  // out of reach: no evidence either way (NaN): new replies wait, the snapshot's listing stands.
-  if (archive && docs[0]?.ownerId === thread.ownerId) return { docs, cutoff: docs[0].createdAt }
-  return { docs, cutoff: NaN }
+  if (archive && first?.ownerId === thread.ownerId) return { docs: [first], cutoff: first.createdAt }
+  return { docs: [], cutoff: NaN }
 }
+
+const origAt = (p: RawDoc) => (typeof p.p.origCreatedAt === 'number' ? p.p.origCreatedAt : p.createdAt)
+
 const STEP_OVERLAP_MS = 2 * 60_000
 const MAX_PAGES = 10
 
@@ -96,9 +101,20 @@ async function scan(type: string, field: '$updatedAt' | '$moderatedAt') {
   let from = prev?.capped ? prev.at : Math.max(since, (prev?.at ?? since) - STEP_OVERLAP_MS)
   const docs: RawDoc[] = []
   let tieAfter: string | undefined = prev?.capped ? prev.after : undefined
+  // The parked id is resolved by Platform against the document as it is now: if it was deleted or
+  // edited since, resume from its value without it (re-reading part of a tie block is harmless).
+  if (tieAfter) {
+    const parked = await getDoc(type, tieAfter).catch(() => null)
+    if (!parked || ((field === '$moderatedAt' ? parked.moderatedAt : parked.updatedAt) ?? 0) !== from) tieAfter = undefined
+  }
   let truncated = true
   for (let i = 0; i < MAX_PAGES; i++) {
     const page = await queryPage(type, { where: [[field, '>=', from]], orderBy: [[field, 'asc']], startAfter: tieAfter })
+      .catch((e) => {
+        // Deleted between the check and the query: retry the page without it.
+        if (tieAfter && /not found/i.test(String((e as { message?: unknown })?.message ?? e))) { tieAfter = undefined; return queryPage(type, { where: [[field, '>=', from]], orderBy: [[field, 'asc']] }) }
+        throw e
+      })
     docs.push(...page.docs)
     if (!page.full || !page.docs.length) { truncated = false; break }
     const value = (d: RawDoc) => (field === '$moderatedAt' ? d.moderatedAt : d.updatedAt) ?? 0
@@ -109,12 +125,15 @@ async function scan(type: string, field: '$updatedAt' | '$moderatedAt') {
   }
   const max = docs.reduce((m, d) => Math.max(m, (field === '$moderatedAt' ? d.moderatedAt : d.updatedAt) ?? 0), prev?.at ?? since)
   const next: Cursor = truncated ? { at: from, after: tieAfter, capped: true } : { at: max, capped: false }
+  // Capped while still re-reading the overlap of an already caught-up scan: nothing new is missing yet,
+  // so don't report truncation (it would hide new threads); the next poll resumes from the cursor.
+  const overlapOnly = truncated && !prev?.capped && from <= (prev?.at ?? -Infinity)
   // Returned, not stored: cursors move only once the whole poll has been applied.
-  return { docs, truncated, next: [[key, next]] as Array<[string, Cursor]> }
+  return { docs, truncated: truncated && !overlapOnly, capped: truncated, next: [[key, next]] as Array<[string, Cursor]> }
 }
 
 type Scan = Awaited<ReturnType<typeof scan>>
-const EMPTY_SCAN: Scan = { docs: [], truncated: false, next: [] }
+const EMPTY_SCAN: Scan = { docs: [], truncated: false, capped: false, next: [] }
 
 // Contracts without moderation have no $moderatedAt index; stop asking once that's clear.
 let moderationIndexes = true
@@ -128,7 +147,7 @@ async function delta(type: string, moderated: boolean) {
       })
     : Promise.resolve(EMPTY_SCAN)
   const [a, b] = await Promise.all([scan(type, '$updatedAt'), mod])
-  return { docs: [...a.docs, ...b.docs], truncated: a.truncated || b.truncated, next: [...a.next, ...b.next] }
+  return { docs: [...a.docs, ...b.docs], truncated: a.truncated || b.truncated, capped: a.capped || b.capped, next: [...a.next, ...b.next] }
 }
 
 export function refreshLive(): Promise<void> {
@@ -161,7 +180,7 @@ export function refreshLive(): Promise<void> {
       }
       // A thread a moderator changed (moved, moved back, hidden…) may be listed live in another forum,
       // which needs its listability too.
-      for (const t of threads.docs) if ((t.moderatedAt ?? 0) > since && !headsFetched.has(t.id)) headsPending.add(t.id)
+      for (const t of threads.docs) if ((t.moderatedAt ?? 0) > since && !isHidden(t) && !headsFetched.has(t.id)) headsPending.add(t.id)
       const cutoffs = new Map<string, number>()
       const heads: RawDoc[] = []
       const queue: string[] = []
@@ -209,7 +228,8 @@ export function refreshLive(): Promise<void> {
       for (const [key, value] of [...threads.next, ...posts.next, ...reactions.next, ...profiles.next]) cursors.set(key, value)
       for (const [id, cutoff] of cutoffs) { headsFetched.set(id, cutoff); headsPending.delete(id) }
       // A capped poll, or heads still pending, resumes right away until it has caught up.
-      if (state.truncated || (headsPending.size && cutoffs.size)) setTimeout(() => void refreshLive(), 1500)
+      const capped = threads.capped || posts.capped || reactions.capped || profiles.capped
+      if (capped || (headsPending.size && cutoffs.size)) setTimeout(() => void refreshLive(), 1500)
     } catch {
       set({ status: state.status === 'live' ? 'live' : 'offline' })
     } finally {

@@ -56,16 +56,18 @@ try {
         let opening = null;
         const all = [];
         let startAfter;
+        let complete = false;
         for (let i = 0; i < 5 && !opening; i++) {
           const res = await sdk.documents.query({ dataContractId: contractId, documentTypeName: 'post', where: [['threadId', '==', thread.$id]], orderBy: [['$createdAt', 'asc']], limit: 100, ...(startAfter ? { startAfter } : {}) });
           const docs = [...res.values()].filter(Boolean).map((d) => d.toJSON());
           all.push(...docs);
           // Imported threads order by original date: read the whole thread for those.
           if (thread.origId == null) opening = docs.find((d) => d.$ownerId === thread.$ownerId) ?? null;
-          if (docs.length < 100) break;
+          if (docs.length < 100) { complete = true; break; }
           startAfter = docs[docs.length - 1].$id;
         }
-        if (thread.origId != null) {
+        // An imported thread too long to read in full can't be judged: hide it (fail closed).
+        if (thread.origId != null && complete) {
           const own = all.filter((d) => d.$ownerId === thread.$ownerId).sort((a, b) => (a.origCreatedAt ?? a.$createdAt) - (b.origCreatedAt ?? b.$createdAt));
           opening = own[0] ?? null;
         }

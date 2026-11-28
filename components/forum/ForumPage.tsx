@@ -36,12 +36,21 @@ export function ForumPage({ forum, crumbs, subforums, threads, page, pages, name
   const [movedFiles, setMovedFiles] = useState<Record<string, ThreadFile>>({})
   const [retry, setRetry] = useState(0)
   useEffect(() => {
-    for (const id of movedKey ? movedKey.split(',') : []) {
-      if (movedFiles[id]) continue
-      fetch(`/data/v2/thread/${id}.json`).then((r) => (r.ok ? (r.json() as Promise<ThreadFile>) : null))
-        .then((f) => { if (f) setMovedFiles((m) => ({ ...m, [id]: f })) })
-        .catch(() => { setTimeout(() => setRetry((n) => n + 1), 15_000) })
-    }
+    const missing = (movedKey ? movedKey.split(',') : []).filter((id) => !movedFiles[id])
+    if (!missing.length) return
+    let alive = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // One retry per round, backing off, for network errors and server-side failures (5xx, 429).
+    void Promise.all(missing.map((id) => fetch(`/data/v2/thread/${id}.json`)
+      .then(async (r) => {
+        if (r.ok) { const f = (await r.json()) as ThreadFile; if (alive) setMovedFiles((m) => ({ ...m, [id]: f })); return true }
+        return r.status === 404 // gone from the index: nothing to retry
+      })
+      .catch(() => false)))
+      .then((done) => {
+        if (alive && done.some((ok) => !ok) && retry < 6) timer = setTimeout(() => setRetry((n) => n + 1), 5_000 * 2 ** retry)
+      })
+    return () => { alive = false; clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movedKey, retry])
   const movedSummaries = movedIn.flatMap((t) => {
@@ -51,7 +60,9 @@ export function ForumPage({ forum, crumbs, subforums, threads, page, pages, name
     const posts = f?.posts.filter((p) => p.createdAt <= ctx.snapshotAt)
     // Only threads the snapshot had in another forum: one that was here already (pinned, say) is on
     // its static page.
-    if (!f || !posts || f.forumId === forum.id) return []
+    // (A file newer than this page's snapshot may already show the move: then it was moderated after
+    // the page's snapshot, and still belongs here.)
+    if (!f || !posts || (f.forumId === forum.id && !((f.thread.moderatedAt ?? 0) > ctx.snapshotAt))) return []
     return [summarizeThread(t, threadPosts(t, posts, ctx.archive), f.reactions, ctx.archive)]
   })
   const merged = mergeForumThreads([...threads, ...movedSummaries], forum.id, live, lc, page === 1)

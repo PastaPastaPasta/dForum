@@ -8,7 +8,7 @@ import { useLive } from '@/lib/live/overlay'
 import { unwatch, useWatches } from '@/lib/watch'
 import { POSTS_PER_PAGE } from '@/lib/forum/types'
 
-export function Watched({ snapshotAt }: { snapshotAt: number }) {
+export function Watched({ snapshotAt, archive }: { snapshotAt: number; archive?: import('@/lib/forum/model').ArchiveRef }) {
   const watches = useWatches()
   const live = useLive(snapshotAt)
   // Posts in the static copy of each thread; 0 when the thread is newer than the snapshot.
@@ -27,7 +27,7 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
   }, [ids.join()])
   // New replies the forum would show (listable threads only), per thread.
   const freshCounts = new Map<string, number>()
-  for (const { thread } of newPosts(live, { snapshotAt })) freshCounts.set(thread.id, (freshCounts.get(thread.id) ?? 0) + 1)
+  for (const { thread } of newPosts(live, { snapshotAt, archive })) freshCounts.set(thread.id, (freshCounts.get(thread.id) ?? 0) + 1)
   const fresh = (id: string) => freshCounts.get(id) ?? 0
   // The page holding the first new reply, capped at the last page the static index built (newer
   // replies show on that last page live).

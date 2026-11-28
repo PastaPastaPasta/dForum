@@ -9,6 +9,7 @@ const doc = (id: string, ownerId: string, createdAt: number, p: Record<string, u
 const store: { posts: RawDoc[]; threads: RawDoc[] } = { posts: [], threads: [] }
 
 vi.mock('@/lib/live/platform', () => ({
+  getDoc: async (type: string, id: string) => (type === 'post' ? store.posts : store.threads).find((d) => d.id === id) ?? null,
   queryPage: async (type: string, opts: { where?: Array<[string, string, unknown]>; orderBy?: Array<[string, string]>; limit?: number; startAfter?: string }) => {
     let docs = type === 'post' ? store.posts : type === 'thread' ? store.threads : []
     for (const [f, op, v] of opts.where ?? []) {
@@ -19,7 +20,12 @@ vi.mock('@/lib/live/platform', () => ({
     }
     const key = opts.orderBy?.[0]?.[0]
     docs = [...docs].sort((a, b) => (key === '$updatedAt' ? a.updatedAt - b.updatedAt : key === '$createdAt' ? a.createdAt - b.createdAt : 0) || (a.id < b.id ? -1 : 1))
-    if (opts.startAfter) docs = docs.slice(docs.findIndex((d) => d.id === opts.startAfter) + 1)
+    if (opts.startAfter) {
+      // As drive does: the start document must exist now.
+      const at = docs.findIndex((d) => d.id === opts.startAfter)
+      if (at < 0) throw new Error('StartDocumentNotFound: start document not found')
+      docs = docs.slice(at + 1)
+    }
     const limit = opts.limit ?? 100
     const page = docs.slice(0, limit)
     return { docs: page, last: page[page.length - 1]?.id, full: page.length >= limit }
@@ -68,5 +74,25 @@ describe('overlay scan', () => {
     const state = hook.get?.() as { posts: RawDoc[]; truncated: boolean }
     expect(state.posts.filter((p) => p.id.startsWith('B'))).toHaveLength(1500)
     expect(state.truncated).toBe(false)
+  })
+})
+
+describe('overlay scan resume', () => {
+  beforeEach(() => { vi.resetModules(); store.posts = []; store.threads = [] })
+  it('survives the parked tie document being deleted before the resume', async () => {
+    store.threads.push(doc('FLOOD', 'spam', SNAP + 1, { forumId: 'F', title: 'flood' }))
+    // 1,200 posts in one block (one $updatedAt): more than one capped poll.
+    for (let i = 0; i < 1200; i++) store.posts.push(doc(`S${String(i).padStart(4, '0')}`, 'spam', SNAP + 5000, { threadId: 'FLOOD', forumId: 'F', body: 's' }))
+    const overlay = await import('@/lib/live/overlay')
+    overlay.useLive(SNAP)
+    hook.sub?.(() => undefined)
+    await overlay.refreshLive()
+    // Moderators delete the flood before the next poll; a real reply follows.
+    store.posts = []
+    store.threads.push(doc('REAL', 'bob', SNAP + 9000, { forumId: 'F', title: 'real' }))
+    store.posts.push(doc('ROPEN', 'bob', SNAP + 9001, { threadId: 'REAL', forumId: 'F', body: 'hello' }))
+    for (let i = 0; i < 3; i++) await overlay.refreshLive()
+    const state = hook.get?.() as { posts: RawDoc[]; status: string }
+    expect(state.posts.some((p) => p.id === 'ROPEN')).toBe(true)
   })
 })
