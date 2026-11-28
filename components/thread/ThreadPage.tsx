@@ -112,13 +112,16 @@ export function ThreadPage(props: ThreadPageProps) {
   const listable = useMemo(() => {
     if (!thread || isHidden(thread)) return false
     if (!props.thread) return threadPosts(thread, mergeDocs(fetched.posts, livePosts), archive).listable
-    const opening = page === 1 ? posts.find((p) => p.ownerId === thread.ownerId) : undefined
+    // Later pages don't hold the opening post; the live delta has it when it was moderated since.
+    const opening = page === 1
+      ? posts.find((p) => p.ownerId === thread.ownerId)
+      : livePosts.find((p) => p.id.slice(0, ID_PREFIX) === props.postIndex[0])
     return !opening || (!isHidden(opening) && !isRetracted(opening))
-  }, [thread, props.thread, fetched.posts, livePosts, archive, page, posts])
+  }, [thread, props.thread, props.postIndex, fetched.posts, livePosts, archive, page, posts])
   // Threads newer than the static index render on the 404 page; give the tab the thread's title.
   const liveTitle = !props.thread && thread && listable ? str(thread, 'title') : undefined
   useEffect(() => {
-    if (liveTitle) document.title = document.title.replace(/^[^|]*\|/, `${liveTitle} |`)
+    if (liveTitle) document.title = document.title.replace(/^[^|]*\|/, () => `${liveTitle} |`)
   }, [liveTitle])
   const newElsewhere = page < pages ? livePosts.filter((p) => p.createdAt > snapshotAt && !props.postIndex.includes(p.id.slice(0, ID_PREFIX))).length : 0
 

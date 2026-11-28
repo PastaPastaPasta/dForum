@@ -59,6 +59,9 @@ describe('short text', () => {
     const p = cleanShortText({ displayName: 'ad\u202Emin\u200B', title: ' Hi\u2066 there ', body: 'a\u202Eb', location: '\u3164' })
     expect(p).toEqual({ displayName: 'admin', title: 'Hi there', body: 'a\u202Eb', location: '' })
     expect(cleanShortText({ displayName: '👨\u200D👩\u200D👧' }).displayName).toBe('👨\u200D👩\u200D👧')
+    expect(cleanShortText({ displayName: 'ad\u200Cmin', title: 'a\u034Fb' })).toEqual({ displayName: 'admin', title: 'ab' })
+    expect(cleanShortText({ displayName: '\u2800\u1160' }).displayName).toBe('')
+    expect(cleanShortText({ displayName: '❤️ Dash' }).displayName).toBe('❤️ Dash')
   })
 })
 
@@ -132,13 +135,15 @@ describe('live delta', () => {
   const open = doc('alice', 1501, { threadId: t.id, forumId: 'F', body: 'hi' })
   const oldThread = { ...doc('carol', 5, { title: 'Old', forumId: 'F' }), id: 'OLD' }
   const reply = doc('bob', 1600, { threadId: 'OLD', forumId: 'F', body: 'reply' })
+  // The overlay always loads a live thread's first posts.
+  const oldOpen = doc('carol', 6, { threadId: 'OLD', forumId: 'F', body: 'old opening' })
   const old = { id: 'OLD', forumId: 'F', title: 'Old', tags: [], ownerId: 'carol', createdAt: 10, sticky: false, locked: false, replies: 3, reactions: 0, lastPostAt: 500, lastPostAuthorId: 'carol' }
   it('adds new threads only once their opening post is visible', () => {
     expect(newThreads({ threads: [t], posts: [] }, ctx)).toHaveLength(0)
     expect(newThreads({ threads: [t], posts: [open] }, ctx)).toHaveLength(1)
   })
   it('bumps forum counts and the thread list', () => {
-    const delta = { threads: [t, oldThread], posts: [open, reply] }
+    const delta = { threads: [t, oldThread], posts: [open, oldOpen, reply] }
     expect(forumActivity(delta, ctx).get('F')).toMatchObject({ threads: 1, posts: 2 })
     const list = mergeForumThreads([old], 'F', delta, ctx)
     expect(list.find((x) => x.id === 'OLD')).toMatchObject({ replies: 4, lastPostAt: 1600, lastPostAuthorId: 'bob' })
@@ -151,13 +156,23 @@ describe('live delta', () => {
     const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
     expect(mergeForumThreads([old], 'F', { threads: [moved], posts: [] }, ctx)).toHaveLength(0)
   })
+  it('ignores live replies in threads whose opening post was hidden long ago, or that never had one', () => {
+    const scam = doc('mallory', 100, { title: 'Scam', forumId: 'F' })
+    const scamOpen = { ...doc('mallory', 101, { threadId: scam.id, forumId: 'F', body: 'scam', modState: 1 }), moderatedAt: 200 }
+    const bump = doc('eve', 1500, { threadId: scam.id, forumId: 'F', body: 'bump' })
+    expect(newPosts({ threads: [scam], posts: [scamOpen, bump] }, ctx)).toHaveLength(0)
+    const empty = doc('mallory', 100, { title: 'No opening', forumId: 'F' })
+    const reply2 = doc('eve', 1500, { threadId: empty.id, forumId: 'F', body: 'reply' })
+    expect(newPosts({ threads: [empty], posts: [reply2] }, ctx)).toHaveLength(0)
+    expect(forumActivity({ threads: [scam, empty], posts: [scamOpen, bump, reply2] }, ctx).get('F')).toBeUndefined()
+  })
   it('ignores live posts in hidden or unknown threads', () => {
     expect(newPosts({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [reply] }, ctx)).toHaveLength(0)
     expect(newPosts({ threads: [], posts: [reply] }, ctx)).toHaveLength(0)
   })
   it('keeps member content in forums archived after it was written', () => {
     const archived = { snapshotAt, archivedForums: new Set(['F']), staff: new Set(['carol']) }
-    expect(newPosts({ threads: [oldThread], posts: [reply] }, archived)).toHaveLength(1)
+    expect(newPosts({ threads: [oldThread], posts: [oldOpen, reply] }, archived)).toHaveLength(1)
   })
   it('lists a thread whose opening post landed just after the snapshot', () => {
     const at = { snapshotAt: 10_000_000 }
@@ -191,7 +206,7 @@ describe('live delta', () => {
   })
   it('counts moved threads toward their new forum', () => {
     const moved = { ...oldThread, p: { ...oldThread.p, movedToForumId: 'G' } }
-    const a = forumActivity({ threads: [moved], posts: [reply] }, ctx)
+    const a = forumActivity({ threads: [moved], posts: [oldOpen, reply] }, ctx)
     expect(a.get('G')?.posts).toBe(1)
     expect(a.get('F')).toBeUndefined()
   })

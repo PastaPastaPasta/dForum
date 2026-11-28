@@ -13,7 +13,13 @@ const textOf = (n?: HastNode): string =>
   !n || n.tagName === 'img' ? '' : n.type === 'text' ? n.value ?? '' : (n.children ?? []).map(textOf).join('')
 
 /** Post bodies. No raw HTML; only http(s)/mailto/relative links; external links are ugc. */
-export function Markdown({ source, className = 'post-body' }: { source: string; className?: string }) {
+export function Markdown({ source, className = 'post-body', attachmentsFrom }: {
+  source: string
+  className?: string
+  /** Origin of the imported forum: its attachment links render as attachment chips. Only passed for
+   * trusted archive posts, so nobody else can dress a link up as a forum attachment. */
+  attachmentsFrom?: string
+}) {
   return (
     <div className={className}>
       <ReactMarkdown
@@ -26,7 +32,7 @@ export function Markdown({ source, className = 'post-body' }: { source: string; 
             const external = /^https?:/i.test(href)
             // Imported attachments (often wrapping a thumbnail the old host won't serve here) become
             // one plain link to the original.
-            if (/\/attachments\//.test(href)) {
+            if (attachmentsFrom && href.startsWith(attachmentsFrom) && /\/attachments\//.test(href)) {
               const label = textOf(node).replace(/^Attachment:?\s*/i, '').trim()
               return <a href={href} rel="nofollow ugc noopener noreferrer" target="_blank" className="attachment">📎 {label || 'Attachment'}</a>
             }

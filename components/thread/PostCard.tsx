@@ -120,7 +120,7 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
               onCancel={() => setEditing(false)}
               onSubmit={async () => { if (await actions.onEdit(post, draft)) setEditing(false) }} />
           ) : (
-            <Markdown source={postBody(post)} />
+            <Markdown source={postBody(post)} attachmentsFrom={imported && sourceUrl ? new URL(sourceUrl).origin + '/' : undefined} />
           )}
           {member?.signature && !hidden && !retracted && !editing && (
             <div className="mt-4 border-t border-rule pt-2 text-sm text-ink-2"><Markdown source={member.signature} className="post-body !font-sans !text-sm" /></div>

@@ -60,14 +60,18 @@ export const num = (doc: RawDoc | undefined, key: string): number | undefined =>
 // Invisible and direction-changing characters: controls, bidi overrides and isolates, zero-width
 // spaces, fillers and tag characters. Short public strings (names, titles) lose them, so nobody can
 // pose as another member or reorder a title. Emoji joiners (U+200D) stay.
-const INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u061C\u115F\u180E\u200B\u200E\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0]|\uDB40[\uDC00-\uDC7F]/g
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800]/gu
+const KEEP = new Set(['\u200D', '\uFE0F']) // emoji joiner and emoji presentation
 const SHORT_TEXT = ['displayName', 'title', 'customTitle', 'location', 'origAuthor', 'role'] as const
 
 /** Strips invisible characters from the short text fields of a document's properties, in place. */
 export function cleanShortText(p: Record<string, unknown>): Record<string, unknown> {
   for (const k of SHORT_TEXT) {
     const v = p[k]
-    if (typeof v === 'string') p[k] = v.replace(INVISIBLE, '').replace(/\s+/g, ' ').trim()
+    if (typeof v !== 'string') continue
+    const cleaned = v.replace(INVISIBLE, (c) => (KEEP.has(c) ? c : '')).replace(/\s+/g, ' ').trim()
+    // Nothing readable left (only fillers or joiners): treat as empty, so the fallback label shows.
+    p[k] = /[\p{L}\p{N}\p{S}]/u.test(cleaned) ? cleaned : ''
   }
   return p
 }

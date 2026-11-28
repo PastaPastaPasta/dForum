@@ -101,7 +101,7 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
         // caller never signs a second copy of a write that went through.
         if (STALE_NONCE.test(errText(e))) {
           let ok = false
-          for (let i = 0; i < 6 && !ok; i++) {
+          for (let i = 0; i < 12 && !ok; i++) {
             await new Promise((r) => setTimeout(r, 2500))
             ok = await landed()
           }

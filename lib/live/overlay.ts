@@ -40,6 +40,9 @@ function set(next: Partial<LiveState>) {
 // Per type and field, the value the next poll starts from. Each poll pages forward by value from
 // its cursor (a busy page continues next poll), so a capped poll never drops the newest changes.
 const cursors = new Map<string, number>()
+// Threads whose first posts have been loaded (see refreshLive).
+const headsFetched = new Set<string>()
+const HEADS_PER_POLL = 40
 const STEP_OVERLAP_MS = 2 * 60_000
 const MAX_PAGES = 10
 
@@ -100,16 +103,27 @@ export function refreshLive(): Promise<void> {
         const page = await queryPage('thread', { where: [['$id', 'in', missing.slice(i, i + 100)]], orderBy: [['$id', 'asc']] })
         allThreads.push(...page.docs)
       }
+      // A live post counts only while its thread is listable (opening post present and visible), the
+      // same rule as the snapshot, so the overlay needs each such thread's first posts too. Fetched
+      // once per thread; later moderation of them arrives through the $moderatedAt scan.
+      const heads: RawDoc[] = []
+      const needHeads = [...new Set(posts.docs.map((p) => str(p, 'threadId')).filter((id): id is string => !!id && !headsFetched.has(id)))]
+      for (const id of needHeads.slice(0, HEADS_PER_POLL)) {
+        const page = await queryPage('post', { where: [['threadId', '==', id]], orderBy: [['$createdAt', 'asc']], limit: 5 })
+        heads.push(...page.docs)
+      }
       set({
         status: 'live',
         threads: allThreads,
-        posts: mergeDocs(state.posts, posts.docs),
+        posts: mergeDocs(state.posts, [...posts.docs, ...heads]),
         reactions: mergeDocs(state.reactions, reactions.docs),
         profiles: mergeDocs(state.profiles, profiles.docs),
         truncated: threads.truncated || posts.truncated || reactions.truncated || profiles.truncated,
         updatedAt: Date.now(),
       })
       for (const [key, value] of [...threads.next, ...posts.next, ...reactions.next, ...profiles.next]) cursors.set(key, value)
+      for (const id of needHeads.slice(0, HEADS_PER_POLL)) headsFetched.add(id)
+      if (needHeads.length > HEADS_PER_POLL) setTimeout(() => void refreshLive(), 1500)
       // A capped poll resumes from its cursors right away until it has caught up.
       if (state.truncated) setTimeout(() => void refreshLive(), 1500)
     } catch {

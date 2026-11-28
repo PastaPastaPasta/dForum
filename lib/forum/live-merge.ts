@@ -108,13 +108,19 @@ export function newThreads(delta: DeltaDocs, ctx: LiveContext): RawDoc[] {
 /** New posts since the snapshot that may be shown, with their threads. */
 export function newPosts(delta: DeltaDocs, ctx: LiveContext): Array<{ post: RawDoc; thread: RawDoc }> {
   const threads = byId(delta.threads)
-  const changes = deltaChanges(delta)
+  // The snapshot's rule: a post shows only in a listable thread (opening post present and visible).
+  // The overlay loads each live thread's first posts, so a reply ("bump") can't revive a thread
+  // whose opening post was hidden — however long ago — or that never had one.
+  const listable = new Map<string, boolean>()
+  const isListable = (t: RawDoc) => {
+    if (!listable.has(t.id)) listable.set(t.id, threadPosts(t, delta.posts, ctx.archive).listable)
+    return listable.get(t.id) as boolean
+  }
   const out: Array<{ post: RawDoc; thread: RawDoc }> = []
   for (const post of delta.posts) {
     if (post.createdAt <= ctx.snapshotAt) continue
     const thread = livePostThread(post, threads, ctx)
-    // A thread whose opening post was hidden is unlisted: replies (a spammer's bump) don't revive it.
-    if (thread && !changes.threadGone(thread.id)) out.push({ post, thread })
+    if (thread && isListable(thread)) out.push({ post, thread })
   }
   return out
 }
