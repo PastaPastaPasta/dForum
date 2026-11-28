@@ -7,7 +7,7 @@ import { Archive, Eye, EyeOff, Lock, Pin, Pencil } from 'lucide-react'
 import type { MemberView, RawDoc, ReactionCounts } from '@/lib/forum/types'
 import { POSTS_PER_PAGE } from '@/lib/forum/types'
 import {
-  archiveAuthor, byEffective, countReactions, effectiveAt, isHidden, mergeDocs, num, postBody, str, threadForumId, isLocked, threadPosts, threadTags,
+  archiveAuthor, byEffective, countReactions, effectiveAt, isHidden, isRetracted, mergeDocs, num, postBody, str, threadForumId, isLocked, threadPosts, threadTags,
 } from '@/lib/forum/model'
 import { editPost, editThread, react, reply, report, retractPost } from '@/lib/forum/actions'
 import { useLive } from '@/lib/live/overlay'
@@ -107,6 +107,14 @@ export function ThreadPage(props: ThreadPageProps) {
       : []
     return [...updated.sort(byEffective(archive)), ...fresh.sort(byEffective(archive))]
   }, [thread, props.thread, props.posts, props.postIndex, fetched.posts, livePosts, page, pages, snapshotAt, archive])
+  // The thread counts only while its opening post is visible (the snapshot's listable rule). Live-only
+  // threads are checked in full; static ones through page 1, where the opening post is.
+  const listable = useMemo(() => {
+    if (!thread || isHidden(thread)) return false
+    if (!props.thread) return threadPosts(thread, mergeDocs(fetched.posts, livePosts), archive).listable
+    const opening = page === 1 ? posts.find((p) => p.ownerId === thread.ownerId) : undefined
+    return !opening || (!isHidden(opening) && !isRetracted(opening))
+  }, [thread, props.thread, fetched.posts, livePosts, archive, page, posts])
   const newElsewhere = page < pages ? livePosts.filter((p) => p.createdAt > snapshotAt && !props.postIndex.includes(p.id.slice(0, ID_PREFIX))).length : 0
 
   const reactionDocs = useMemo(() => mergeDocs(threadReactions ?? [], live.reactions.filter((r) => str(r, 'threadId') === threadId)), [threadReactions, live.reactions, threadId])
@@ -166,7 +174,9 @@ export function ThreadPage(props: ThreadPageProps) {
     }
   }
 
-  const threadOpen = !!thread && !isLocked(thread) && !isHidden(thread)
+  const archivedForums = new Set([...(props.ctx?.archivedForums ?? []), ...(props.forums ?? []).filter((x) => x.archived).map((x) => x.id)])
+  // Edits and reactions close with replies: locked, hidden, or in an archived (read-only) forum.
+  const threadOpen = !!thread && acceptsReplies(thread, { archivedForums })
   const hiddenProfiles = new Set(live.profiles.filter((p) => isHidden(p)).map((p) => p.ownerId))
   const actions: PostActions = {
     canWrite: canWrite && threadOpen,
@@ -203,11 +213,11 @@ export function ThreadPage(props: ThreadPageProps) {
 
   // A hidden thread's title, tags and author are hidden too: only staff see what was moderated.
   const viewerIsStaff = !!session && !!props.ctx?.staff.includes(session.identityId)
-  if (isHidden(thread) && !viewerIsStaff) {
+  if (!listable && !viewerIsStaff && (isHidden(thread) || props.thread || fetched.state === 'done')) {
     return (
       <div className="panel mx-auto max-w-read p-8 text-center">
-        <h1 className="text-xl font-semibold">This thread was hidden by moderators</h1>
-        <p className="mt-2 text-ink-2">It is no longer shown on the forum. <Link className="link" href="/">Back to the forums</Link></p>
+        <h1 className="text-xl font-semibold">This thread isn&apos;t available</h1>
+        <p className="mt-2 text-ink-2">Moderators hid it, or its author deleted the opening post. <Link className="link" href="/">Back to the forums</Link></p>
       </div>
     )
   }
@@ -227,7 +237,6 @@ export function ThreadPage(props: ThreadPageProps) {
   const imported = archiveAuthor(thread, archive)
   const opener = imported ?? nameOf(thread.ownerId)
   const ownThread = session?.identityId === thread.ownerId && !imported
-  const archivedForums = new Set([...(props.ctx?.archivedForums ?? []), ...(props.forums ?? []).filter((x) => x.archived).map((x) => x.id)])
   // A reply's forumId is the thread's original forum, so a thread moved out of an archived forum
   // stays closed too (consensus refuses the post).
   forumArchived = forumArchived || archivedForums.has(str(thread, 'forumId') ?? '')

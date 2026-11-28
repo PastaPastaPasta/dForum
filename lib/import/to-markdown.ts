@@ -212,7 +212,10 @@ function renderNode(node: Node, o: MarkdownOptions, atLineStart: boolean): strin
 export function xfHtmlToMarkdown(html: string, opts: MarkdownOptions): string {
   const root = parse(html, { comment: false, blockTextElements: { script: false, style: false, noscript: false } })
   return renderChildren(root, opts)
-    .replace(LEGACY_RE, (_, pre: string, code: string) => `${pre}${LEGACY_CODES[code]}`)
+    // Code (fenced or inline) keeps its text as written.
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, i) => (i % 2 ? part : part.replace(LEGACY_RE, (_, pre: string, code: string) => `${pre}${LEGACY_CODES[code]}`)))
+    .join('')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

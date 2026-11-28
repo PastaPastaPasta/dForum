@@ -29,6 +29,7 @@ export interface BatchWriteArgs {
   landed?: (documentId: string) => Promise<boolean>
 }
 
+export const STALE_NONCE = /invalid identity nonce|nonce already present|code 40204/i
 const TRANSIENT = /Tenderdash is not available|\(code 14\)|UNAVAILABLE|Deadline expired|timed out|no available (addresses|nodes)|connection (refused|reset)|transport error/i
 const ALREADY_SEEN = /already (in|exists|received|been)|duplicate state transition|in (the )?mempool|state transition .*already/i
 const errText = (e: unknown) => String((e as { message?: unknown })?.message ?? e)
@@ -94,6 +95,18 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
           }
           if (ok) break
           throw new Error('The network received this write but has not confirmed it yet. Reload the page in a minute before trying again.')
+        }
+        // A stale nonce can mean an earlier send of this same transition landed (the SDK and this
+        // loop both resend). Give a lagging node time to show it before reporting a refusal, so the
+        // caller never signs a second copy of a write that went through.
+        if (STALE_NONCE.test(errText(e))) {
+          let ok = false
+          for (let i = 0; i < 6 && !ok; i++) {
+            await new Promise((r) => setTimeout(r, 2500))
+            ok = await landed()
+          }
+          if (ok) break
+          throw e
         }
         if (attempt >= 3 || !TRANSIENT.test(errText(e))) throw e
         await new Promise((r) => setTimeout(r, 1500 * attempt))

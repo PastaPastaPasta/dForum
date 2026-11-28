@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Archive, ChevronDown, MessagesSquare } from 'lucide-react'
 import type { CategoryView, ForumView, LastPost } from '@/lib/forum/types'
 import { childForums, forumDescendants } from '@/lib/forum/model'
-import { forumActivity, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
+import { deltaChanges, forumActivity, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { isUnread, useSeen } from '@/lib/seen'
@@ -27,10 +27,12 @@ export function ForumIndex({ categories, forums, names, ctx }: {
   const seen = useSeen()
   const unread = (f: ForumView) => !!f.lastPost && isUnread(seen, f.lastPost.at, seen.forums[f.id])
 
+  const changes = deltaChanges(live)
   const withLive = (f: ForumView): ForumView => {
     let threads = f.threadCount
     let posts = f.postCount
-    let last = f.lastPost
+    // A last post hidden since the snapshot drops out (the next index picks the one before it).
+    let last = f.lastPost && !changes.postGone(f.lastPost.postId) && !changes.threadGone(f.lastPost.threadId) ? f.lastPost : undefined
     for (const g of [f, ...forumDescendants(forums, f.id)]) {
       const a = activity.get(g.id)
       if (!a) continue
@@ -114,7 +116,7 @@ function ForumRow({ forum, subs, nameOf, unread }: { forum: ForumView; subs: For
         <div className="flex gap-1 md:justify-end"><dt className="text-ink-2">Messages</dt><dd className="font-medium tabnum">{fmt.format(forum.postCount)}</dd></div>
       </dl>
       <div className="col-start-2 min-w-0 md:col-start-auto">
-        {forum.lastPost ? <LastPostCell last={forum.lastPost} nameOf={nameOf} /> : <span className="text-sm text-ink-2">No threads yet</span>}
+        {forum.lastPost ? <LastPostCell last={forum.lastPost} nameOf={nameOf} /> : <span className="text-sm text-ink-2">{forum.threadCount ? '' : 'No threads yet'}</span>}
       </div>
     </li>
   )

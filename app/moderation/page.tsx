@@ -273,19 +273,22 @@ function Content({ act, busy, forums, moderatorId, openMember }: PanelProps) {
     const r = parseRef(input)
     if (!r) { setError('Paste a thread link, a post link (with #post-…), or a thread id.'); return }
     setLooking(true)
+    // Only the latest lookup may touch state: an older, slower one must not overwrite it.
+    const current = () => mine === requestId.current
     try {
-    let d = await getDoc(r.type, r.id)
-    let type = r.type
-    if (!d && r.type === 'thread') { d = await getDoc('post', r.id); type = 'post' }
-    if (!d) { setError('No thread or post with that id.'); setDoc(null); return }
-    const parent = type === 'thread' ? d : await getDoc('thread', str(d, 'threadId') ?? '')
-    if (mine !== requestId.current) return
-    setThread(parent)
-    setDoc({ type, doc: d })
+      let d = await getDoc(r.type, r.id)
+      let type = r.type
+      if (!d && r.type === 'thread') { d = await getDoc('post', r.id); type = 'post' }
+      if (!current()) return
+      if (!d) { setError('No thread or post with that id.'); setDoc(null); return }
+      const parent = type === 'thread' ? d : await getDoc('thread', str(d, 'threadId') ?? '')
+      if (!current()) return
+      setThread(parent)
+      setDoc({ type, doc: d })
     } catch {
-      setError('Could not reach Dash Platform. Try again.')
+      if (current()) setError('Could not reach Dash Platform. Try again.')
     } finally {
-      setLooking(false)
+      if (current()) setLooking(false)
     }
   }, [])
   useEffect(() => {

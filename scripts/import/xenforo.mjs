@@ -225,7 +225,9 @@ async function crawlApi() {
         if (t.discussion_state !== 'visible' || t.discussion_type === 'redirect') continue;
         entry.threads.push(t.thread_id);
         const out = join(CACHE, 'threads', `${t.thread_id}.json`);
-        if (existsSync(out)) continue;
+        const known = readJson(out, null);
+        // --refresh refetches a thread only when it has replies we don't have yet.
+        if (known && (!opts.refresh || (t.reply_count ?? 0) + 1 <= known.posts.length)) continue;
         const posts = [];
         for (let pp = 1; ; pp++) {
           const pr = await api(`threads/${t.thread_id}/posts?page=${pp}`);

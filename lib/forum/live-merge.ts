@@ -5,7 +5,7 @@
  */
 import type { LastPost, RawDoc, ThreadSummary } from './types.ts'
 import {
-  archiveAuthor, type ArchiveRef, effectiveAt, isArchive, isHidden, isLocked, isRetracted, num, str, threadForumId, threadTags,
+  archiveAuthor, type ArchiveRef, effectiveAt, isArchive, isHidden, isLocked, isRetracted, num, str, threadForumId, threadPosts, threadTags,
 } from './model.ts'
 
 export interface DeltaDocs {
@@ -55,6 +55,7 @@ export function acceptsReplies(thread: RawDoc, ctx: Pick<LiveContext, 'archivedF
 
 /** Moderation and edits the live delta has seen on documents the static index already lists. */
 export interface DeltaChanges {
+  /** Hidden, or its opening post (when the delta has it) hidden or retracted by its author. */
   threadGone(id: string): boolean
   postGone(id: string): boolean
   thread(id: string): RawDoc | undefined
@@ -64,7 +65,13 @@ export function deltaChanges(delta: DeltaDocs): DeltaChanges {
   const threads = byId(delta.threads)
   const posts = byId(delta.posts)
   return {
-    threadGone: (id) => { const t = threads.get(id); return !!t && isHidden(t) },
+    threadGone: (id) => {
+      const t = threads.get(id)
+      if (!t) return false
+      if (isHidden(t)) return true
+      const opening = delta.posts.find((p) => str(p, 'threadId') === id && p.ownerId === t.ownerId && p.p.origId === undefined && p.createdAt - t.createdAt < STRADDLE_MS)
+      return !!opening && !visible(opening)
+    },
     postGone: (id) => { const p = posts.get(id); return !!p && !visible(p) },
     thread: (id) => threads.get(id),
   }
@@ -86,11 +93,11 @@ const STRADDLE_MS = 120_000
  * after it, or created just before it with an opening post that landed after it. */
 export function newThreads(delta: DeltaDocs, ctx: LiveContext): RawDoc[] {
   return delta.threads.filter((t) => {
-    if (isHidden(t)) return false
-    const own = delta.posts.filter((p) => str(p, 'threadId') === t.id && p.ownerId === t.ownerId)
-    if (!own.some(visible)) return false
+    // The same rule the snapshot applies: the thread and its opening post are visible.
+    const view = threadPosts(t, delta.posts, ctx.archive)
+    if (!view.listable || !view.opening) return false
     if (t.createdAt > ctx.snapshotAt) return true
-    return t.createdAt > ctx.snapshotAt - STRADDLE_MS && own.every((p) => p.createdAt > ctx.snapshotAt)
+    return t.createdAt > ctx.snapshotAt - STRADDLE_MS && view.opening.createdAt > ctx.snapshotAt
   })
 }
 

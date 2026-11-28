@@ -9,7 +9,7 @@
  */
 import type { IdentitySigner as IdentitySignerCtor } from '@dashevo/evo-sdk'
 import bs58 from 'bs58'
-import { batchedWrite } from '@/lib/services/batch-write'
+import { batchedWrite, STALE_NONCE } from '@/lib/services/batch-write'
 import { getSdk, getSdkClasses } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID, NETWORK } from '@/lib/constants'
 import { hash160 } from '@/lib/auth/protocol'
@@ -366,12 +366,14 @@ async function freshNonce(identityId: string): Promise<bigint> {
   const raw = (await sdk.wasm.getIdentityContractNonce(identityId, CONTRACT_ID)) ?? 0n
   const chainNext = (raw & SEQUENCE_MASK) + 1n
   const mine = (usedNonce.get(identityId) ?? 0n) + 1n
-  const next = chainNext > mine ? chainNext : mine
-  usedNonce.set(identityId, next)
-  return next
+  return chainNext > mine ? chainNext : mine
 }
 
-const STALE_NONCE = /invalid identity nonce|nonce already present|code 40204/i
+/** Records a nonce once its write went through, so the next write in this tab starts above it. */
+function nonceUsed(identityId: string, nonce: bigint) {
+  if ((usedNonce.get(identityId) ?? 0n) < nonce) usedNonce.set(identityId, nonce)
+}
+
 
 /** Runs a write once more when the chosen nonce turned out stale (the write did not happen). */
 async function withNonceRetry<T>(identityId: string, write: () => Promise<T>): Promise<T> {
@@ -380,8 +382,9 @@ async function withNonceRetry<T>(identityId: string, write: () => Promise<T>): P
   } catch (e) {
     const text = String((e as { message?: unknown })?.message ?? e)
     if (!STALE_NONCE.test(text)) throw e
-    const current = text.match(/current identity nonce is (\d+)/)?.[1]
-    if (current) usedNonce.set(identityId, BigInt(current))
+    // The message prints the chain's nonce as "24" or "Some(24)".
+    const current = text.match(/current identity nonce is (?:Some\()?(\d+)/)?.[1]
+    if (current) nonceUsed(identityId, BigInt(current))
     await new Promise((r) => setTimeout(r, 1500))
     return write()
   }
@@ -423,6 +426,7 @@ async function createOnce(
         identityKey: sign.identityKey as never,
         landed: async (id) => !!(await get(type, id)),
       })
+      nonceUsed(identityId, nonce)
       const after = await get(type, documentId).catch(() => null)
       return after ?? {
         id: documentId,
@@ -436,6 +440,7 @@ async function createOnce(
       }
     }
     const created = await sdk.documents.create({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+    nonceUsed(identityId, nonce)
     const normalized = normalizeDoc(created)
     if (!normalized) throw new Error('Document create returned an unreadable document')
     return normalized
@@ -487,6 +492,7 @@ async function replaceOnce(
           return !!now && now.revision >= nextRevision && now.updatedAt > existing.updatedAt
         },
       })
+      nonceUsed(identityId, nonce)
       // The chain wrote the document — a re-read failure is not a write
       // failure. Report honestly: return what the write produced.
       const after = await get(existing.documentTypeName, existing.id).catch(() => null)
@@ -503,6 +509,7 @@ async function replaceOnce(
       }
     }
     await sdk.documents.replace({ document, identityKey: sign.identityKey as never, signer: sign.signer })
+    nonceUsed(identityId, nonce)
     // The chain wrote the document — a re-read failure is not a write
     // failure. Report honestly: return what the write produced.
     const after = await get(existing.documentTypeName, existing.id).catch(() => null)

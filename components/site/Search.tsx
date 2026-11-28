@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { Search as SearchIcon } from 'lucide-react'
 import { str, threadForumId } from '@/lib/forum/model'
-import { newThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
+import { deltaChanges, newThreads, toLiveContext, type LiveContextProps } from '@/lib/forum/live-merge'
 import { useLive } from '@/lib/live/overlay'
 
 interface Sub { url: string; title: string; excerpt: string }
@@ -74,6 +74,9 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
     return () => clearTimeout(t)
   }, [q, forum])
 
+  // The index is up to an hour old: drop threads moderators have hidden since.
+  const changes = deltaChanges(live)
+  const shownHits = hits?.filter((h) => !changes.threadGone(h.url.match(/\/t\/([^/]+)\//)?.[1] ?? '')) ?? null
   const needle = q.trim().toLowerCase()
   const fresh = needle ? newThreads(live, toLiveContext(ctx)).filter((t) => (str(t, 'title') ?? '').toLowerCase().includes(needle)) : []
 
@@ -101,12 +104,12 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
         </section>
       )}
       {state === 'error' && <p role="alert" className="text-danger">The search index couldn&apos;t load. Try again after reloading the page.</p>}
-      {hits && (
+      {shownHits && (
         <section aria-live="polite" className="space-y-2">
-          <p className="text-sm text-ink-2">{state === 'loading' ? 'Searching…' : `${hits.length === 30 ? 'Top 30' : hits.length} thread${hits.length === 1 ? '' : 's'}`}</p>
-          {hits.length > 0 ? (
+          <p className="text-sm text-ink-2">{state === 'loading' ? 'Searching…' : `${shownHits.length === 30 ? 'Top 30' : shownHits.length} thread${shownHits.length === 1 ? '' : 's'}`}</p>
+          {shownHits.length > 0 ? (
             <ul className="panel divide-y divide-rule">
-              {hits.map((h) => (
+              {shownHits.map((h) => (
                 <li key={h.url} className="px-4 py-3">
                   <a href={h.url} className="font-medium hover:text-dash">{h.title}</a>
                   {h.forum && <p className="text-xs text-ink-2">{h.forum}</p>}

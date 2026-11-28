@@ -26,15 +26,17 @@ export function WhatsNew({ threads, ctx, names, forumTitles }: {
   for (const t of newThreads(live, lc)) {
     byId.set(t.id, {
       id: t.id, forumId: threadForumId(t), title: str(t, 'title') ?? '', tags: threadTags(t), ownerId: t.ownerId, archiveAuthor: archiveAuthor(t, archive),
-      createdAt: effectiveAt(t, archive), sticky: false, locked: isLocked(t), replies: 0, reactions: 0, lastPostAt: effectiveAt(t, archive), lastPostAuthorId: t.ownerId,
+      createdAt: effectiveAt(t, archive), sticky: false, locked: isLocked(t), replies: -1, reactions: 0, lastPostAt: effectiveAt(t, archive), lastPostAuthorId: t.ownerId,
     })
   }
   for (const { post: p, thread } of newPosts(live, lc)) {
     const s = byId.get(thread.id)
     if (!s) continue
+    s.replies += 1
     if (effectiveAt(p, archive) > s.lastPostAt) { s.lastPostAt = effectiveAt(p, archive); s.lastPostAuthorId = p.ownerId; s.lastPostArchiveAuthor = archiveAuthor(p, archive); s.lastPostId = p.id }
   }
-  const list = sortThreadSummaries([...byId.values()].map((t) => ({ ...t, sticky: false }))).slice(0, 50)
+  // New threads start at -1: their opening post arrives among the new posts.
+  const list = sortThreadSummaries([...byId.values()].map((t) => ({ ...t, sticky: false, replies: Math.max(0, t.replies) }))).slice(0, 50)
   const nameOf = useNames(names, list.flatMap((t) => [t.ownerId, t.lastPostAuthorId]), live.profiles)
   return <ThreadList threads={list} nameOf={nameOf} showForum forumTitle={(id) => forumTitles[id]} emptyText="Nothing has been posted yet." />
 }

@@ -60,9 +60,12 @@ async function scan(type: string, field: '$updatedAt' | '$moderatedAt') {
     from = last
   }
   const max = docs.reduce((m, d) => Math.max(m, (field === '$moderatedAt' ? d.moderatedAt : d.updatedAt) ?? 0), cursors.get(key) ?? since)
-  cursors.set(key, max)
-  return { docs, truncated }
+  // Returned, not stored: cursors move only once the whole poll has been applied.
+  return { docs, truncated, next: [[key, max]] as Array<[string, number]> }
 }
+
+type Scan = Awaited<ReturnType<typeof scan>>
+const EMPTY_SCAN: Scan = { docs: [], truncated: false, next: [] }
 
 // Contracts without moderation have no $moderatedAt index; stop asking once that's clear.
 let moderationIndexes = true
@@ -72,11 +75,11 @@ async function delta(type: string, moderated: boolean) {
     ? scan(type, '$moderatedAt').catch((e) => {
         if (/non indexed|not indexed|no index/i.test(String((e as { message?: unknown })?.message ?? e))) moderationIndexes = false
         else throw e
-        return { docs: [] as RawDoc[], truncated: false }
+        return EMPTY_SCAN
       })
-    : Promise.resolve({ docs: [] as RawDoc[], truncated: false })
+    : Promise.resolve(EMPTY_SCAN)
   const [a, b] = await Promise.all([scan(type, '$updatedAt'), mod])
-  return { docs: [...a.docs, ...b.docs], truncated: a.truncated || b.truncated }
+  return { docs: [...a.docs, ...b.docs], truncated: a.truncated || b.truncated, next: [...a.next, ...b.next] }
 }
 
 export function refreshLive(): Promise<void> {
@@ -106,6 +109,7 @@ export function refreshLive(): Promise<void> {
         truncated: threads.truncated || posts.truncated || reactions.truncated || profiles.truncated,
         updatedAt: Date.now(),
       })
+      for (const [key, value] of [...threads.next, ...posts.next, ...reactions.next, ...profiles.next]) cursors.set(key, value)
       // A capped poll resumes from its cursors right away until it has caught up.
       if (state.truncated) setTimeout(() => void refreshLive(), 1500)
     } catch {

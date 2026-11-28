@@ -70,6 +70,7 @@ describe('HTML to Markdown', () => {
     expect(md('<img class="smilie" alt="(y)" src="x.png" />')).toBe('👍')
     expect(md('<p>great work :grin: and :tongue:.</p>')).toBe('great work 😁 and 😛.')
     expect(md('<p>see http://x.org/a:grin:b</p>')).not.toMatch(/😁/)
+    expect(md('<p>run <code>echo :grin:</code> now :grin:</p>')).toBe('run `echo :grin:` now 😁')
     expect(md('<a href="/forum/attachments/a-pdf.9/">View attachment 9</a>')).toBe('[Attachment](https://www.dash.org/forum/attachments/a-pdf.9/)')
     expect(md('<a href="/forum/attachments/a-pdf.9/">roadmap.pdf</a>')).toBe('[Attachment: roadmap.pdf](https://www.dash.org/forum/attachments/a-pdf.9/)')
     expect(md('<span class="bbMediaWrapper" data-media-site-id="youtube" data-media-key="abcdefg"></span>')).toBe('<https://www.youtube.com/watch?v=abcdefg>')

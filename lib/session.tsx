@@ -121,6 +121,7 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
     if (!user) {
       // controller already clears storage on logout; make sure the mirror clears
       setAuthKeyWif(null)
+      setKeyCheckedFor(null)
     }
   }, [user])
 

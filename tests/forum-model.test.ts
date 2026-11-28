@@ -160,6 +160,14 @@ describe('live delta', () => {
     const ownerReply = doc('carol', 10_000_700, { threadId: older.id, forumId: 'F', body: 'later' })
     expect(newThreads({ threads: [older], posts: [ownerReply] }, at)).toHaveLength(0)
   })
+  it('does not list a new thread whose opening post is hidden or retracted, even with a later visible post', () => {
+    const later = doc('alice', 1700, { threadId: t.id, forumId: 'F', body: 'bump' })
+    const hiddenOpen = { ...open, p: { ...open.p, modState: 1 } }
+    expect(newThreads({ threads: [t], posts: [hiddenOpen, later] }, ctx)).toHaveLength(0)
+    const retracted = { ...open, p: { ...open.p, retracted: true } }
+    expect(newThreads({ threads: [t], posts: [retracted, later] }, ctx)).toHaveLength(0)
+    expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later] }).threadGone(t.id)).toBe(true)
+  })
   it('reports moderation of documents the static index lists', () => {
     const hiddenPost = { ...reply, p: { ...reply.p, modState: 1 } }
     const c = deltaChanges({ threads: [{ ...oldThread, p: { ...oldThread.p, modState: 1 } }], posts: [hiddenPost] })
