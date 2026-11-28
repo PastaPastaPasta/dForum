@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RawDoc } from '@/lib/forum/types'
 import {
-  compareIds, countReactions, effectiveAt, isArchive, mergeDocs, resolveForumTree, summarizeThread, threadPosts, sortThreadSummaries, excerpt,
+  cleanShortText, compareIds, countReactions, effectiveAt, isArchive, mergeDocs, resolveForumTree, summarizeThread, threadPosts, sortThreadSummaries, excerpt,
 } from '@/lib/forum/model'
 import { acceptsReplies, deltaChanges, forumActivity, mergeForumThreads, newPosts, newThreads } from '@/lib/forum/live-merge'
 import { isUnread } from '@/lib/seen'
@@ -51,6 +51,14 @@ describe('archive trust window', () => {
     expect(acceptsReplies(doc('a', 1, { forumId: 'OPEN', locked: true }), ctx)).toBe(false)
     expect(acceptsReplies(doc('a', 1, { forumId: 'ARCHIVED', movedToForumId: 'OPEN' }), ctx)).toBe(false)
     expect(acceptsReplies(doc('a', 1, { forumId: 'OPEN', movedToForumId: 'ARCHIVED' }), ctx)).toBe(false)
+  })
+})
+
+describe('short text', () => {
+  it('strips invisible and direction-changing characters from names and titles, not bodies', () => {
+    const p = cleanShortText({ displayName: 'ad\u202Emin\u200B', title: ' Hi\u2066 there ', body: 'a\u202Eb', location: '\u3164' })
+    expect(p).toEqual({ displayName: 'admin', title: 'Hi there', body: 'a\u202Eb', location: '' })
+    expect(cleanShortText({ displayName: '👨\u200D👩\u200D👧' }).displayName).toBe('👨\u200D👩\u200D👧')
   })
 })
 
@@ -167,6 +175,12 @@ describe('live delta', () => {
     const retracted = { ...open, p: { ...open.p, retracted: true } }
     expect(newThreads({ threads: [t], posts: [retracted, later] }, ctx)).toHaveLength(0)
     expect(deltaChanges({ threads: [t], posts: [hiddenOpen, later] }).threadGone(t.id)).toBe(true)
+    expect(newPosts({ threads: [t], posts: [hiddenOpen, later] }, ctx)).toHaveLength(0)
+    // An older thread (in the snapshot) whose opening post was hidden since: a bump stays out.
+    const old2 = doc('mallory', 900, { title: 'Scam', forumId: 'F' })
+    const op2 = { ...doc('mallory', 901, { threadId: old2.id, forumId: 'F', body: 'scam' }), moderatedAt: 1200, p: { threadId: old2.id, forumId: 'F', body: 'scam', modState: 1 } }
+    const bump = doc('mallory', 1300, { threadId: old2.id, forumId: 'F', body: 'bump' })
+    expect(newPosts({ threads: [old2], posts: [op2, bump] }, ctx)).toHaveLength(0)
   })
   it('reports moderation of documents the static index lists', () => {
     const hiddenPost = { ...reply, p: { ...reply.p, modState: 1 } }

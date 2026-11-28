@@ -61,6 +61,8 @@ Why each index exists:
 
 v3 dropped indexes that only the snapshot could answer more cheaply: `recent` on thread and post, `byTag`, `byForumSticky`, `byMovedTo`, `post.byForum`, `post.byOrigAuthor`, and every `countable` flag. Each index entry is paid on every create, so a live post now writes three index entries instead of five.
 
+Not read by the app today: `thread.byForum` and `forum.byCategory` (listings come from the snapshot) and `post.byAuthor` (the importer's trust check). Indexes can't be added later, so they stay for live fallbacks and moderator tools (a spammer's posts by author); drop `thread.byForum` at the next registration if no reader appears.
+
 ## Consensus rules (v4)
 
 - **Locked threads** refuse replies on chain: `post.threadId` refers to a thread whose `locked` is not `true`. A `threadOpen` rule (`referenced: ['threadId', 'locked']`) makes every post and reaction create *and edit* read the thread, so a lock also freezes existing posts and reaction toggles; a locked thread's `title` and `tags` are conditionally immutable (`when: $old.locked = 1`). Moderators lock with `changeFields { locked: true }` and unlock by clearing it. A moderator-deleted thread keeps `locked` (`deleteKeepsFields`).

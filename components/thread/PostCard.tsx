@@ -14,6 +14,8 @@ import { Reactions } from './Reactions'
 
 export interface PostActions {
   canWrite: boolean
+  /** Reporting stays open in locked threads: abuse is often why a thread was locked. */
+  canReport: boolean
   /** The signed-in member is the owner or a moderator. */
   staff: boolean
   busy: string | null
@@ -125,7 +127,7 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
           )}
         </div>
         {/* No footer when there is nothing to do or show (logged-out readers of unreacted posts). */}
-        {!editing && ((visible && (actions.canWrite || Object.values(reactions).some((c) => c > 0))) || actions.staff) && (
+        {!editing && ((visible && (actions.canWrite || actions.canReport || Object.values(reactions).some((c) => c > 0))) || actions.staff) && (
           <footer data-pagefind-ignore className="flex flex-wrap items-center gap-1 border-t border-rule px-2 py-1.5 md:px-3">
             {visible && <Reactions counts={reactions} mine={mine} canReact={actions.canWrite && !own} busy={busy} onReact={(k) => actions.onReact(post, k)} />}
             <div className="ml-auto flex flex-wrap items-center">
@@ -144,7 +146,7 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
                   </button>
                 </>
               )}
-              {actions.canWrite && !own && (
+              {actions.canReport && !own && (
                 <button type="button" className="btn-ghost text-sm" aria-expanded={reporting} disabled={reported} onClick={() => setReporting((r) => !r)}>
                   <Flag aria-hidden className="h-4 w-4" />{reported ? 'Reported' : 'Report'}
                 </button>

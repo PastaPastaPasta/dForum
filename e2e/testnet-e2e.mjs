@@ -90,6 +90,40 @@ async function editFromNode(index, threadId, match, body) {
   }
 }
 
+/** Replaces persona `index`'s document — by id, or the first one of theirs matching `where` — with
+ * `props(current)`. Returns the refusal, or null when the change was applied. */
+async function replaceFromNode(index, type, idOrWhere, props) {
+  const sdkMod = await import('@dashevo/evo-sdk')
+  const record = JSON.parse(readFileSync('contracts/deployments/testnet.json', 'utf8'))
+  const contractId = record.contracts.team.contractId
+  const identityId = record.personas.find((p) => p.index === index).id
+  const k = deriveIdentityKeys(index).find((x) => x.securityLevel === 'HIGH' && x.purpose === 'AUTHENTICATION')
+  const sdk = sdkMod.EvoSDK.testnetTrusted({ settings: { timeoutMs: 60000 } })
+  await sdk.connect()
+  let cur
+  if (typeof idOrWhere === 'string') cur = (await sdk.documents.get(contractId, type, idOrWhere))?.toJSON()
+  else {
+    const res = await sdk.documents.query({ dataContractId: contractId, documentTypeName: type, where: [['threadId', '==', idOrWhere.threadId]], orderBy: [['$createdAt', 'asc']], limit: 50 })
+    cur = [...res.values()].filter(Boolean).map((d) => d.toJSON()).find((j) => j.$ownerId === identityId)
+  }
+  if (!cur) throw new Error(`no ${type} of persona ${index} to change`)
+  const next = props(cur)
+  const identity = await sdk.identities.fetch(identityId)
+  const signer = new sdkMod.IdentitySigner()
+  signer.addKeyFromWif(k.wif)
+  const document = new sdkMod.Document({ properties: next, documentTypeName: type, dataContractId: contractId, ownerId: identityId, revision: BigInt(cur.$revision) + 1n, id: cur.$id })
+  try {
+    await sdk.documents.replace({ document, identityKey: identity.getPublicKeyById(k.keyIndex), signer })
+    for (let i = 0; i < 5; i++) {
+      if (Number((await sdk.documents.get(contractId, type, cur.$id)).toJSON().$revision) > Number(cur.$revision)) return null
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+    return 'change was not applied'
+  } catch (e) {
+    return String(e?.message ?? e).replace(/[59c][1-9A-HJ-NP-Za-km-z]{50,51}/g, '[redacted]').replace(/^.*last error: /s, '')
+  }
+}
+
 async function shot(p, label) {
   const file = `${SHOTS}/${String(++shotN).padStart(2, '0')}-${p.name}-${label}.png`
   await p.page.screenshot({ path: file, fullPage: true })
@@ -295,7 +329,13 @@ try {
     // v4: the lock also freezes existing posts. bob's earlier reply can't be edited any more.
     const editRefusal = await editFromNode(2, threadId, 'A first reply', 'Edited after the lock.')
     if (!editRefusal) throw new Error('an edit in a locked thread was accepted')
-    return { refusal: refusal.slice(0, 300), editRefusal: editRefusal.slice(0, 300) }
+    // The lock also freezes the thread's title and reaction toggles (carol liked the opening post).
+    const titleRefusal = await replaceFromNode(2, 'thread', threadId, (j) => ({ ...Object.fromEntries(Object.entries(j).filter(([k, v]) => !k.startsWith('$') && v !== null)), title: `${j.title} (edited)` }))
+    if (!titleRefusal) throw new Error('a title edit in a locked thread was accepted')
+    if (/does not moderate/.test(titleRefusal)) throw new Error(`title edit refused for another reason: ${titleRefusal}`)
+    const reactionRefusal = await replaceFromNode(3, 'reaction', { threadId }, (j) => ({ postId: j.postId, postOwnerId: j.postOwnerId, threadId: j.threadId, kind: 0 }))
+    if (!reactionRefusal) throw new Error('a reaction change in a locked thread was accepted')
+    return { refusal: refusal.slice(0, 200), editRefusal: editRefusal.slice(0, 200), titleRefusal: titleRefusal.slice(0, 200), reactionRefusal: reactionRefusal.slice(0, 200) }
   })
   await step('pages hydrate without errors', async () => {
     if (hydrationErrors.length) throw new Error(`hydration failed: ${[...new Set(hydrationErrors)].join(', ')}`)

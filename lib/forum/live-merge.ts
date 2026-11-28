@@ -69,8 +69,12 @@ export function deltaChanges(delta: DeltaDocs): DeltaChanges {
       const t = threads.get(id)
       if (!t) return false
       if (isHidden(t)) return true
-      const opening = delta.posts.find((p) => str(p, 'threadId') === id && p.ownerId === t.ownerId && p.p.origId === undefined && p.createdAt - t.createdAt < STRADDLE_MS)
-      return !!opening && !visible(opening)
+      // The opening post is written right after its thread. When the delta holds the owner's first
+      // post from that moment, it is the opening post (archive threads included: they load in order).
+      const first = delta.posts
+        .filter((p) => str(p, 'threadId') === id && p.ownerId === t.ownerId)
+        .sort((a, b) => a.createdAt - b.createdAt)[0]
+      return !!first && first.createdAt - t.createdAt < STRADDLE_MS && !visible(first)
     },
     postGone: (id) => { const p = posts.get(id); return !!p && !visible(p) },
     thread: (id) => threads.get(id),
@@ -104,11 +108,13 @@ export function newThreads(delta: DeltaDocs, ctx: LiveContext): RawDoc[] {
 /** New posts since the snapshot that may be shown, with their threads. */
 export function newPosts(delta: DeltaDocs, ctx: LiveContext): Array<{ post: RawDoc; thread: RawDoc }> {
   const threads = byId(delta.threads)
+  const changes = deltaChanges(delta)
   const out: Array<{ post: RawDoc; thread: RawDoc }> = []
   for (const post of delta.posts) {
     if (post.createdAt <= ctx.snapshotAt) continue
     const thread = livePostThread(post, threads, ctx)
-    if (thread) out.push({ post, thread })
+    // A thread whose opening post was hidden is unlisted: replies (a spammer's bump) don't revive it.
+    if (thread && !changes.threadGone(thread.id)) out.push({ post, thread })
   }
   return out
 }

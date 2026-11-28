@@ -180,6 +180,7 @@ export function ThreadPage(props: ThreadPageProps) {
   const hiddenProfiles = new Set(live.profiles.filter((p) => isHidden(p)).map((p) => p.ownerId))
   const actions: PostActions = {
     canWrite: canWrite && threadOpen,
+    canReport: canWrite && !!thread && !isHidden(thread),
     staff: canWrite && !!session && !!props.ctx?.staff.includes(session.identityId),
     busy,
     onQuote(post, name) {

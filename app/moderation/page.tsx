@@ -380,9 +380,17 @@ function Members({ act, busy, moderatorId, memberPrefill }: PanelProps) {
   const [days, setDays] = useState(7)
   const [error, setError] = useState<string | null>(null)
   const valid = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target.trim())
+  const statusRequest = useRef(0)
   const load = useCallback(async (id?: string) => {
+    const mine = ++statusRequest.current
     setError(null)
-    try { setStatus(await moderationStatus((id ?? target).trim())) } catch (e) { setError(e instanceof Error ? e.message : 'Could not read the status.') }
+    setStatus(null)
+    try {
+      const s = await moderationStatus((id ?? target).trim())
+      if (mine === statusRequest.current) setStatus(s)
+    } catch (e) {
+      if (mine === statusRequest.current) setError(e instanceof Error ? e.message : 'Could not read the status.')
+    }
   }, [target])
   // Arriving from a post's "Moderate" action with ?member= looks the author up right away.
   useEffect(() => {

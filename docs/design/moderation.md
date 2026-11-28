@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `team` (default) | banlist, suspensions, warnings, `appointedModerators` | Centralized ownership, non-elected team. This is what forum.dashhq.org runs. |
 | `none` | absent | Nothing can be removed or banned at consensus, ever. Posts become permanent documents. |
-| `network` | `elected` with an interim appointed set | Masternode-elected moderators. Testnet only: a seated team cannot be challenged in protocol 14. |
+| `network` | `elected` with an interim appointed set | Masternode-elected moderators. Testnet only: a seated team cannot be challenged, and the elected declaration can't take on document types added later (it is fixed at registration). |
 
 The app reads the mode and roster from the live contract (`getRoster`), never from a document.
 
@@ -26,7 +26,7 @@ This signs with the owner's CRITICAL key (`DFORUM_OWNER_WIF` and `DFORUM_OWNER_K
 | --- | --- | --- |
 | Hide / unhide a thread, post or profile | changeFields `modState` | Hidden everywhere; the post keeps a placeholder. Reversible. |
 | Pin / unpin a thread | changeFields `sticky` | Sorted first in its forum |
-| Lock / unlock a thread | changeFields `locked` | Consensus refuses new replies; edits and reactions close in the app |
+| Lock / unlock a thread | changeFields `locked` | Consensus refuses new replies, edits of existing posts, reaction changes, and title or tag edits. Moderator changes (hide, move, unlock) still work, and members can still report |
 | Move a thread | changeFields `movedToForumId` | Listed in the new forum |
 | Delete | `moderatorDeleteDocument` | Removed, leaving a removal record (thread keeps forumId; post keeps threadId and forumId). The console recommends hiding instead. |
 | Resolve a report | changeFields `status` (2 actioned, 3 dismissed) + `resolution` | Leaves the open queue |

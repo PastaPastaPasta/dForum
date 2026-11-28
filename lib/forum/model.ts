@@ -57,6 +57,21 @@ export const num = (doc: RawDoc | undefined, key: string): number | undefined =>
 }
 
 /** The archivist and, optionally, the time after which its provenance is no longer trusted. */
+// Invisible and direction-changing characters: controls, bidi overrides and isolates, zero-width
+// spaces, fillers and tag characters. Short public strings (names, titles) lose them, so nobody can
+// pose as another member or reorder a title. Emoji joiners (U+200D) stay.
+const INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u061C\u115F\u180E\u200B\u200E\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\u3164\uFEFF\uFFA0]|\uDB40[\uDC00-\uDC7F]/g
+const SHORT_TEXT = ['displayName', 'title', 'customTitle', 'location', 'origAuthor', 'role'] as const
+
+/** Strips invisible characters from the short text fields of a document's properties, in place. */
+export function cleanShortText(p: Record<string, unknown>): Record<string, unknown> {
+  for (const k of SHORT_TEXT) {
+    const v = p[k]
+    if (typeof v === 'string') p[k] = v.replace(INVISIBLE, '').replace(/\s+/g, ' ').trim()
+  }
+  return p
+}
+
 export type ArchiveRef = string | { id: string; until?: number } | undefined
 
 export const archiveId = (ref: ArchiveRef): string | undefined => (typeof ref === 'string' ? ref : ref?.id)

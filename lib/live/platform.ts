@@ -2,6 +2,7 @@
 
 /** Raw document reads from Platform, normalized to the snapshot's RawDoc shape. */
 import type { RawDoc } from '@/lib/forum/types'
+import { cleanShortText } from '@/lib/forum/model'
 import { getSdk } from '@/lib/services/evo-sdk-service'
 import { CONTRACT_ID } from '@/lib/constants'
 
@@ -14,6 +15,7 @@ export function toRaw(doc: { toJSON(): Record<string, unknown> }): RawDoc {
   const j = doc.toJSON()
   const p: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(j)) if (!k.startsWith('$') && v !== null && v !== undefined) p[k] = plain(v)
+  cleanShortText(p)
   const raw: RawDoc = {
     id: String(j.$id),
     ownerId: String(j.$ownerId),

@@ -21,7 +21,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync 
 import { dirname } from 'node:path';
 import { EvoSDK } from '@dashevo/evo-sdk';
 import {
-  archiveAuthor, archiveRef, countReactions, effectiveAt, excerpt, isArchive, isHidden, isRetracted, lastPostOf, num,
+  archiveAuthor, archiveRef, cleanShortText, countReactions, effectiveAt, excerpt, isArchive, isHidden, isRetracted, lastPostOf, num,
   postBody, resolveForumTree, sortThreadSummaries, str, summarizeThread, threadForumId, threadPosts,
 } from '../lib/forum/model.ts';
 
@@ -46,6 +46,7 @@ export function toRaw(doc) {
   const j = doc.toJSON();
   const p = {};
   for (const [k, v] of Object.entries(j)) if (!k.startsWith('$') && v !== null && v !== undefined) p[k] = toPlain(v);
+  cleanShortText(p);
   const raw = {
     id: j.$id,
     ownerId: j.$ownerId,

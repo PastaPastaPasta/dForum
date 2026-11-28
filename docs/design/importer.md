@@ -8,6 +8,7 @@
 - **Archivist writes the content.** A dedicated **archivist** identity writes threads and posts with `origId`, `origAuthor`, `origAuthorId` and `origCreatedAt`. The forum trusts those fields only because `forumSettings.archiveOwnerId` names that identity. Anyone else who sets them is ignored.
 - **Trust window.** `forumSettings.archiveTrustUntil` bounds that trust: archivist documents created on chain after it show as ordinary posts by the archivist identity. Close the window when a backfill is done (`trust --until now`) so a leaked archivist key can't forge history, and reopen it (`trust --until open`) for the next backfill.
 - **Separate identities.** The archivist must not be the owner or a moderator: moderators can't remove documents owned by the owner or other moderators, so archive takedowns would become impossible. On testnet the archivist is persona index 5 (`99hojzpv…KxH`).
+- **After the window closes,** a leaked archivist key can no longer forge history, but it could still edit or retract imported posts, which then lose their archive trust (vandalism, not forgery). Keep the archivist key offline once a backfill is done. The next contract registration should make imported bodies conditionally immutable (`{property, when}` on `origId`).
 - **Display.** Imported posts show the original author with an archive mark and a link to the original post. Imported authors are names, not Dash identities, and are listed separately on the members page.
 
 ## Stages
@@ -36,6 +37,8 @@ node scripts/import/xenforo.mjs trust --until now
 ```
 
 **Backfilling again later.** The crawl, ledger and structure map are all resumable, so a later backfill (new threads on dash.org/forum, or forums skipped the first time) is the same sequence: `crawl --refresh` (refetches the node index, forum lists and the newest page of each known thread; older pages come from the cache), `trust --until open` (refused if the archivist wrote anything while the window was closed), `structure` (existing categories and forums are found by slug and reused), `load` (the ledger and the `byOrigin` index skip everything already written), then `trust --until now`. Forums already archived refuse new posts at consensus; to add history to one, the owner clears `archived` first and runs `archive` again afterwards.
+
+Two things to know while a backfill runs: a thread a moderator locks before its import finishes refuses the rest of its posts (consensus), so `load` stops there; and XenForo's own lock state isn't carried over (lock imported threads from the console if needed).
 
 The structure map is kept per contract (`structure-map-<contract>.json`), as is the ledger, so registering a new contract starts a clean import.
 
