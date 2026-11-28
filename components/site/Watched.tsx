@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ThreadFile } from '@/lib/forum/types'
 import { isHidden, isRetracted, str } from '@/lib/forum/model'
 import { useLive } from '@/lib/live/overlay'
@@ -13,6 +13,8 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
   const live = useLive(snapshotAt)
   // Posts in the static copy of each thread; 0 when the thread is newer than the snapshot.
   const [counts, setCounts] = useState<Record<string, number>>({})
+  const [announce, setAnnounce] = useState('')
+  const heading = useRef<HTMLHeadingElement>(null)
   const ids = Object.keys(watches)
   useEffect(() => {
     let alive = true
@@ -34,7 +36,8 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
   const list = ids.map((id) => ({ id, ...watches[id], total: counts[id] === undefined ? watches[id].seen : counts[id] + fresh(id) })).sort((a, b) => (b.total - b.seen) - (a.total - a.seen) || b.at - a.at)
   return (
     <div className="mx-auto max-w-2xl space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Watched threads</h1>
+      <h1 ref={heading} tabIndex={-1} className="text-2xl font-semibold tracking-tight">Watched threads</h1>
+      <p role="status" className="sr-only">{announce}</p>
       <p className="text-sm text-ink-2">Your watch list is kept in this browser only, so it stays private.</p>
       {list.length === 0 ? (
         <p className="panel px-4 py-6 text-center text-ink-2">You aren&apos;t watching any threads. Use Watch on a thread to follow new replies.</p>
@@ -48,7 +51,14 @@ export function Watched({ snapshotAt }: { snapshotAt: number }) {
                 <Link href={firstNewPage(w.id, w.seen, unread) > 1 ? `/t/${w.id}/page/${firstNewPage(w.id, w.seen, unread)}/` : `/t/${w.id}/`}
                   className={`tap-y min-w-0 flex-1 truncate ${unread ? 'font-semibold' : ''} hover:text-dash`}>{w.title}</Link>
                 {unread > 0 && <span className="rounded-full bg-dash px-2 text-xs font-semibold text-dash-ink tabnum">{unread} new</span>}
-                <button type="button" className="btn-ghost text-sm" onClick={() => unwatch(w.id)} aria-label={`Stop watching ${w.title}`}>Unwatch</button>
+                <button type="button" className="btn-ghost text-sm" aria-label={`Stop watching ${w.title}`} onClick={(e) => {
+                  // Keep keyboard focus in the list: the next row's Unwatch, else the heading.
+                  const row = e.currentTarget.closest('li')
+                  const next = (row?.nextElementSibling ?? row?.previousElementSibling)?.querySelector('button')
+                  unwatch(w.id)
+                  setAnnounce(`Stopped watching ${w.title}`)
+                  requestAnimationFrame(() => (next ?? heading.current)?.focus())
+                }}>Unwatch</button>
               </li>
             )
           })}

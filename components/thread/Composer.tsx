@@ -77,7 +77,7 @@ export const Composer = forwardRef<ComposerHandle, {
       ) : (
         <textarea ref={area} value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} placeholder={placeholder}
           autoFocus={autoFocus} rows={6}
-          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && !over && value.trim()) onSubmit() }}
+          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && !disabled && !over && value.trim()) onSubmit() }}
           className="block min-h-[9rem] w-full resize-y bg-sheet px-4 py-3 font-serif text-[1.0625rem] leading-relaxed outline-none" />
       )}
       <div className="flex flex-wrap items-center gap-3 border-t border-rule px-3 py-2">

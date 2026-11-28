@@ -14,11 +14,13 @@ describe('post rendering', () => {
     const out = html('nice :grin:\n\n`:grin:` and ``x :grin: x``\n\n~~~\n:grin:\n~~~\n\n    :grin: indented')
     expect(out.match(/😁/g)).toHaveLength(1)
     expect(out).toContain('<code>:grin:</code>')
+    expect(html('so :grin::grin: and :sad:')).toContain('so 😁😁 and 🙁')
   })
   it('makes attachment chips only for the archive origin', () => {
-    expect(html('[Attachment: a.pdf](https://www.dash.org/forum/attachments/a.9/)', 'https://www.dash.org/')).toContain('📎 a.pdf')
+    expect(html('[Attachment: a.pdf](https://www.dash.org/forum/attachments/a.9/)', 'https://www.dash.org/')).toContain('📎</span> a.pdf')
     expect(html('[Attachment: a.exe](https://evil.example/attachments/1/)', 'https://www.dash.org/')).not.toContain('📎')
     expect(html('[Attachment: a.pdf](https://www.dash.org/forum/attachments/a.9/)')).not.toContain('📎')
+    expect(html('[Attachment](https://www.dash.org/forum/attachments/img_0750-jpg.4914/)', 'https://www.dash.org/')).toContain('img_0750.jpg')
   })
   it('keeps links safe', () => {
     expect(html('[x](javascript:alert(1))')).not.toContain('javascript:')

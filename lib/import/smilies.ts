@@ -1,12 +1,13 @@
 /** Codes from the forum's older software that survive as plain text in old posts. */
 const LEGACY_CODES: Record<string, string> = {
-  grin: '😁', tongue: '😛', smile: '🙂', wink: '😉', cry: '😢', mad: '😠', cool: '😎', eek: '😳', rolleyes: '🙄', confused: '😕', oops: '😳',
+  grin: '😁', tongue: '😛', sad: '🙁', what: '😳', smile: '🙂', wink: '😉', cry: '😢', mad: '😠', cool: '😎', eek: '😳', rolleyes: '🙄', confused: '😕', oops: '😳',
 }
-const LEGACY_RE = new RegExp(`(^|[\\s(])\\\\?:(${Object.keys(LEGACY_CODES).join('|')}):(?=$|[\\s.,!?)])`, 'gm')
+// Lookarounds (not consumed), so back-to-back codes like ":grin::grin:" both convert.
+const LEGACY_RE = new RegExp(`(?<=^|[\\s(:])\\\\?:(${Object.keys(LEGACY_CODES).join('|')}):(?=$|[\\s.,!?):])`, 'gm')
 
 /** Replaces legacy smiley codes in plain text. */
 export function legacySmilies(text: string): string {
-  return text.replace(LEGACY_RE, (_, pre: string, code: string) => `${pre}${LEGACY_CODES[code]}`)
+  return text.replace(LEGACY_RE, (_, code: string) => LEGACY_CODES[code])
 }
 
 /** Applies `fn` to Markdown outside fenced and inline code. */

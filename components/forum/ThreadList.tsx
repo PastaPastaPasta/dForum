@@ -33,7 +33,7 @@ export function ThreadList({ threads, nameOf, showForum, forumTitle, emptyText =
           <li key={t.id} className={`grid grid-cols-[2.5rem_1fr] gap-x-3 gap-y-1.5 px-4 py-3 md:grid-cols-[2.5rem_1fr_8.5rem_12rem] md:items-center ${t.sticky ? 'bg-dash/[0.04]' : ''}`}>
             <Avatar seed={t.ownerId + (t.archiveAuthor ?? '')} name={author} size={40} archive={!!t.archiveAuthor} />
             <div className="min-w-0">
-              <div className="flex flex-wrap items-baseline gap-x-2">
+              <div className="flex flex-wrap items-center gap-x-2">
                 {t.sticky && <span className="inline-flex items-center gap-1 text-xs font-semibold text-dash"><Pin aria-hidden className="h-3.5 w-3.5" />Pinned</span>}
                 {t.locked && <span className="inline-flex items-center gap-1 text-xs font-semibold text-ink-2"><Lock aria-hidden className="h-3.5 w-3.5" />Locked</span>}
                 <Link prefetch={false} href={`/t/${t.id}/`} className={`leading-snug hover:text-dash ${unread ? 'font-bold' : 'font-semibold'}`}>{t.title}</Link>
@@ -56,14 +56,14 @@ export function ThreadList({ threads, nameOf, showForum, forumTitle, emptyText =
                 {t.tags.map((tag) => <Link prefetch={false} key={tag} href={`/tags/${tag}/`} className="tap rounded bg-sunk px-1.5 text-xs leading-5 hover:text-dash">{tag}</Link>)}
               </p>
             </div>
-            <dl className="col-start-2 flex gap-4 text-sm md:col-start-auto md:grid md:grid-cols-[auto_auto] md:justify-end md:gap-x-2 md:gap-y-0">
+            <dl className="col-start-2 flex gap-4 text-sm md:col-start-auto md:grid md:grid-cols-[auto_4ch] md:justify-start md:gap-x-2 md:gap-y-0">
               <dt className="text-ink-2">Replies</dt><dd className="tabnum">{fmt.format(t.replies)}</dd>
               <dt className="text-ink-2">Reactions</dt><dd className="tabnum">{fmt.format(t.reactions)}</dd>
             </dl>
             <div className="col-start-2 text-sm md:col-start-auto md:text-right">
               <span className="text-ink-2 md:hidden">Last reply </span>
               <Link prefetch={false} href={lastHref} className="tap-y text-ink-2 hover:text-dash"><Time at={t.lastPostAt} /></Link>
-              <p className="truncate"><AuthorLink id={t.lastPostAuthorId} name={lastName} archiveAuthor={t.lastPostArchiveAuthor} className="text-ink-2" /></p>
+              <p className="truncate"><AuthorLink id={t.lastPostAuthorId} name={lastName} archiveAuthor={t.lastPostArchiveAuthor} className="tap-y text-ink-2" /></p>
             </div>
           </li>
         )

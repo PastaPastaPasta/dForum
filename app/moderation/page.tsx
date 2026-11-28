@@ -411,7 +411,7 @@ function Members({ act, busy, moderatorId, memberPrefill }: PanelProps) {
         <div className="panel space-y-3 p-4">
           <p className="text-sm"><Link className="link font-medium" href={`/u/${id}/`}>{memberLabel(id)}</Link>:{' '}
             {status.banned ? <span className="text-danger">banned{status.banReason?.text ? ` (${status.banReason.text})` : ''}</span> : 'not banned'},{' '}
-            {status.suspendedUntil ? <>suspended until {new Date(Number(status.suspendedUntil)).toUTCString()}</> : 'not suspended'},{' '}
+            {status.suspendedUntil ? <>suspended until <Time at={Number(status.suspendedUntil)} /></> : 'not suspended'},{' '}
             {(status.warnings?.length ?? 0)} warning{status.warnings?.length === 1 ? '' : 's'}</p>
           {id === moderatorId ? <p className="text-sm text-ink-2">That&apos;s you.</p> : (
             <>
@@ -424,8 +424,8 @@ function Members({ act, busy, moderatorId, memberPrefill }: PanelProps) {
                   : <button type="button" className="btn btn-danger" disabled={!!busy || !reason.trim()} onClick={() => void run('Ban', () => banUser(m, id, reason.trim()), 'Ban this identity? It can no longer write to this forum until unbanned.')}>Ban</button>}
                 {status.suspendedUntil
                   ? <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Lift suspension', () => unsuspendUser(m, id))}>Lift suspension</button>
-                  : <span className="flex items-center gap-1"><label className="flex items-center gap-1 text-sm"><input type="number" min={1} max={365} className="field w-20 text-sm" value={days} onChange={(e) => setDays(Number(e.target.value))} /> days</label>
-                    <button type="button" className="btn btn-quiet" disabled={!!busy || !reason.trim()} onClick={() => void run('Suspend', () => suspendUser(m, id, BigInt(Date.now() + days * 86_400_000), reason.trim()))}>Suspend {days} days</button></span>}
+                  : <span className="flex items-center gap-1"><label className="flex items-center gap-1 text-sm"><input type="number" min={1} max={365} className="field w-20 text-sm" value={days} onChange={(e) => setDays(Math.min(365, Math.max(0, Math.round(Number(e.target.value) || 0))))} /> days</label>
+                    <button type="button" className="btn btn-quiet" disabled={!!busy || !reason.trim() || days < 1} onClick={() => void run('Suspend', () => suspendUser(m, id, BigInt(Date.now() + days * 86_400_000), reason.trim()))}>Suspend {days} days</button></span>}
                 <button type="button" className="btn btn-quiet" disabled={!!busy || !reason.trim()} onClick={() => void run('Warn', () => warnUser(m, id, reason.trim()))}>Warn</button>
                 {(status.warnings?.length ?? 0) > 0 && <button type="button" className="btn btn-quiet" disabled={!!busy} onClick={() => void run('Clear warnings', () => clearWarnings(m, id))}>Clear warnings</button>}
               </div>
