@@ -29,6 +29,8 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
   const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle')
   const live = useLive(snapshotAt)
   const seq = useRef(0)
+  // Read once: landing with ?q= shouldn't open a phone keyboard over the results.
+  const [initialQuery] = useState(() => (typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('q') ?? ''))
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -50,12 +52,20 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
       try {
         const pf = await loadPagefind()
         const res = await pf.search(query, forum ? { filters: { forum } } : undefined)
-        const data = await Promise.all(res.results.slice(0, 30).map((r) => r.data()))
+        const data = await Promise.all(res.results.slice(0, 60).map((r) => r.data()))
         if (n !== seq.current) return
-        setHits(data.map((d) => ({
-          url: d.url, title: d.meta.title ?? d.url, excerpt: d.excerpt, forum: d.filters.forum?.[0],
-          subs: (d.sub_results ?? []).filter((r) => r.url.includes('#h-')).slice(0, 3),
-        })))
+        // The index holds one entry per thread page: fold them into one result per thread, keeping
+        // the best-ranked page's place and the matching posts in thread order.
+        const threads = new Map<string, Hit>()
+        for (const d of data) {
+          const key = d.url.replace(/page\/\d+\/?$/, '')
+          const subs = (d.sub_results ?? []).filter((x) => x.url.includes('#h-'))
+          const hit = threads.get(key)
+          if (hit) { hit.subs.push(...subs); continue }
+          threads.set(key, { url: key, title: d.meta.title ?? key, excerpt: d.excerpt, forum: d.filters.forum?.[0], subs })
+        }
+        const postNumber = (x: Sub) => Number(x.title.match(/#(\d+)/)?.[1] ?? 0)
+        setHits([...threads.values()].slice(0, 30).map((h) => ({ ...h, subs: h.subs.sort((a, b) => postNumber(a) - postNumber(b)).slice(0, 3) })))
         setState('idle')
       } catch {
         if (n === seq.current) setState('error')
@@ -71,9 +81,9 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
     <div className="mx-auto max-w-3xl space-y-5">
       <h1 className="text-2xl font-semibold tracking-tight">Search</h1>
       <form role="search" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-2 sm:flex-row">
-        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-field bg-sheet px-3 focus-within:border-dash">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-field bg-sheet px-3 focus-within:border-dash focus-within:outline focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-dash">
           <SearchIcon aria-hidden className="h-4 w-4 text-ink-2" />
-          <input autoFocus type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search threads and posts" aria-label="Search terms" className="h-10 min-w-0 flex-1 bg-transparent outline-none" />
+          <input autoFocus={!initialQuery} type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search threads and posts" aria-label="Search terms" className="h-10 min-w-0 flex-1 bg-transparent outline-none focus-visible:outline-none" />
         </label>
         <select className="field sm:w-auto" value={forum} onChange={(e) => setForum(e.target.value)} aria-label="Forum">
           <option value="">All forums</option>
@@ -93,7 +103,7 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
       {state === 'error' && <p role="alert" className="text-danger">The search index couldn&apos;t load. Try again after reloading the page.</p>}
       {hits && (
         <section aria-live="polite" className="space-y-2">
-          <p className="text-sm text-ink-2">{state === 'loading' ? 'Searching…' : `${hits.length === 30 ? 'Top 30' : hits.length} result${hits.length === 1 ? '' : 's'}`}</p>
+          <p className="text-sm text-ink-2">{state === 'loading' ? 'Searching…' : `${hits.length === 30 ? 'Top 30' : hits.length} thread${hits.length === 1 ? '' : 's'}`}</p>
           {hits.length > 0 ? (
             <ul className="panel divide-y divide-rule">
               {hits.map((h) => (
@@ -107,7 +117,7 @@ export function Search({ ctx, forumTitles }: { ctx: LiveContextProps; forumTitle
                       {h.subs.map((r) => (
                         <li key={r.url} className="text-sm">
                           <a href={postUrl(r.url)} className="font-medium text-ink-2 hover:text-dash">{r.title}</a>
-                          <p className="text-ink-2 [&_mark]:bg-dash/20 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: markOnly(r.excerpt) }} />
+                          <p className="text-ink-2 [&_mark]:bg-dash/20 [&_mark]:text-ink" dangerouslySetInnerHTML={{ __html: markOnly(r.excerpt).replace(r.title, '').replace(/^[.\s]+/, '') }} />
                         </li>
                       ))}
                     </ul>

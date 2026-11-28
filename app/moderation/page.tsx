@@ -50,7 +50,12 @@ function Console() {
   const [identityId, setIdentityId] = useState('')
   const [wif, setWif] = useState('')
   const [tab, setTab] = useState<Tab>('reports')
-  useEffect(() => { if (new URLSearchParams(location.search).get('ref')) setTab('content') }, [])
+  const [memberPrefill, setMemberPrefill] = useState<string | null>(null)
+  useEffect(() => {
+    const q = new URLSearchParams(location.search)
+    if (q.get('ref')) setTab('content')
+    else if (q.get('member')) setTab('members')
+  }, [])
   const [forums, setForums] = useState<ForumOption[]>([])
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -98,7 +103,10 @@ function Console() {
     )
   }
 
-  const props = { act, busy, forums, moderatorId: key.moderator.identityId }
+  const props = {
+    act, busy, forums, moderatorId: key.moderator.identityId, memberPrefill,
+    openMember: (id: string) => { setMemberPrefill(id); setTab('members') },
+  }
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -107,29 +115,46 @@ function Console() {
         <button type="button" className="btn btn-quiet ml-auto" onClick={key.lock}><Lock className="h-4 w-4" />Lock console</button>
       </div>
       <div role="tablist" className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-rule [scrollbar-width:none]" aria-label="Moderation sections">
-        {([['reports', 'Reports', Flag], ['content', 'Content', Search], ['members', 'Members', Gavel], ['log', 'Audit log', ScrollText]] as const).map(([t, label, Icon]) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
+        {TABS.map(([t, label, Icon]) => (
+          <button key={t} id={`tab-${t}`} type="button" role="tab" aria-selected={tab === t} aria-controls={`panel-${t}`} tabIndex={tab === t ? 0 : -1}
+            onClick={() => setTab(t)}
+            onKeyDown={(e) => {
+              const i = TABS.findIndex(([x]) => x === t)
+              const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+              if (!step) return
+              e.preventDefault()
+              const next = TABS[(i + step + TABS.length) % TABS.length][0]
+              setTab(next)
+              document.getElementById(`tab-${next}`)?.focus()
+            }}
             className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium ${tab === t ? 'border-dash text-ink' : 'border-transparent text-ink-2 hover:text-ink'}`}>
-            <Icon className="h-4 w-4" />{label}
+            <Icon aria-hidden className="h-4 w-4" />{label}
           </button>
         ))}
       </div>
       {flash && <p role={flash.ok ? 'status' : 'alert'} className={`rounded-md px-3 py-2 text-sm ${flash.ok ? 'bg-live/10 text-live' : 'bg-danger/10 text-danger'}`}>{flash.text}</p>}
       <ModeratorContext.Provider value={key.moderator}>
-        {tab === 'reports' && <Reports {...props} />}
-        {tab === 'content' && <Content {...props} />}
-        {tab === 'members' && <Members {...props} />}
-        {tab === 'log' && <AuditLog />}
+        <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+          {tab === 'reports' && <Reports {...props} />}
+          {tab === 'content' && <Content {...props} />}
+          {tab === 'members' && <Members {...props} />}
+          {tab === 'log' && <AuditLog />}
+        </div>
       </ModeratorContext.Provider>
     </div>
   )
 }
+
+const TABS = [['reports', 'Reports', Flag], ['content', 'Content', Search], ['members', 'Members', Gavel], ['log', 'Audit log', ScrollText]] as const
 
 interface PanelProps {
   act: (label: string, fn: () => Promise<unknown>, confirmText?: string) => Promise<boolean>
   busy: string | null
   forums: ForumOption[]
   moderatorId: string
+  /** Opens the Members tab looking up this identity. */
+  openMember: (id: string) => void
+  memberPrefill: string | null
 }
 
 const ModeratorContext = createContext<ModerationIdentity | null>(null)
@@ -225,7 +250,7 @@ function parseRef(input: string): { type: 'thread' | 'post'; id: string } | null
   return null
 }
 
-function Content({ act, busy, forums, moderatorId }: PanelProps) {
+function Content({ act, busy, forums, moderatorId, openMember }: PanelProps) {
   const m = useModerator()
   const [ref, setRef] = useState('')
   const [doc, setDoc] = useState<{ type: 'thread' | 'post'; doc: RawDoc } | null>(null)
@@ -289,7 +314,10 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
           <p className="text-sm text-ink-2">{doc.type === 'thread' ? 'Thread' : 'Post'} by <Link className="link" href={`/u/${doc.doc.ownerId}/`}>{names(doc.doc.ownerId)}</Link>, <Time at={doc.doc.createdAt} />
             {isHidden(doc.doc) && <span className="ml-2 rounded bg-danger/10 px-1.5 text-xs text-danger">hidden</span>}</p>
           <p className="font-medium" data-testid="moderation-target">{doc.type === 'thread' ? str(doc.doc, 'title') : excerpt(postBody(doc.doc), 500)}</p>
-          {thread && <Link className="link text-sm" href={`/t/${thread.id}/`}>Open thread <ExternalLink className="inline h-3.5 w-3.5" /></Link>}
+          <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            {thread && <Link className="link" href={`/t/${thread.id}/`}>Open thread <ExternalLink aria-hidden className="inline h-3.5 w-3.5" /></Link>}
+            {!own && <button type="button" className="link" onClick={() => openMember(doc.doc.ownerId)}>Ban, suspend or warn the author</button>}
+          </p>
           {own ? <p className="text-sm text-ink-2">You can&apos;t moderate your own content (the network refuses it).</p> : m && (
             <>
               <label className="block text-sm font-medium">Reason (optional, kept in the public moderation record)
@@ -341,7 +369,7 @@ function Content({ act, busy, forums, moderatorId }: PanelProps) {
   )
 }
 
-function Members({ act, busy, moderatorId }: PanelProps) {
+function Members({ act, busy, moderatorId, memberPrefill }: PanelProps) {
   const m = useModerator()
   const [target, setTarget] = useState('')
   const [status, setStatus] = useState<Awaited<ReturnType<typeof moderationStatus>> | null>(null)
@@ -349,10 +377,16 @@ function Members({ act, busy, moderatorId }: PanelProps) {
   const [days, setDays] = useState(7)
   const [error, setError] = useState<string | null>(null)
   const valid = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target.trim())
-  const load = useCallback(async () => {
+  const load = useCallback(async (id?: string) => {
     setError(null)
-    try { setStatus(await moderationStatus(target.trim())) } catch (e) { setError(e instanceof Error ? e.message : 'Could not read the status.') }
+    try { setStatus(await moderationStatus((id ?? target).trim())) } catch (e) { setError(e instanceof Error ? e.message : 'Could not read the status.') }
   }, [target])
+  // Arriving from a post's "Moderate" action with ?member= looks the author up right away.
+  useEffect(() => {
+    const pre = memberPrefill ?? new URLSearchParams(location.search).get('member')
+    if (pre && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(pre)) { setTarget(pre); void load(pre) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const run = (label: string, fn: () => Promise<unknown>, c?: string) => act(label, fn, c).then((ok) => { if (ok) void load() })
   const id = target.trim()
   return (

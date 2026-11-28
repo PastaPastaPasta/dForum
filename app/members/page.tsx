@@ -11,7 +11,9 @@ const joined = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric
 export default function Members() {
   const list = members().filter((m) => !m.hidden)
   const roles = rolesFor()
-  const staff = list.filter((m) => roles[m.id])
+  // The team comes from the contract roster, so staff who haven't posted are listed too.
+  const byId = new Map(list.map((m) => [m.id, m]))
+  const staff = Object.keys(roles).map((id) => byId.get(id) ?? { id, name: '', avatarUrl: undefined })
   const archived = archiveMembers().slice(0, 60)
   const s = site()
   return (
@@ -60,7 +62,7 @@ export default function Members() {
           <h2 id="arch" className="text-lg font-semibold">Archive authors</h2>
           <p className="text-sm text-ink-2">Authors of posts imported from {s.settings.archiveSourceName ?? 'the previous forum'}. They are names from the archive, not Dash identities.</p>
           <ul className="flex flex-wrap gap-2">
-            {archived.map((a) => <li key={a.key} className="rounded-md bg-archive-wash px-2.5 py-1 text-sm text-archive">{a.name} <span className="tabnum">{a.posts}</span></li>)}
+            {archived.map((a) => <li key={a.key} className="rounded-md bg-archive-wash px-2.5 py-1 text-sm text-archive">{a.name}<span className="tabnum text-ink-2"> · {a.posts.toLocaleString('en-US')} {a.posts === 1 ? 'post' : 'posts'}</span></li>)}
           </ul>
         </section>
       )}

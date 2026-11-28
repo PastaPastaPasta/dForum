@@ -10,6 +10,7 @@ import { useSession } from '@/lib/session'
 import { LOGIN_AVAILABLE } from '@/lib/host'
 import { writeFailureMessage } from '@/lib/services/write-errors'
 import { Composer } from './Composer'
+import { KeyNotice } from '@/components/site/KeyNotice'
 
 const DRAFT_KEY = 'dforum:draft:new-thread'
 
@@ -101,7 +102,8 @@ export function NewThread({ categories, forums }: { categories: CategoryView[]; 
         {tagList.length > 0 && <span className="mt-1 flex flex-wrap gap-1.5">{tagList.map((t) => <span key={t} className="rounded bg-sunk px-1.5 text-xs leading-5">{t}</span>)}</span>}
       </label>
       {pending && !busy && <p className="text-sm text-ink-2">The thread was created, but its opening post wasn&apos;t saved. Post again to finish it; the title and tags are already saved.</p>}
-      <Composer value={body} onChange={setBody} busy={busy} submitLabel={pending ? 'Save opening post' : 'Post thread'} label="Opening post" placeholder="Write the opening post…" onSubmit={() => void submit()} error={error} />
+      <Composer value={body} onChange={setBody} busy={busy} disabled={!session.authKeyWif} submitLabel={pending ? 'Save opening post' : 'Post thread'} label="Opening post" placeholder="Write the opening post…" onSubmit={() => void submit()} error={error} />
+      <KeyNotice />
       <p className="text-sm text-ink-2">Your thread is saved to Dash Platform and shows up for everyone within a few seconds.</p>
     </div>
   )

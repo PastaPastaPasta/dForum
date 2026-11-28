@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useSession } from '@/lib/session'
+import { KeyNotice } from '@/components/site/KeyNotice'
 import { LOGIN_AVAILABLE } from '@/lib/host'
 import { saveProfile } from '@/lib/forum/actions'
 import { str } from '@/lib/forum/model'
@@ -31,7 +32,7 @@ function validate(d: Draft): string | null {
 }
 
 export default function SettingsPage() {
-  const { session, ready, signOut } = useSession()
+  const { session, ready, signOut, keyState } = useSession()
   const [draft, setDraft] = useState<Draft>(EMPTY)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [saving, setSaving] = useState(false)
@@ -106,8 +107,9 @@ export default function SettingsPage() {
               {'hint' in f && f.hint && <span className="mt-1 block text-xs text-ink-2">{f.hint}</span>}
             </label>
           ))}
+          <KeyNotice />
           <div className="flex flex-wrap items-center gap-3">
-            <button className="btn btn-primary" disabled={saving || state === 'loading'}>{saving ? 'Saving to Platform…' : 'Save profile'}</button>
+            <button className="btn btn-primary" disabled={saving || state === 'loading' || keyState !== 'ready'}>{saving ? 'Saving…' : 'Save profile'}</button>
             <Link href={`/u/${session.identityId}/`} className="link text-sm">View your profile</Link>
           </div>
           {message && <p role={message.ok ? 'status' : 'alert'} className={message.ok ? 'text-live' : 'text-danger'}>{message.text}</p>}

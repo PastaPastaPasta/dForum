@@ -9,6 +9,7 @@ import { forumActivity, mergeForumThreads, toLiveContext, type LiveContextProps 
 import { useLive } from '@/lib/live/overlay'
 import { useNames } from '@/lib/live/names'
 import { useSession } from '@/lib/session'
+import { LOGIN_AVAILABLE } from '@/lib/host'
 import { useMarkSeen } from '@/lib/seen'
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs'
 import { Pagination } from '@/components/ui/Pagination'
@@ -48,7 +49,7 @@ export function ForumPage({ forum, crumbs, subforums, threads, page, pages, name
         </div>
         {forum.archived ? (
           <p className="flex items-center gap-1.5 rounded-md bg-archive-wash px-3 py-1.5 text-sm text-archive"><Archive aria-hidden className="h-4 w-4" />Archived: read only</p>
-        ) : (
+        ) : (session || LOGIN_AVAILABLE) && (
           <Link prefetch={false} href={session ? `/new/?forum=${forum.slug}` : `/login/?next=${encodeURIComponent(`/new/?forum=${forum.slug}`)}`} className="btn btn-primary">
             <PenSquare aria-hidden className="h-4 w-4" />{session ? 'Post thread' : 'Log in to post'}
           </Link>

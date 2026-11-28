@@ -357,13 +357,46 @@ function securityLevelNumber(level: string): number {
   }
 }
 
+// The last nonce this tab used per identity. A node that hasn't seen our previous write yet would
+// hand back the same nonce (40204 "nonce already present at tip"); never go backwards.
+const usedNonce = new Map<string, bigint>()
+
 async function freshNonce(identityId: string): Promise<bigint> {
   const sdk = await getSdk()
   const raw = (await sdk.wasm.getIdentityContractNonce(identityId, CONTRACT_ID)) ?? 0n
-  return (raw & SEQUENCE_MASK) + 1n
+  const chainNext = (raw & SEQUENCE_MASK) + 1n
+  const mine = (usedNonce.get(identityId) ?? 0n) + 1n
+  const next = chainNext > mine ? chainNext : mine
+  usedNonce.set(identityId, next)
+  return next
+}
+
+const STALE_NONCE = /invalid identity nonce|nonce already present|code 40204/i
+
+/** Runs a write once more when the chosen nonce turned out stale (the write did not happen). */
+async function withNonceRetry<T>(identityId: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write()
+  } catch (e) {
+    const text = String((e as { message?: unknown })?.message ?? e)
+    if (!STALE_NONCE.test(text)) throw e
+    const current = text.match(/current identity nonce is (\d+)/)?.[1]
+    if (current) usedNonce.set(identityId, BigInt(current))
+    await new Promise((r) => setTimeout(r, 1500))
+    return write()
+  }
 }
 
 export async function createDocument(
+  type: string,
+  identityId: string,
+  authKeyWif: string,
+  properties: Record<string, unknown>,
+): Promise<DocRef> {
+  return withNonceRetry(identityId, () => createOnce(type, identityId, authKeyWif, properties))
+}
+
+async function createOnce(
   type: string,
   identityId: string,
   authKeyWif: string,
@@ -412,6 +445,15 @@ export async function createDocument(
 }
 
 export async function replaceDocument(
+  existing: DocRef,
+  identityId: string,
+  authKeyWif: string,
+  properties: Record<string, unknown>,
+): Promise<DocRef> {
+  return withNonceRetry(identityId, () => replaceOnce(existing, identityId, authKeyWif, properties))
+}
+
+async function replaceOnce(
   existing: DocRef,
   identityId: string,
   authKeyWif: string,

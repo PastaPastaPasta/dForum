@@ -23,10 +23,14 @@ import { hostIsCanonical, LOGIN_AVAILABLE } from '@/lib/host'
 import type { SessionData } from '@/lib/types'
 import type { PlatformAuthController } from 'platform-auth'
 
+export type KeyState = 'none' | 'loading' | 'ready' | 'missing'
+
 const SessionContext = createContext<{
   controller: PlatformAuthController
   session: SessionData | null
   ready: boolean
+  /** The signing key for the signed-in identity: still being read, available, or gone. */
+  keyState: KeyState
   isAuthRestoring: boolean
   authError: string | null
   signOut: () => Promise<void>
@@ -34,6 +38,7 @@ const SessionContext = createContext<{
   controller: null as unknown as PlatformAuthController,
   session: null,
   ready: false,
+  keyState: 'none',
   isAuthRestoring: true,
   authError: null,
   signOut: async () => undefined,
@@ -51,6 +56,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 function SessionBridge({ children, controller }: { children: ReactNode; controller: PlatformAuthController }) {
   const auth = usePlatformAuth()
   const [authKeyWif, setAuthKeyWif] = useState<string | null>(null)
+  // The identity whose key lookup has finished (with or without a key).
+  const [keyCheckedFor, setKeyCheckedFor] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
   // The session restore + the signing-key read are both gated to the
   // canonical host: on any other origin the snapshot must not be rehydrated
@@ -98,11 +105,11 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
     let cancelled = false
     Promise.resolve(secretStore.getPrivateKey(identityId))
       .then((wif) => {
-        if (!cancelled) setAuthKeyWif(wif)
+        if (!cancelled) { setAuthKeyWif(wif); setKeyCheckedFor(identityId) }
       })
       .catch(() => {
         // Signing key unavailable — the profile still renders; writes refuse.
-        if (!cancelled) setAuthKeyWif(null)
+        if (!cancelled) { setAuthKeyWif(null); setKeyCheckedFor(identityId) }
       })
     return () => {
       cancelled = true
@@ -117,6 +124,7 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
     }
   }, [user])
 
+  const hostAllowedNow = typeof window !== 'undefined' && gated === true
   const session: SessionData | null = identityId
     ? {
         identityId,
@@ -124,6 +132,8 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
         username: user?.username,
       }
     : null
+
+  const keyState: KeyState = !identityId || !hostAllowedNow ? 'none' : keyCheckedFor !== identityId ? 'loading' : authKeyWif ? 'ready' : 'missing'
 
   const signOut = async () => {
     try {
@@ -139,6 +149,7 @@ function SessionBridge({ children, controller }: { children: ReactNode; controll
       value={{
         controller,
         session,
+        keyState,
         // On the gated (read-only) deploy the vendored controller never
         // leaves isAuthRestoring — readiness comes from the gate itself.
         ready: ready && (gated === null ? false : gated ? !auth.isAuthRestoring : true),

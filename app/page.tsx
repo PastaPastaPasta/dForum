@@ -18,7 +18,7 @@ export default function Home() {
           <Markdown source={s.settings.announcement} className="post-body !font-sans !text-[0.95rem]" />
         </div>
       )}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <ForumIndex categories={s.categories} forums={s.forums} names={names} ctx={liveContext()} />
         <HomeSidebar site={{ ...s, forums: [], categories: [] }} names={names} ctx={liveContext()} />
       </div>

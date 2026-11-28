@@ -335,7 +335,8 @@ export function build({ state, small, snapshotAt, contract }) {
       if (isArchive(p, archive)) {
         archivePosts += 1;
         const name = archiveAuthor(p, archive);
-        const key = num(p, 'origAuthorId') !== undefined ? `x${num(p, 'origAuthorId')}` : `n${name}`;
+        // XenForo usernames are unique ignoring case; the author id is missing on some crawled pages.
+        const key = `n${name.toLowerCase()}`;
         const a = archiveMembers.get(key) ?? { key, name, origAuthorId: num(p, 'origAuthorId'), posts: 0, threads: 0, firstAt: Infinity, lastAt: 0 };
         a.posts += 1;
         if (p === view.opening) a.threads += 1;

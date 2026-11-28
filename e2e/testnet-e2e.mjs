@@ -179,7 +179,7 @@ try {
     const opening = carol.page.locator('article').first()
     await opening.waitFor({ timeout: 60_000 })
     await opening.getByRole('button', { name: 'React' }).click()
-    await carol.page.getByRole('menuitemradio', { name: 'Like' }).click()
+    await carol.page.getByRole('group', { name: 'Choose a reaction' }).getByRole('button', { name: 'Like', exact: true }).click()
     await opening.getByRole('button', { name: /Like: 1/ }).waitFor({ timeout: WRITE_TIMEOUT })
     await opening.getByRole('button', { name: 'Quote' }).click()
     await carol.page.getByLabel('Write a reply').press('End')

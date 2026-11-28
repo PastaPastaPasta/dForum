@@ -35,7 +35,7 @@ export function HomeSidebar({ site, names, ctx }: { site: SiteFile; names: Recor
   const nameOf = useNames(names, latest.map((l) => l.authorId), live.profiles)
 
   return (
-    <aside className="space-y-5" aria-label="Forum activity">
+    <aside className="grid content-start gap-5 md:grid-cols-2 xl:grid-cols-1" aria-label="Forum activity">
       {ready && !session && LOGIN_AVAILABLE && (
         <section className="panel p-4">
           <h2 className="font-semibold">Join the discussion</h2>

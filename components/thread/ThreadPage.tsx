@@ -22,6 +22,7 @@ import { writeFailureMessage } from '@/lib/services/write-errors'
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs'
 import { Pagination } from '@/components/ui/Pagination'
 import { Time } from '@/components/ui/Time'
+import { KeyNotice } from '@/components/site/KeyNotice'
 import { Composer, type ComposerHandle } from './Composer'
 import { PostCard, type PostActions } from './PostCard'
 
@@ -53,7 +54,7 @@ const ID_PREFIX = 12
 export function ThreadPage(props: ThreadPageProps) {
   const { threadId, page, pages, snapshotAt, archive } = props
   const router = useRouter()
-  const { session, ready, signOut } = useSession()
+  const { session, ready, signOut, keyState } = useSession()
   const live = useLive(snapshotAt)
   const composer = useRef<ComposerHandle>(null)
   const [draft, setDraft] = useState('')
@@ -65,6 +66,7 @@ export function ThreadPage(props: ThreadPageProps) {
   const [threadReactions, setThreadReactions] = useState<RawDoc[] | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+  const [justWatched, setJustWatched] = useState(false)
   const canWrite = ready && !!session?.authKeyWif && LOGIN_AVAILABLE
 
   // Threads newer than the snapshot have no static data: read them live.
@@ -260,10 +262,15 @@ export function ThreadPage(props: ThreadPageProps) {
           </h1>
         )}
         </div>
-        <button type="button" onClick={watch.toggle} aria-pressed={watch.watching} className="btn btn-quiet shrink-0" data-pagefind-ignore>
+        <button type="button" onClick={() => { setJustWatched(!watch.watching); watch.toggle() }} aria-pressed={watch.watching} className="btn btn-quiet shrink-0" data-pagefind-ignore>
           {watch.watching ? <><EyeOff aria-hidden className="h-4 w-4" />Unwatch</> : <><Eye aria-hidden className="h-4 w-4" />Watch</>}
         </button>
         </div>
+        {justWatched && watch.watching && (
+          <p role="status" className="text-sm text-ink-2" data-pagefind-ignore>
+            Watching. New replies show on <Link className="link" href="/watched/">Watched threads</Link>. The list is kept in this browser.
+          </p>
+        )}
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-2" data-pagefind-ignore>
           <span>Started by {imported ? <span className="text-archive">{imported}</span> : <Link className="font-medium text-ink hover:text-dash" href={`/u/${thread.ownerId}/`}>{opener}</Link>}</span>
           <Time at={effectiveAt(thread, archive)} />
@@ -309,6 +316,8 @@ export function ThreadPage(props: ThreadPageProps) {
               setReplyTo(undefined)
               if (page !== pages) router.push(hrefFor(pages) + '#reply')
             })} />
+        ) : session && keyState !== 'ready' && acceptsReplies(thread, { archivedForums }) ? (
+          <KeyNotice />
         ) : ready && LOGIN_AVAILABLE ? (
           <div className="panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <p className="text-ink-2">Log in with your Dash wallet to reply.</p>

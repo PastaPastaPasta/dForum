@@ -24,13 +24,15 @@ export const Composer = forwardRef<ComposerHandle, {
   onChange(v: string): void
   onSubmit(): void
   busy: boolean
+  /** Submitting is off (e.g. the forum key isn't ready); typing still works. */
+  disabled?: boolean
   submitLabel: string
   placeholder?: string
   label: string
   autoFocus?: boolean
   onCancel?(): void
   error?: string | null
-}>(function Composer({ value, onChange, onSubmit, busy, submitLabel, placeholder, label, autoFocus, onCancel, error }, ref) {
+}>(function Composer({ value, onChange, onSubmit, busy, disabled, submitLabel, placeholder, label, autoFocus, onCancel, error }, ref) {
   const area = useRef<HTMLTextAreaElement>(null)
   const [preview, setPreview] = useState(false)
   const bytes = byteLength(value)
@@ -82,7 +84,7 @@ export const Composer = forwardRef<ComposerHandle, {
         <p className="text-xs text-ink-2">Markdown supported. Posts are public and stored on Dash Platform.</p>
         <span className={`ml-auto text-xs tabnum ${over ? 'font-semibold text-danger' : 'text-ink-2'}`}>{over ? `Too long by ${(bytes - BODY_MAX_BYTES).toLocaleString('en-US')} characters` : bytes > BODY_MAX_BYTES * 0.8 ? `${Math.round((bytes / BODY_MAX_BYTES) * 100)}% of the length limit` : ''}</span>
         {onCancel && <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={busy}>Cancel</button>}
-        <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={busy || over || !value.trim()}>
+        <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={busy || disabled || over || !value.trim()}>
           {busy ? (submitLabel.startsWith('Save') ? 'Saving…' : 'Posting…') : submitLabel}
         </button>
       </div>

@@ -12,6 +12,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { useUnreadAlerts } from '@/lib/live/alerts'
 import { useProfileNames } from '@/lib/use-profiles'
 import { memberLabel } from '@/lib/forum/model'
+import { useWatches } from '@/lib/watch'
 
 const NAV = [
   { href: '/', label: 'Forums', match: (p: string) => p === '/' || p.startsWith('/f/') || p.startsWith('/t/') },
@@ -37,6 +38,12 @@ export function Header({ siteName }: { siteName: string }) {
     return () => { live = false }
   }, [session?.identityId])
   useEffect(() => {
+    if (!mobile) return
+    const close = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobile(false) }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [mobile])
+  useEffect(() => {
     if (!menu) return
     const close = (e: MouseEvent | KeyboardEvent) => {
       if (e instanceof KeyboardEvent ? e.key === 'Escape' : !menuRef.current?.contains(e.target as Node)) setMenu(false)
@@ -48,6 +55,11 @@ export function Header({ siteName }: { siteName: string }) {
 
   const profileNames = useProfileNames(session ? [session.identityId] : [])
   const onSearch = pathname.startsWith('/search')
+  // Watching works without logging in, so the list gets a nav link once it has threads.
+  const watchCount = Object.keys(useWatches()).length
+  const nav = watchCount
+    ? [...NAV, { href: '/watched/', label: 'Watched', match: (p: string) => p.startsWith('/watched') }]
+    : NAV
   const name = session ? profileNames[session.identityId] || memberLabel(session.identityId) : ''
   return (
     <header className="sticky top-0 z-40 border-b border-rule bg-sheet/95 backdrop-blur supports-[backdrop-filter]:bg-sheet/85">
@@ -60,7 +72,7 @@ export function Header({ siteName }: { siteName: string }) {
           <span className="truncate text-[1.05rem]">{siteName}</span>
         </Link>
         <nav aria-label="Main" className="ml-4 hidden items-center gap-1 lg:flex">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <Link key={n.href} href={n.href} aria-current={n.match(pathname) ? 'page' : undefined}
               className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium ${n.match(pathname) ? 'bg-sunk text-ink' : 'text-ink-2 hover:text-ink'}`}>
               {n.label}
@@ -68,9 +80,9 @@ export function Header({ siteName }: { siteName: string }) {
           ))}
         </nav>
         {!onSearch && (
-          <form action="/search/" method="get" role="search" className="ml-auto hidden max-w-xs flex-1 items-center gap-2 rounded-md border border-field bg-paper px-2.5 focus-within:border-dash sm:flex">
+          <form action="/search/" method="get" role="search" className="ml-auto hidden max-w-xs flex-1 items-center gap-2 rounded-md border border-field bg-paper px-2.5 focus-within:border-dash focus-within:outline focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-dash sm:flex">
             <Search aria-hidden className="h-4 w-4 text-ink-2" />
-            <input name="q" type="search" placeholder="Search" aria-label="Search the forum" className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none" />
+            <input name="q" type="search" placeholder="Search" aria-label="Search the forum" className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none focus-visible:outline-none" />
           </form>
         )}
         <div className={`ml-auto flex items-center gap-1 ${onSearch ? '' : 'sm:ml-0'}`}>
@@ -111,8 +123,8 @@ export function Header({ siteName }: { siteName: string }) {
       </div>
       {mobile && (
         <nav aria-label="Main" className="border-t border-rule px-4 py-2 lg:hidden">
-          {NAV.map((n) => (
-            <Link key={n.href} href={n.href} aria-current={n.match(pathname) ? 'page' : undefined} className="block rounded-md px-2 py-2.5 text-sm font-medium hover:bg-sunk">{n.label}</Link>
+          {nav.map((n) => (
+            <Link key={n.href} href={n.href} aria-current={n.match(pathname) ? 'page' : undefined} className="block rounded-md px-2 py-2.5 text-sm font-medium hover:bg-sunk aria-[current=page]:bg-sunk aria-[current=page]:text-dash">{n.label}</Link>
           ))}
           {session && <Link href="/new/" className="block rounded-md px-2 py-2.5 text-sm font-medium text-dash hover:bg-sunk">New thread</Link>}
         </nav>

@@ -86,15 +86,26 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
       </aside>
       <div className="flex min-w-0 flex-col">
         <header data-pagefind-ignore className="flex items-center gap-2 px-4 pt-3 text-sm text-ink-2 md:px-5">
-          <Link prefetch={false} href={`/t/${threadId}/#post-${post.id}`} className="hover:text-dash"><Time at={at} /></Link>
-          {imported && (
-            <span className="rounded bg-archive-wash px-1.5 text-xs text-archive">Imported</span>
-          )}
+          <Time at={at} />
           {imported && sourceUrl && origPostId && (
-            <a className="text-xs underline decoration-rule underline-offset-2 hover:text-dash" href={`${sourceUrl.replace(/\/?$/, '/')}posts/${origPostId}/`} rel="nofollow noopener" aria-label={`Original post by ${imported}`}>Original</a>
+            <a className="tap text-xs underline decoration-rule underline-offset-2 hover:text-dash" href={`${sourceUrl.replace(/\/?$/, '/')}posts/${origPostId}/`} rel="nofollow noopener" aria-label={`Original post by ${imported}`}>Original</a>
           )}
           {isEdited(post) && !retracted && !imported && <span className="flex items-center gap-1" title={`Edited ${new Date(post.updatedAt).toUTCString()}`}><History aria-hidden className="h-3.5 w-3.5" />Edited</span>}
-          <a href={`#post-${post.id}`} className="ml-auto tabnum hover:text-dash" aria-label={`Permalink to post ${n}`}>#{n}</a>
+          {/* The post number is the permalink; clicking it also copies the link. */}
+          <a href={`/t/${threadId}/#post-${post.id}`} className="tap ml-auto inline-flex items-center gap-1 rounded px-1 tabnum hover:text-dash"
+            aria-label={copied ? `Link to post #${n} copied` : `Post #${n}: copy link`}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+              e.preventDefault()
+              history.replaceState(null, '', `#post-${post.id}`)
+              void navigator.clipboard?.writeText(`${location.origin}/t/${threadId}/#post-${post.id}`).then(() => {
+                setCopied(true)
+                setTimeout(() => setCopied(false), 2000)
+              })
+            }}>
+            {copied ? <><Check aria-hidden className="h-3.5 w-3.5 text-live" /><span aria-hidden>Copied</span></> : <><Link2 aria-hidden className="h-3.5 w-3.5" />#{n}</>}
+          </a>
+          <span className="sr-only" role="status">{copied ? 'Link copied' : ''}</span>
         </header>
 
         <div className="flex-1 px-4 py-3 md:px-5">
@@ -113,22 +124,12 @@ export function PostCard({ post, n, threadId, name, member, role, archive, sourc
             <div className="mt-4 border-t border-rule pt-2 text-sm text-ink-2"><Markdown source={member.signature} className="post-body !font-sans !text-sm" /></div>
           )}
         </div>
-        {!editing && (visible || actions.staff) && (
+        {/* No footer when there is nothing to do or show (logged-out readers of unreacted posts). */}
+        {!editing && ((visible && (actions.canWrite || Object.values(reactions).some((c) => c > 0))) || actions.staff) && (
           <footer data-pagefind-ignore className="flex flex-wrap items-center gap-1 border-t border-rule px-2 py-1.5 md:px-3">
             {visible && <Reactions counts={reactions} mine={mine} canReact={actions.canWrite && !own} busy={busy} onReact={(k) => actions.onReact(post, k)} />}
             <div className="ml-auto flex flex-wrap items-center">
               {visible && <>
-              <button type="button" className="btn-ghost text-sm" aria-label={copied ? 'Link copied' : `Copy link to post #${n}`}
-                onClick={() => {
-                  void navigator.clipboard?.writeText(`${location.origin}/t/${threadId}/#post-${post.id}`).then(() => {
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 2000)
-                  })
-                }}>
-                {copied ? <Check aria-hidden className="h-4 w-4 text-live" /> : <Link2 aria-hidden className="h-4 w-4" />}
-                <span className="hidden sm:inline" aria-hidden>{copied ? 'Copied' : 'Copy link'}</span>
-              </button>
-              <span className="sr-only" role="status">{copied ? 'Link copied' : ''}</span>
               {actions.canWrite && (
                 <button type="button" className="btn-ghost text-sm" onClick={() => actions.onQuote(post, displayName)}>
                   <MessageSquareQuote aria-hidden className="h-4 w-4" />Quote

@@ -14,7 +14,15 @@ const SMILIES: Record<string, string> = {
   ':o': '😮', ':O': '😮', ':mad:': '😠', ':confused:': '😕', ':cool:': '😎', ':rolleyes:': '🙄', ':eek:': '😳',
   ':LOL:': '😂', ':lol:': '😂', ':oops:': '😳', ':cry:': '😢', ':evil:': '😈', ':twisted:': '😈', ':whistle:': '😗', ':geek:': '🤓',
   ':sick:': '🤢', ':alien:': '👽', ':unsure:': '😕', ':sleep:': '😴', ':love:': '😍', ':giggle:': '🤭', ':coffee:': '☕', ':rolleyes': '🙄',
+  ':-P': '😛', ':-p': '😛', '(y)': '👍', '(n)': '👎', 'o_O': '😳', 'O_o': '😳', ':sneaky:': '😏', ':ROFLMAO:': '🤣', ':devilish:': '😈',
+  ':censored:': '🤬', ':cautious:': '🤨', ':sick': '🤢',
 }
+
+/** Codes from the forum's older software that survive as plain text in old posts. */
+const LEGACY_CODES: Record<string, string> = {
+  grin: '😁', tongue: '😛', smile: '🙂', wink: '😉', cry: '😢', mad: '😠', cool: '😎', eek: '😳', rolleyes: '🙄', confused: '😕', oops: '😳',
+}
+const LEGACY_RE = new RegExp(`(^|[\\s(])\\\\?:(${Object.keys(LEGACY_CODES).join('|')}):(?=$|[\\s.,!?)])`, 'gm')
 
 const BLOCK_TAGS = new Set(['div', 'p', 'section', 'article', 'center', 'figure', 'aside', 'header', 'footer'])
 
@@ -204,6 +212,7 @@ function renderNode(node: Node, o: MarkdownOptions, atLineStart: boolean): strin
 export function xfHtmlToMarkdown(html: string, opts: MarkdownOptions): string {
   const root = parse(html, { comment: false, blockTextElements: { script: false, style: false, noscript: false } })
   return renderChildren(root, opts)
+    .replace(LEGACY_RE, (_, pre: string, code: string) => `${pre}${LEGACY_CODES[code]}`)
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
