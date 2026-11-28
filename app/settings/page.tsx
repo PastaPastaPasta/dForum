@@ -9,7 +9,7 @@ import { Avatar } from '@/components/Avatar'
 import { useSession } from '@/lib/session'
 import { query, createDocument, replaceDocument } from '@/lib/services/document-service'
 import { LIMITS } from '@/lib/constants'
-import { redactWif } from '@/lib/redact'
+import { writeFailureMessage } from '@/lib/services/write-errors'
 import { shortId, safeHttpUrl, codePointSlice, codePointLength } from '@/lib/utils'
 import { LOGIN_AVAILABLE } from '@/lib/host'
 
@@ -32,7 +32,7 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [fieldError, setFieldError] = useState<{ displayName?: string; website?: string } | null>(null)
+  const [fieldError, setFieldError] = useState<{ displayName?: string; bio?: string; website?: string; signature?: string } | null>(null)
   const [saved, setSaved] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
 
@@ -129,12 +129,17 @@ export default function SettingsPage() {
     }
     if (!loaded || loadError) return
 
-    const displayName = codePointSlice(draft.displayName.trim(), LIMITS.displayName)
+    const displayName = draft.displayName.trim()
     const website = draft.website.trim()
-    const errs: { displayName?: string; website?: string } = {}
+    const errs: { displayName?: string; bio?: string; signature?: string; website?: string } = {}
     if (!displayName) errs.displayName = 'Display name is required.'
+    else if (codePointLength(displayName) > LIMITS.displayName) errs.displayName = `Display name is too long — the platform limit is ${LIMITS.displayName} characters.`
+    if (codePointLength(draft.bio.trim()) > LIMITS.bio) errs.bio = `Bio is too long — the platform limit is ${LIMITS.bio} characters.`
+    if (codePointLength(draft.signature.trim()) > LIMITS.signature) errs.signature = `Signature is too long — the platform limit is ${LIMITS.signature} characters.`
     if (website && !safeHttpUrl(website)) errs.website = 'Website must be a full http(s) URL, e.g. https://example.com'
     if (Object.keys(errs).length) { setFieldError(errs); return }
+
+    const clampedDisplayName = displayName
     setFieldError(null)
 
     setSaving(true)
@@ -142,10 +147,10 @@ export default function SettingsPage() {
     setSaved(false)
     try {
       const properties = {
-        displayName,
-        bio: codePointSlice(draft.bio.trim(), LIMITS.bio),
+        displayName: clampedDisplayName,
+        bio: draft.bio.trim(),
         website: safeHttpUrl(website) ?? '',
-        signature: codePointSlice(draft.signature.trim(), LIMITS.signature),
+        signature: draft.signature.trim(),
       }
       if (profileId) {
         // Moderator-owned fields (customTitle, modState) are never sent by the
@@ -176,7 +181,9 @@ export default function SettingsPage() {
       }
       setSaved(true)
     } catch (e) {
-      setError(redactWif(e instanceof Error ? e.message : 'Failed to save — try again in a moment'))
+      const failure = writeFailureMessage(e)
+      if (failure.sessionLogout) await signOut()
+      setError(failure.message)
     } finally {
       setSaving(false)
     }
@@ -227,7 +234,6 @@ export default function SettingsPage() {
                   id="displayName"
                   value={draft.displayName}
                   onChange={(e) => { setDraft((d) => ({ ...d, displayName: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.displayName}
                   aria-invalid={Boolean(fieldError?.displayName)}
                   aria-describedby={fieldError?.displayName ? 'displayName-error' : undefined}
                   className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
@@ -245,12 +251,17 @@ export default function SettingsPage() {
                   id="bio"
                   value={draft.bio}
                   onChange={(e) => { setDraft((d) => ({ ...d, bio: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.bio}
                   rows={4}
+                  aria-invalid={Boolean(fieldError?.bio)}
+                  aria-describedby={fieldError?.bio ? 'bio-error' : undefined}
                   className="mt-1.5 rounded-lg border border-input bg-[#111a2e] p-3 text-base sm:text-sm focus:border-[#008CE7] w-full resize-y"
                   placeholder="A short bio — what you post about."
                 />
-                <CharCount count={codePointLength(draft.bio)} max={LIMITS.bio} />
+                {fieldError?.bio ? (
+                  <p id="bio-error" className="mt-1 text-xs text-red-400">{fieldError.bio}</p>
+                ) : (
+                  <CharCount count={codePointLength(draft.bio)} max={LIMITS.bio} />
+                )}
               </div>
               <div>
                 <label htmlFor="website" className="text-sm font-medium text-[#93a1bd]">Website <span className="text-[#93a1bd] font-normal">(optional)</span></label>
@@ -260,7 +271,6 @@ export default function SettingsPage() {
                   inputMode="url"
                   value={draft.website}
                   onChange={(e) => { setDraft((d) => ({ ...d, website: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.website}
                   aria-invalid={Boolean(fieldError?.website)}
                   aria-describedby={fieldError?.website ? 'website-error' : 'website-hint'}
                   className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
@@ -278,11 +288,16 @@ export default function SettingsPage() {
                   id="signature"
                   value={draft.signature}
                   onChange={(e) => { setDraft((d) => ({ ...d, signature: e.target.value })); setSaved(false) }}
-                  maxLength={LIMITS.signature}
+                  aria-invalid={Boolean(fieldError?.signature)}
+                  aria-describedby={fieldError?.signature ? 'signature-error' : undefined}
                   className="mt-1.5 rounded-lg border border-input bg-[#111a2e] px-3 py-2.5 text-base sm:text-sm focus:border-[#008CE7] w-full"
                   placeholder="Shown on your profile"
                 />
-                <CharCount count={codePointLength(draft.signature)} max={LIMITS.signature} />
+                {fieldError?.signature ? (
+                  <p id="signature-error" className="mt-1 text-xs text-red-400">{fieldError.signature}</p>
+                ) : (
+                  <CharCount count={codePointLength(draft.signature)} max={LIMITS.signature} />
+                )}
               </div>
 
               {error && (
@@ -310,7 +325,7 @@ export default function SettingsPage() {
 
           <div className="mt-10 border-t border-[#22304e] pt-6">
             <h2 className="text-sm font-medium text-[#93a1bd] uppercase tracking-wider">Session</h2>
-            <p className="mt-2 text-sm text-[#93a1bd]">Your session is held in this tab&apos;s session storage until you log out or the browser session ends — signing out clears your keys from this browser.</p>
+            <p className="mt-2 text-sm text-[#93a1bd]">Your session is held in this tab&apos;s session storage until you log out or the browser session ends. Signing out forgets the copy here — it does NOT revoke the key; to revoke it, disconnect dForum in your wallet.</p>
             <button
               onClick={handleSignOut}
               disabled={signingOut}

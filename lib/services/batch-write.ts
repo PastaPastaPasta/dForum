@@ -21,6 +21,7 @@ import {
   type StateTransition,
 } from '@dashevo/wasm-sdk'
 import { getSdk } from '@/lib/services/evo-sdk-service'
+import { CONTRACT_ID } from '@/lib/constants'
 
 export type BatchWriteKind = 'create' | 'replace'
 
@@ -42,6 +43,17 @@ export interface BatchWriteArgs {
  * already on the document.
  */
 export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
+  // Defence in depth on the signing path — the chain's key bounds already
+  // enforce both, but a caller bug should refuse before signing, not after.
+  if (!args.ownerId) throw new Error('Batched write requires an owner id')
+  const documentContractId = args.document.dataContractId?.toBase58?.() ?? null
+  if (documentContractId && documentContractId !== CONTRACT_ID) {
+    throw new Error(`Refusing to sign a write for contract ${documentContractId} — dForum contract is ${CONTRACT_ID}`)
+  }
+  const documentOwnerId = args.document.ownerId?.toBase58?.() ?? null
+  if (documentOwnerId && documentOwnerId !== args.ownerId) {
+    throw new Error('Batched write owner does not match the document owner')
+  }
   const transition =
     args.kind === 'create'
       ? new DocumentCreateTransition({ document: args.document, identityContractNonce: args.nonce }).toDocumentTransition()
@@ -58,8 +70,11 @@ export async function batchedWrite(args: BatchWriteArgs): Promise<string> {
   }
 
   const sdk = await getSdk()
-  await sdk.stateTransitions.broadcastAndWait(stateTransition)
-  stateTransition.free()
+  try {
+    await sdk.stateTransitions.broadcastAndWait(stateTransition)
+  } finally {
+    stateTransition.free()
+  }
 
   // After construction the create transition writes the derived id back onto
   // the document; the replace keeps its existing id. Either way it is the id

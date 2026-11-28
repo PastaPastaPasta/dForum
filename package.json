@@ -15,7 +15,7 @@
     "postbuild": "node scripts/csp.mjs"
   },
   "dependencies": {
-    "@dashevo/evo-sdk": "^5.1.0-rc.1",
+    "@dashevo/evo-sdk": "5.1.0-rc.1",
     "@dashevo/wasm-sdk": "5.1.0-rc.1",
     "@noble/secp256k1": "^3.2.0",
     "bs58": "^6.0.0",

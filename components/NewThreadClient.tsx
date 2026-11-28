@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Send, Loader2, AlertCircle } from 'lucide-react'
@@ -13,6 +13,7 @@ import type { Snapshot } from '@/lib/services/snapshot-server'
 import { LIMITS } from '@/lib/constants'
 import { codePointSlice, codePointLength } from '@/lib/utils'
 import { redactWif } from '@/lib/redact'
+import { writeFailureMessage } from '@/lib/services/write-errors'
 import { LOGIN_AVAILABLE } from '@/lib/host'
 
 interface ForumOption {
@@ -42,7 +43,7 @@ function parseTags(raw: string): { valid: string[]; rejected: string[] } {
 
 export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
   const router = useRouter()
-  const { session, ready } = useSession()
+  const { session, ready, signOut } = useSession()
   const snap = snapshot
   // Read in an effect — during prerender there is no window.
   const [forumParam, setForumParam] = useState<string | null>(null)
@@ -67,6 +68,13 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
   const [createdThreadId, setCreatedThreadId] = useState('')
   const [createdForumId, setCreatedForumId] = useState('')
   const threadCreated = Boolean(createdThreadId)
+  // Set once a write attempt has failed — its write may have landed, so the
+  // next attempt re-checks the chain before writing again, and refuses when
+  // the check can't run (fail closed, like the thread-reply guard).
+  const [lastWriteFailed, setLastWriteFailed] = useState(false)
+  // Timestamp of the FIRST write attempt — the guard's lookback window is
+  // anchored to it, not to "now", so a slow retry still matches its own write.
+  const attemptStartRef = useRef(0)
 
   // Live forum list — page through the whole index so a >50-forum contract
   // never silently loses forums to the picker.
@@ -176,9 +184,11 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
     else if (tagList.valid.length === 0 && tags.trim()) errs.tags = 'No usable tags — fix the tags or leave the field empty.'
     const titleTrim = title.trim()
     if (codePointLength(titleTrim) < 3) errs.title = 'A title is required (at least 3 characters)'
+    else if (codePointLength(titleTrim) > LIMITS.title) errs.title = `Title is too long — the platform limit is ${LIMITS.title} characters.`
     const bodyTrim = body.trim()
     if (!bodyTrim) errs.body = 'An opening post is required — a thread with no posts is never listed.'
-    else if (new TextEncoder().encode(bodyTrim).length > LIMITS.bodyMaxBytes) errs.body = `Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes (${LIMITS.body} chars max).`
+    else if (codePointLength(bodyTrim) > LIMITS.body) errs.body = `Opening post is too long — the platform limit is ${LIMITS.body} characters.`
+    else if (new TextEncoder().encode(bodyTrim).length > LIMITS.bodyMaxBytes) errs.body = `Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes.`
     if (Object.keys(errs).length) {
       setFieldError(errs)
       const first = ['forum', 'title', 'tags', 'body'].find((k) => errs[k as keyof typeof errs])
@@ -195,14 +205,19 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
     setError(null)
     try {
       const tagList = parseTags(tags).valid
+      if (attemptStartRef.current === 0) attemptStartRef.current = Date.now()
+      // Anchored to the first attempt, not "now" — a slow retry would
+      // otherwise miss its own write. A first attempt has no prior write, so
+      // its guard is best-effort; once a previous attempt has failed the
+      // guard runs after the failure and must not proceed blind.
+      const windowStart = attemptStartRef.current - 5 * 60_000
 
       // A create can fail or time out even though it landed on the chain —
       // before creating, re-query for a thread by this owner with a similar
-      // title from the last ~2 minutes and adopt it instead of creating a
-      // duplicate. Fails open: on any query error, proceed as before.
+      // title and adopt it instead of creating a duplicate.
       try {
         const recent = await query('thread', {
-          where: [['$ownerId', '==', session.identityId], ['$createdAt', '>=', Date.now() - 120_000]],
+          where: [['$ownerId', '==', session.identityId], ['$createdAt', '>=', windowStart]],
           orderBy: [['$createdAt', 'desc']],
           limit: 3,
         })
@@ -236,7 +251,14 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
           return
         }
       } catch {
-        // Fail open — the re-query is best-effort; proceed with creation.
+        if (lastWriteFailed) {
+          // A prior attempt failed — its write may have landed. A failed
+          // re-query means an unknown state, so refuse to blind-write.
+          setSubmitting(false)
+          setError('Could not verify your thread — check your Open threads before retrying. Your thread may already be created.')
+          return
+        }
+        // Fresh attempt: the re-query is best-effort — proceed with creation.
       }
 
       const thread = await createDocument('thread', session.identityId, session.authKeyWif, {
@@ -244,6 +266,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
         title: codePointSlice(titleTrim, LIMITS.title),
         tags: tagList,
       })
+      setLastWriteFailed(false)
       setCreatedThreadId(thread.id)
       setCreatedForumId(selected.id)
 
@@ -269,7 +292,10 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
         return
       }
     } catch (e) {
-      setError(redactWif(e instanceof Error ? e.message : 'Failed to create thread — try again in a moment'))
+      setLastWriteFailed(true)
+      const failure = writeFailureMessage(e)
+      if (failure.sessionLogout) await signOut()
+      setError(failure.message)
       setSubmitting(false)
     }
   }
@@ -280,6 +306,10 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
     const bodyTrim = body.trim()
     if (!bodyTrim) {
       setError('Write the opening post first, then tap "Finish opening post".')
+      return
+    }
+    if (codePointLength(bodyTrim) > LIMITS.body) {
+      setError(`Opening post is too long — the platform limit is ${LIMITS.body} characters.`)
       return
     }
     if (new TextEncoder().encode(bodyTrim).length > LIMITS.bodyMaxBytes) {
@@ -321,7 +351,9 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
       setBody('')
       router.push(`/t/${encodeURIComponent(threadId)}`)
     } catch (e) {
-      setError(redactWif(e instanceof Error ? e.message : 'Opening post failed — try again in a moment'))
+      const failure = writeFailureMessage(e)
+      if (failure.sessionLogout) await signOut()
+      setError(failure.message)
       setSubmitting(false)
     }
   }
@@ -363,7 +395,6 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
               <label htmlFor="title" className="text-sm font-medium text-[#93a1bd]">Title</label>
               <input
                 id="title"
-                maxLength={LIMITS.title}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 disabled={threadCreated}
@@ -403,7 +434,6 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
               <textarea
                 id="body"
                 rows={6}
-                maxLength={LIMITS.body}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="What would you like to discuss?"
@@ -414,7 +444,7 @@ export default function NewThreadClient({ snapshot }: { snapshot: Snapshot }) {
               {fieldError?.body ? (
                 <p id="body-error" className="mt-1 text-xs text-red-400">{fieldError.body}</p>
               ) : (
-                <p className="mt-1 text-xs text-[#93a1bd] text-right">{body.length}/{LIMITS.body} chars · {new TextEncoder().encode(body).length}/{LIMITS.bodyMaxBytes} bytes</p>
+                <p className="mt-1 text-xs text-[#93a1bd] text-right">{codePointLength(body)}/{LIMITS.body} chars{new TextEncoder().encode(body).length >= LIMITS.bodyMaxBytes * 0.8 ? ` · ${new TextEncoder().encode(body).length}/${LIMITS.bodyMaxBytes} bytes` : ''}</p>
               )}
             </div>
 

@@ -33,6 +33,18 @@ import bs58 from 'bs58';
 import { redactWif } from './lib/redact.mjs';
 import { beforePost, openingPostFromPosts } from '../lib/services/orphan-rules.ts';
 
+/** The opening-post scan hit the page budget — distinct from "no opening
+ * post" (a legitimate null). The static index treats it as "unknown → not
+ * listed" for that one thread (a throw would fail the whole hourly build
+ * over a single orphan), keeping the build honest only about real read
+ * errors. */
+class OrphanScanExhaustedError extends Error {
+  constructor() {
+    super('orphan scan exhausted its page budget');
+    this.name = 'OrphanScanExhaustedError';
+  }
+}
+
 const CONTRACT_ID = process.env.NEXT_PUBLIC_DFORUM_CONTRACT_ID || readContractId();
 const NETWORK = process.env.NEXT_PUBLIC_NETWORK || 'testnet';
 const OUT = 'data/snapshot.json';
@@ -92,8 +104,18 @@ async function fetchListableThreads(sdk) {
       if (listed.length >= LISTED_TARGET) break;
       const batch = candidates.slice(i, i + FETCH_CONCURRENCY);
       const checked = await Promise.all(batch.map(async (doc) => {
-        const opening = await openingPost(sdk, doc);
-        return opening ? { thread: doc, opening } : null;
+        try {
+          const opening = await openingPost(sdk, doc);
+          return opening ? { thread: doc, opening } : null;
+        } catch (err) {
+          if (err instanceof OrphanScanExhaustedError) {
+            // Unknown — this thread is NOT shipped (the static index is the
+            // guarded path), but a single orphan must not fail the build.
+            console.log(`snapshot: thread ${doc.id} skipped — orphan scan budget exhausted (unknown)`);
+            return null;
+          }
+          throw err;
+        }
       }));
       for (const item of checked) {
         if (item && listed.length < LISTED_TARGET) listed.push(item);
@@ -157,10 +179,9 @@ async function openingPost(sdk, thread) {
     if (posts.length < 25) return null; // short page — no opening post
     after = posts[posts.length - 1].id;
   }
-  // Same honest failure as lib/services/orphan.ts's OrphanScanExhaustedError
-  // ("orphan scan exhausted its page budget") — the loop completed without a
-  // break/return, so the opening post may exist past the page budget.
-  throw new Error('orphan scan exhausted its page budget');
+  // The loop completed without a break/return — the opening post may exist
+  // past the page budget. Same signal the live path throws.
+  throw new OrphanScanExhaustedError();
 }
 
 async function main() {
@@ -225,8 +246,10 @@ async function main() {
         if (doc.properties?.modState != null) return [id, 'Hidden profile'];
         const name = doc.properties?.displayName;
         return [id, typeof name === 'string' && name.trim() ? name.trim() : null];
-      } catch {
-        return [id, null];
+      } catch (err) {
+        // A profile read failure is a fetch failure — shipping a snapshot
+        // with missing names would be a false "all good".
+        throw err;
       }
     }));
     for (const [id, name] of resolved) {

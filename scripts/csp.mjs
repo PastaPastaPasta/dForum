@@ -62,9 +62,20 @@ for (const file of files) {
     html = html.replace(HEAD_OPEN_RE, (m) => `${m}\n${meta}`)
   } else {
     // No insertion point — leaving it unchanged would ship an unprotected page.
-    console.warn(`WARN: no <head> in ${file} — leaving it unchanged`)
+    console.error(`FAIL: no <head> in ${file}`)
+    process.exitCode = 1
     continue
   }
   writeFileSync(file, html)
+}
+// Final gate: every emitted page must carry the policy — a page that lost its
+// meta would be an unprotected leak of whatever inline scripts it holds.
+for (const file of files) {
+  if (process.exitCode) break
+  const html = readFileSync(file, 'utf8')
+  if (!META_RE.test(html)) {
+    console.error(`FAIL: no CSP meta in ${file}`)
+    process.exitCode = 1
+  }
 }
 console.log(`csp: ${files.length} pages processed, ${inlineScripts} inline script payloads hashed`)

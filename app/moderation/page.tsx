@@ -823,11 +823,20 @@ export default function ModerationPage() {
                 <h2 className="font-semibold flex items-center gap-2"><Shield className="w-4 h-4 text-[#4db3ff]" /> Team roster</h2>
                 {roster ? (
                   <div className="mt-3 space-y-2">
-                    <RosterRow label="Owner (always moderates)" id={roster.ownerId} highlight={isOwner} />
-                    {roster.appointed.map((id) => (
+                    {/* Owner: always the moderator on the chain, but refused
+                        on this host — the owner key is kept offline for contract
+                        updates. Shown as informational, never as an option. */}
+                    <RosterRow label={localhost ? 'Owner (always moderates)' : 'Owner — offline only'} id={roster.ownerId} highlight={isOwner} />
+                    {/* An owner id in the appointed list is the same identity —
+                        do not list it twice. */}
+                    {roster.appointed.filter((id) => id !== roster.ownerId).map((id) => (
                       <RosterRow key={id} label="Appointed moderator" id={id} highlight={id === identityTrim} />
                     ))}
-                    {roster.appointed.length === 0 && <p className="text-xs text-[#93a1bd]">No appointed moderators — owner only.</p>}
+                    {roster.appointed.filter((id) => id !== roster.ownerId).length === 0 && (
+                      <p className="text-xs text-amber-400">
+                        No appointed moderator can act from this host yet — the contract only has its owner (offline). An appointed moderator must be added by the owner to act here.
+                      </p>
+                    )}
                     <p className="text-[12px] text-[#93a1bd] pt-1">Appointed moderators are set by the owner in the contract&apos;s moderation config (owner-managed; the change applies to new moderation actions).</p>
                   </div>
                 ) : rosterError ? (
@@ -969,7 +978,7 @@ export default function ModerationPage() {
                 <input
                   value={lookupId}
                   onChange={(e) => setLookupId(e.target.value)}
-                  placeholder="Look up a thread or post ID (e.g. an older report)…"
+                  placeholder="Look up a thread or post ID…"
                   aria-label="Look up a thread or post ID"
                   className="min-w-0 flex-1 rounded-lg border border-input bg-[#0b1220] px-3 py-2 text-base sm:text-sm font-mono focus:border-[#008CE7]"
                   onKeyDown={(e) => e.key === 'Enter' && lookupDocument()}

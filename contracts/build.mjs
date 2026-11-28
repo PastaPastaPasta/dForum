@@ -5,6 +5,10 @@
  * Usage:
  *   node contracts/build.mjs --moderation none|team|network [--deployer <identityId>] [--out <dir>]
  *
+ * The schema is written in THIS FILE (and nowhere else) — there is no separate
+ * schema file to keep in sync; CI checks that the committed generated files
+ * match regeneration.
+ *
  * The generated file is committed; CI checks that regeneration is clean.
  *
  * Modes:

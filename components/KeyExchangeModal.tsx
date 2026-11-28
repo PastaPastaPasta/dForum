@@ -16,7 +16,8 @@ import { QRCodeSVG } from 'qrcode.react'
 import { Check, Copy, Loader2, KeyRound, ShieldCheck, X, AlertTriangle, ExternalLink, UserRound } from 'lucide-react'
 import { useSession } from '@/lib/session'
 import { useAppConnectLogin } from '@/lib/app-connect/use-login'
-import { formatTime } from '@/lib/utils'
+import { useProfileNames } from '@/lib/use-profiles'
+import { formatTime, shortId } from '@/lib/utils'
 import { redactWif } from '@/lib/redact'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input, select, textarea, [role="button"]'
@@ -98,6 +99,8 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
   const primaryCarrierUri = login.uris?.[0] ?? null
   const fallbackCarrier = login.uris?.[1] ?? null
   const remaining = login.remainingSeconds != null ? formatTime(login.remainingSeconds) : null
+  const candidateIds = login.candidates.map((c) => c.identityId)
+  const candidateNames = useProfileNames(candidateIds)
 
   const showError = login.phase === 'error' || login.phase === 'timeout' || login.phase === 'too-many'
   const errorText =
@@ -153,22 +156,24 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
 
           {login.phase === 'waiting' && primaryCarrierUri && (
             <>
+              {/* Tapping the primary action opens the wallet directly — the
+                  QR below is the desktop-scan path. */}
+              <a
+                href={primaryCarrierUri.uri}
+                className="btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium"
+                aria-label="Open login URI in wallet"
+              >
+                <ExternalLink className="w-4 h-4" aria-hidden="true" /> Open in wallet
+              </a>
               <div className="p-3 bg-white rounded-xl border-2 border-[#008CE7]">
-                <QRCodeSVG value={primaryCarrierUri.uri} size={208} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Login URI QR code" />
+                <QRCodeSVG value={primaryCarrierUri.uri} size={240} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" role="img" aria-label="Login URI QR code" />
               </div>
               <div className="text-center">
-                <p className="text-sm font-medium">Scan with your Dash wallet</p>
+                <p className="text-sm font-medium">Or scan with your Dash wallet</p>
                 <p className="text-xs text-[#93a1bd] mt-1">
                   {remaining != null ? `Expires in ${remaining}` : 'Waiting for wallet…'}
                 </p>
               </div>
-              <a
-                href={primaryCarrierUri.uri}
-                className="inline-flex items-center gap-2 rounded-lg border border-[#22304e] px-3 py-2 text-xs text-[#4db3ff] hover:border-[#008CE7] hover:text-white transition"
-                aria-label="Open login URI in wallet"
-              >
-                <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> Open in wallet
-              </a>
               {fallbackCarrier && (
                 <a
                   href={fallbackCarrier.uri}
@@ -200,7 +205,7 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                 </div>
               )}
               <p className="text-xs text-[#93a1bd] text-center">
-                Scan the QR with your wallet, or paste the URI into it.
+                Open the URI in your wallet, or scan the QR with it.
               </p>
             </>
           )}
@@ -219,8 +224,9 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
                         className="w-full flex items-center gap-3 rounded-xl border border-[#22304e] bg-[#18233c] px-4 py-3 text-left hover:border-[#008CE7] hover:bg-[#1d2a45] transition disabled:opacity-50"
                       >
                         <UserRound className="w-5 h-5 text-[#4db3ff] shrink-0" aria-hidden="true" />
-                        <span className="min-w-0">
-                          <span className="block text-xs font-mono text-white truncate">{candidate.identityId}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm text-white truncate">{candidateNames[candidate.identityId] ?? shortId(candidate.identityId, 12)}</span>
+                          <span className="block text-xs font-mono text-[#93a1bd] truncate" title={candidate.identityId}>{shortId(candidate.identityId, 12)}</span>
                         </span>
                       </button>
                     </li>
@@ -271,8 +277,8 @@ export function KeyExchangeModal({ onClose }: { onClose?: () => void }) {
         </div>
 
         <p className="mt-6 text-center text-xs text-[#93a1bd] flex items-center justify-center gap-1.5">
-          <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
-          Your wallet registers a HIGH-level, contract-bound key for this tab only — it can sign documents on dForum&apos;s contract, and nothing else. It cannot withdraw or transfer credits, and its use is limited to this host.
+          <KeyRound className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          Your wallet adds a key to your identity that can only write to dForum&apos;s contract, can spend at most ~0.5 DASH in fees, and expires in 90 days. dForum keeps its copy in this tab only. Signing out forgets it here — to revoke it, disconnect dForum in your wallet.
         </p>
       </div>
     </div>

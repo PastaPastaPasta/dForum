@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Lock } from 'lucide-react'
 import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
-import { isModerated } from '@/lib/utils'
+import { isModerated, shortId } from '@/lib/utils'
 
 export interface ThreadRowData {
   id: string
@@ -22,6 +22,8 @@ export function ThreadRow({ thread, nameOf, forumTitle }: { thread: ThreadRowDat
   const forumName = forumTitle ?? thread.forumSlug
   const metaParts: (string | JSX.Element)[] = []
   if (authorName) metaParts.push(authorName)
+  // Display names are not unique — pin the identity next to the name.
+  if (thread.ownerId) metaParts.push(<span key="shortid" className="font-mono text-[10px] tracking-tight">{shortId(thread.ownerId, 6)}</span>)
   if (forumName) metaParts.push(forumName)
   metaParts.push(<RelativeTime key="time" time={thread.createdAt} />)
   // Tags are appended after the meta — never before the separator.

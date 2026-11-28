@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { MessageSquare, Send, Lock, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
@@ -9,14 +9,14 @@ import { Avatar } from '@/components/Avatar'
 import { RelativeTime } from '@/components/RelativeTime'
 import { get, query, queryRaw, createDocument } from '@/lib/services/document-service'
 import { LOGIN_AVAILABLE } from '@/lib/host'
-import { shortId, isModerated } from '@/lib/utils'
+import { shortId, isModerated, codePointLength } from '@/lib/utils'
 import { useProfileNames } from '@/lib/use-profiles'
 import { useSession } from '@/lib/session'
 import { useLive } from '@/components/LiveFeed'
 import type { SnapshotThread, StaticPost } from '@/lib/services/snapshot-server'
 import { LIMITS } from '@/lib/constants'
 import { beforePost, earliestOwnerPost, type OpeningPost } from '@/lib/services/orphan'
-import { redactWif } from '@/lib/redact'
+import { writeFailureMessage } from '@/lib/services/write-errors'
 import { LiveUnavailable } from '@/components/LiveUnavailable'
 
 interface LiveThread {
@@ -59,7 +59,7 @@ export default function ThreadClient({
   snapshotForumTitle?: string | null
   initialPosts: StaticPost[]
 }) {
-  const { session, ready } = useSession()
+  const { session, ready, signOut } = useSession()
   const [replyBody, setReplyBody] = useState('')
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
@@ -72,6 +72,9 @@ export default function ThreadClient({
   // Set when a previous write attempt failed — its write may have landed,
   // so the next attempt re-checks the chain before writing again.
   const [lastWriteFailed, setLastWriteFailed] = useState(false)
+  // Timestamp of the FIRST write attempt — the guard's lookback window is
+  // anchored to it, not to "now", so a slow retry still matches its own write.
+  const attemptStartRef = useRef(0)
 
   const { live, loading: liveLoading, error: liveError, retry } = useLive<LoadResult>(() => loadThread(threadId), threadId)
 
@@ -181,6 +184,10 @@ export default function ThreadClient({
       setPostError('Your session has no signable key. Try logging in again.')
       return
     }
+    if (codePointLength(body) > LIMITS.body) {
+      setPostError(`Reply is too long — the platform limit is ${LIMITS.body} characters.`)
+      return
+    }
     if (new TextEncoder().encode(body).length > LIMITS.bodyMaxBytes) {
       setPostError(`Body is too large — the platform limit is ${LIMITS.bodyMaxBytes} bytes.`)
       return
@@ -188,19 +195,22 @@ export default function ThreadClient({
     setPosting(true)
     setPostError(null)
     setPosted(null)
+    if (attemptStartRef.current === 0) attemptStartRef.current = Date.now()
+    const windowStart = attemptStartRef.current - 5 * 60_000
     try {
       // A write can fail or time out even though it landed on the chain —
       // only once a previous attempt failed (not on the first try: a genuine
       // repeat like "+1" must not be mistaken for a landed duplicate),
       // re-query for this owner's exact recent threadId-matching body and
       // adopt it. Queried via the byAuthor index ($ownerId + $createdAt) so
-      // the chain can serve it; threadId is filtered in the client. Fails
-      // open: on any query error, proceed with creation.
+      // the chain can serve it; threadId is filtered in the client. On a
+      // failed re-query or a throw, the write is REFUSED — proceeding blind
+      // would double-post.
       if (lastWriteFailed) {
         let recent: Awaited<ReturnType<typeof query>>
         try {
           recent = await query('post', {
-            where: [['$ownerId', '==', session.identityId], ['$createdAt', '>=', Date.now() - 120_000]],
+            where: [['$ownerId', '==', session.identityId], ['$createdAt', '>=', windowStart]],
             orderBy: [['$createdAt', 'desc']],
             limit: 5,
           })
@@ -252,7 +262,9 @@ export default function ThreadClient({
       ])
     } catch (e) {
       setLastWriteFailed(true)
-      setPostError(redactWif(e instanceof Error ? e.message : 'Failed to post — try again in a moment'))
+      const failure = writeFailureMessage(e)
+      if (failure.sessionLogout) await signOut()
+      setPostError(failure.message)
       setPosted(null)
     } finally {
       setPosting(false)
@@ -417,7 +429,6 @@ export default function ThreadClient({
                       value={replyBody}
                       onChange={(e) => setReplyBody(e.target.value)}
                       rows={4}
-                      maxLength={LIMITS.body}
                       placeholder="Write your reply…"
                       className="mt-2 w-full rounded-lg border border-input bg-[#0b1220] p-3 text-base sm:text-sm placeholder:text-[#93a1bd] resize-y"
                     />
@@ -429,7 +440,7 @@ export default function ThreadClient({
                       ) : (
                         <span className="min-h-[1rem]" />
                       )}
-                      <span>{replyBody.length}/{LIMITS.body} chars · {new TextEncoder().encode(replyBody).length}/{LIMITS.bodyMaxBytes} bytes</span>
+                      <span>{codePointLength(replyBody)}/{LIMITS.body} chars{new TextEncoder().encode(replyBody).length >= LIMITS.bodyMaxBytes * 0.8 ? ` · ${new TextEncoder().encode(replyBody).length}/${LIMITS.bodyMaxBytes} bytes` : ''}</span>
                     </div>
                     <div className="mt-2 flex justify-end">
                       <button
@@ -502,6 +513,7 @@ function PostCard({ post, mine, nameOf }: { post: LivePost; mine?: string | null
         <div className="flex-1 min-w-0">
           <p className="font-medium truncate">
             <Link href={`/u/${encodeURIComponent(post.authorId)}`} className="hover:text-[#4db3ff] hover:underline transition">{authorName}</Link>
+            <span className="ml-2 text-xs font-mono text-[#93a1bd]" title={post.authorId}>{shortId(post.authorId, 10)}</span>
           </p>
           <p className="text-xs text-[#93a1bd]">
             <RelativeTime time={post.createdAt} />

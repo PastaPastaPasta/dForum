@@ -15,10 +15,12 @@
       "mode": "team",
       "version": 1,
       "identityNonce": "1",
-      "registeredAt": "2026-11-26T07:06:00Z",
+      "registeredAt": "2026-11-26T07:23:31Z",
       "costCredits": "84722365420",
       "sizeBytes": 7587,
-      "note": "registered via scripts/register-contract.mjs; wait phase failed on the discovered testnet nodes but the broadcast landed (nonce 1 consumed, balance dropped exactly the computed cost, contract fetches with version 1)"
+      "note": "registered via scripts/register-contract.mjs; wait phase failed on the discovered testnet nodes but the broadcast landed (nonce 1 consumed, balance dropped exactly the computed cost, contract fetches with version 1)",
+      "broadcastAt": "2026-11-26T07:06:00Z",
+      "registrationTxHash": "C1EA4532D42B19C54E0E43F13BC58E1F76ED87D2C0283DF5ABFB5574173D9297"
     }
   }
 }

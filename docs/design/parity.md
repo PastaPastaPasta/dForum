@@ -10,8 +10,8 @@ Scope is the forum product surface, not the Dash Core protocol. Honest gaps are 
 |---|---|
 | Categories → forums | `category` + `forum` types (owner-managed; one level of hierarchy) |
 | Threads (start/view) | `thread` type; path route `/t/[id]`, sticky + lockedAt + tags (≤5, contract-validated) |
-| Posts (flat chronology) | `post` type; reply chronology, `replyToId` quotes, body ≤4000 chars / ≤5120 bytes |
-| Search | title/tag/forum search across the latest 25 listable threads (live + static) |
+| Posts (flat chronology) | `post` type; reply chronology (`replyToId` is recorded on the chain but not rendered as a quote — bodies render as-is), body ≤4000 chars / ≤5120 bytes |
+| Search | title/tag/forum-title search over the latest 25 live threads plus the last static snapshot (live fill refines it) |
 | Profiles | identity-scoped (no global username): threads + posts, custom display name/bio/signature/website |
 | Login / register | App Connect v2 "login with Dash" — QR + wallet; the wallet registers the contract-bound key as part of the approval (the "register" equivalent, no server-side accounts) |
 | Statuses | sticky/pinned, locked, hidden (moderation), orphan drop, pagination ("Load more") |
@@ -28,7 +28,7 @@ Scope is the forum product surface, not the Dash Core protocol. Honest gaps are 
 | User reports / mod queue | The `report` type exists in the contract (deletable, status/resolution changeable) but the app neither creates nor moderates reports today — there is no public "flag a post" flow and no report triage queue in the console. A proper report queue (public report → moderator triage) is the one deliberate gap — it needs a public report flow plus a triage queue, not just a button (see `docs/design/contract-next-registration.md`). |
 | Poll/vote feature | Reference site mentioned polls historically; not in the current XenForo surface. Not shipped. |
 | RSS / notifications | Not in the v1 scope. The SPA shell is the AI/SEO surface. |
-| Edit history | No history entries; the body is author-editable and "edited" is shown via `$updatedAt` (moderator `changeFields` bump `$revision`). Append-only semantics are documented in the data model. |
+| Edit history | No history entries; there is no edit control in the UI — "edited" is shown via `$updatedAt` (moderator `changeFields` bump `$revision`). Append-only semantics are documented in the data model. |
 | Thread moves | v1: forumId is immutable (no moves). |
 
 ## Honest caveats

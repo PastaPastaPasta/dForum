@@ -156,6 +156,9 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
     window.history.replaceState(null, '', url)
   }, [q, ready])
 
+  const forumTitleBySlug = new Map(snap.forums.map((f) => [f.slug, f.title]))
+  const forumTitleOf = (t: SearchResult): string | null => (t.forumSlug ? forumTitleBySlug.get(t.forumSlug) ?? null : null)
+
   const needle = q.trim().toLowerCase()
   const matched = useMemo(() => {
     if (!needle) return allThreads
@@ -163,10 +166,10 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
       (t) =>
         t.title.toLowerCase().includes(needle) ||
         t.tags.some((tag) => tag.toLowerCase().includes(needle)) ||
-        t.forumSlug?.toLowerCase().includes(needle) ||
+        forumTitleOf(t)?.toLowerCase().includes(needle) ||
         t.id.toLowerCase().includes(needle),
     )
-  }, [allThreads, needle])
+  }, [allThreads, needle, forumTitleBySlug])
 
   // Orphan rule — applied to the displayed set, never the raw stream.
   const [orphanFiltered, setOrphanFiltered] = useState<SearchResult[] | null>(null)
@@ -189,8 +192,6 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
   const authorIds = results.map((t) => t.ownerId)
   const profiles = useProfileNames(authorIds)
   const nameOf = (id: string): string => profiles[id] ?? snap.profiles[id] ?? shortId(id, 12)
-  const forumTitleBySlug = new Map(snap.forums.map((f) => [f.slug, f.title]))
-  const forumTitleOf = (t: SearchResult): string | null => (t.forumSlug ? forumTitleBySlug.get(t.forumSlug) ?? null : null)
 
   return (
     <>
@@ -199,7 +200,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
         <section className="border-b border-[#22304e]">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Search dForum</h1>
-            <p className="mt-1 text-sm text-[#93a1bd]">Search threads by title, tag, or forum — shows the latest {MAX_LIST} threads</p>
+            <p className="mt-1 text-sm text-[#93a1bd]">Search threads by title, tag, or forum title — the latest {MAX_LIST} threads, plus the last snapshot{snap.generatedAt ? ` (${new Date(snap.generatedAt).toUTCString()})` : ''}</p>
 
             <form role="search" aria-label="Search threads" onSubmit={(e) => e.preventDefault()} className="relative mt-5">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#93a1bd]" aria-hidden="true" />
@@ -216,7 +217,7 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
                 </span>
               )}
             </form>
-            {failed && <LiveUnavailable className="mt-2" onRetry={retry} />}
+            {failed && <LiveUnavailable className="mt-2" onRetry={retry}  snapshotDate={snap.generatedAt} />}
           </div>
         </section>
 
@@ -249,7 +250,13 @@ export default function SearchClient({ snapshot }: { snapshot: Snapshot }) {
             </div>
           )}
           <p className="mt-3 text-xs text-[#93a1bd]" role="status">
-            {failed ? 'Live read failed — showing the snapshot.' : loading ? `${results.length} ${results.length === 1 ? 'thread' : 'threads'} · refreshing…` : `${results.length} ${results.length === 1 ? 'thread' : 'threads'}`}
+            {failed
+              ? 'Live read failed — showing the snapshot.'
+              : loading
+                ? `${results.length} ${results.length === 1 ? 'thread' : 'threads'} · refreshing…`
+                : q.trim()
+                  ? `Showing ${results.length} of ${matched.length} matches`
+                  : `${results.length} ${results.length === 1 ? 'thread' : 'threads'}`}
           </p>
         </section>
       </main>

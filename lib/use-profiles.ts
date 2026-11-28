@@ -26,27 +26,51 @@ export function useProfileNames(ids: (string | null | undefined)[]): Record<stri
     let cancelled = false
     const missing = unique.filter((id) => !cache.has(id))
     if (missing.length === 0) return
-    Promise.all(missing.map(async (id) => {
+
+    const resolveName = (doc: { properties?: Record<string, unknown> } | undefined, id: string): [string, string] => {
+      if (doc?.properties?.modState != null) return [id, 'Hidden profile'] as const
+      const name = doc?.properties?.displayName
+      const resolved = typeof name === 'string' && name.trim() ? name.trim() : shortId(id, 12)
+      return [id, resolved] as const
+    }
+
+    // One batched read per 100 ids (byOwner unique index, `in` accepts up to
+    // 100) instead of one query per id — a full thread page fans out to ~100
+    // requests otherwise. On failure the batch is dropped and we fall back to
+    // the per-id path, so a broken `in` never hides names entirely.
+    const perId = async (id: string) => {
       try {
         const d = await query('profile', { where: [['$ownerId', '==', id]], limit: 1 })
-        const doc = d[0]
-        if (doc?.properties?.modState != null) {
-          cache.set(id, 'Hidden profile')
-          return [id, 'Hidden profile'] as const
-        }
-        const name = doc?.properties?.displayName
-        const resolved = typeof name === 'string' && name.trim() ? name.trim() : shortId(id, 12)
-        cache.set(id, resolved)
-        return [id, resolved] as const
+        return resolveName(d[0], id)
       } catch {
-        // Not cached and not merged — the caller's own id-slice fallback
-        // renders meanwhile; a later ids-change re-runs the effect.
         return null
       }
-    })).then((entries) => {
+    }
+    const batch = async (): Promise<[string, string][]> => {
+      const out: [string, string][] = []
+      for (let i = 0; i < missing.length; i += 100) {
+        const chunk = missing.slice(i, i + 100)
+        try {
+          const docs = await query('profile', { where: [['$ownerId', 'in', chunk]], limit: 100 })
+          const byOwner = new Map(docs.map((d) => [d.ownerId, d]))
+          for (const id of chunk) {
+            const doc = byOwner.get(id)
+            out.push(resolveName(doc, id))
+          }
+        } catch {
+          // Fallback for this chunk only.
+          const fallback = await Promise.all(chunk.map(perId))
+          for (const entry of fallback) if (entry) out.push([entry[0], entry[1]])
+        }
+      }
+      return out
+    }
+
+    batch().then((entries) => {
       if (cancelled) return
       const concrete = entries.filter((e): e is [string, string] => e != null)
       if (concrete.length === 0) return
+      for (const [id, name] of concrete) cache.set(id, name)
       setNames((prev) => ({ ...prev, ...Object.fromEntries(concrete) }))
     })
     return () => { cancelled = true }

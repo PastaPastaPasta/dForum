@@ -23,9 +23,15 @@ describe('connection id', () => {
   })
 
   it('refuses a malformed stored value', () => {
-    store.set('dforum:app-connect:connection-id', 'not-hex')
+    store.set('dforum:app-connect:connection-id:testnet', 'not-hex')
     const fresh = ensureConnectionId()
     expect(fresh).toMatch(/^[0-9a-f]{32}$/)
     expect(fresh).not.toBe('not-hex')
+  })
+
+  it('stores the id under a network-scoped key', () => {
+    const id = ensureConnectionId()
+    expect(store.has('dforum:app-connect:connection-id:testnet')).toBe(true)
+    expect(store.get('dforum:app-connect:connection-id:testnet')).toBe(id)
   })
 })

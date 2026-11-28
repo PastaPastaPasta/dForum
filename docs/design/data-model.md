@@ -1,5 +1,7 @@
 # Data model
 
+> The contract schema is written in `contracts/build.mjs` — there is no separate schema file; CI regenerates and diffs the committed outputs against it.
+
 One contract per deployment (bans/suspensions apply to a single contract; one deployment, one ban surface). Owner-only types: `forumSettings`, `category`, `forum`, `teamMember`. Public types: `thread`, `post`, `reaction`, `report`, `profile`.
 
 ## Types and fields (advisor-settled)

@@ -329,7 +329,7 @@ export default function ProfileClient({ identityId, snapshot }: { identityId: st
 
         {stale && (
           <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-4">
-            <LiveUnavailable onRetry={retry} />
+            <LiveUnavailable onRetry={retry}  snapshotDate={snap?.generatedAt ?? null} />
           </div>
         )}
 

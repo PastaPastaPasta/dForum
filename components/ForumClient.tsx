@@ -168,7 +168,7 @@ export default function ForumClient({ slug, snapshot }: { slug: string; snapshot
             </div>
             <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">{forumTitle}</h1>
             <p className="mt-2 text-[#93a1bd] max-w-2xl">{forumDesc || 'Discussions in this forum.'}</p>
-            {showStaleNote && <LiveUnavailable className="mt-4" onRetry={retry} />}
+            {showStaleNote && <LiveUnavailable className="mt-4" onRetry={retry}  snapshotDate={snap?.generatedAt ?? null} />}
             <div className="mt-4 flex items-center gap-4 text-sm text-[#93a1bd]">
               <span className="whitespace-nowrap">{listed.length}{moreCursor != null ? '+' : ''} thread{listed.length === 1 ? '' : 's'}</span>
               {!ready ? null

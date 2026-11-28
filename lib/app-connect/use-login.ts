@@ -305,6 +305,9 @@ export function useAppConnectLogin(controller: PlatformAuthController): AppConne
   const accept = useCallback(async (identityId: string) => {
     const chosen = verifiedRef.current.find((candidate) => candidate.identityId === identityId) ?? null
     if (!chosen) return false
+    // Stop polling while this is in flight — a fresh answer must not re-verify
+    // (and re-wipe) the grants this accept is about to wipe.
+    stopPolling()
     // Wipe every other grant right away — only the chosen identity's keys
     // should survive the sign-in.
     for (const other of verifiedRef.current.filter((v) => v !== chosen)) wipeGrant(other.grant)
@@ -313,7 +316,17 @@ export function useAppConnectLogin(controller: PlatformAuthController): AppConne
       const authKey = grant.authKeys.find((key) => key.bindingIndex === 0) ?? grant.authKeys[0]
       if (!authKey) {
         wipeGrant(grant)
+        resetVerified()
         setError('No contract-bound key was granted — nothing to sign with.')
+        setPhase('error')
+        return false
+      }
+      // A grant whose private key came back zeroed can never sign — refuse
+      // before asking the vendored controller to store it (it does not check).
+      if (authKey.privateKey.every((b) => b === 0)) {
+        wipeGrant(grant)
+        resetVerified()
+        setError('The granted key came back empty — start again.')
         setPhase('error')
         return false
       }
@@ -321,16 +334,18 @@ export function useAppConnectLogin(controller: PlatformAuthController): AppConne
       wipeGrant(grant)
       await controller.loginWithAuthKey(identityId, authKeyWif, { skipUsernameCheck: true })
       setPhase('accepted')
-      stopPolling()
       wipeActive()
       return true
     } catch (err) {
       try { wipeGrant(grant) } catch { /* already wiped */ }
+      // Everything was wiped — drop the verified list so a new answer can't
+      // be listed against grants that no longer exist.
+      resetVerified()
       setError(err instanceof Error ? err.message : 'Signing you in failed')
       setPhase('error')
       return false
     }
-  }, [controller, stopPolling, wipeActive])
+  }, [controller, stopPolling, wipeActive, resetVerified])
 
   const retry = useCallback(() => {
     wipeAll()

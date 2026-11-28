@@ -30,8 +30,8 @@ export default function LoginPage() {
 
   // The login flow holds key material — it only runs where the session
   // machinery is even available (the canonical host), not merely where the
-  // host string happens to match. On the Pages shell there is no login at
-  // all, so the canonical check folds the availability gate in.
+  // host string happens to match. The site is served from the root, so the
+  // availability gate and the canonical-host gate are the same check.
   const canonical = LOGIN_AVAILABLE && hostIsCanonical(host)
 
   const openModal = useCallback(() => {
@@ -110,7 +110,7 @@ export default function LoginPage() {
 
               <div className="mt-6 space-y-3 text-sm">
                 <Benefit icon={<ShieldCheck className="w-4 h-4" />} text="Your identity stays yours — dForum is a static site over the Dash Platform" />
-                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet authorizes a HIGH-level, contract-bound signing key stored in this tab's session storage — it can sign documents on dForum's contract only; it cannot withdraw or transfer credits, and its use is limited to this host" />
+                <Benefit icon={<KeyRound className="w-4 h-4" />} text="Your wallet adds a key to your identity that can only write to dForum's contract, spend at most ~0.5 DASH in fees, and expire in 90 days. dForum keeps its copy in this tab only — signing out forgets it here; to revoke it, disconnect dForum in your wallet" />
                 <Benefit icon={<MessageSquare className="w-4 h-4" />} text="Posts, profiles, forums and settings all live on-chain" />
               </div>
 
@@ -167,7 +167,7 @@ export default function LoginPage() {
                 <ol className="space-y-5">
                   <Step number={1} title="Scan the QR" body="Open your Dash wallet and scan the dashpay://connect code shown in the login modal." />
                   <Step number={2} title="Approve the request" body="Confirm the App Connect request in your wallet — your wallet registers the bound key as part of the approval, on chain." />
-                  <Step number={3} title="You're in" body="Your session lives in this tab's session storage until you log out or the browser session ends — your wallet key never leaves your wallet. Logging out clears it from this browser." />
+                  <Step number={3} title="You're in" body="Your wallet adds a key that can only write to dForum's contract (~0.5 DASH budget, 90-day expiry). dForum keeps its copy in this tab only. Signing out forgets the copy here — it does NOT revoke the key; to revoke it, disconnect dForum in your wallet." />
                 </ol>
               </div>
             )}

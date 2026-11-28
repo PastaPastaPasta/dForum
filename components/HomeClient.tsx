@@ -66,7 +66,7 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
 
         {error && !loading && (
           <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
-            <LiveUnavailable onRetry={retry} />
+            <LiveUnavailable onRetry={retry}  snapshotDate={snap.generatedAt} />
           </div>
         )}
 
@@ -103,26 +103,42 @@ export default function HomeClient({ snapshot }: { snapshot: Snapshot }) {
 
         <section className="max-w-6xl mx-auto px-4 sm:px-6 mt-12">
           <SectionHeader title="Forums" subtitle="Browse by space" />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {forums.map((f) => (
-              <Link
-                key={f.id}
-                href={`/f/${encodeURIComponent(f.slug ?? f.id)}`}
-                className="group rounded-xl border border-[#22304e] bg-[#111a2e] p-4 hover:border-[#008CE7] transition fade-up"
-              >
-                <p className="font-semibold group-hover:text-[#4db3ff] transition">{f.title}</p>
-                <p className="mt-1 text-sm text-[#93a1bd] line-clamp-2">{f.description || 'No description.'}</p>
-                <p className="mt-3 text-xs text-[#93a1bd]">{f.categoryLabel ? `in ${f.categoryLabel}` : ''}</p>
-              </Link>
-            ))}
-            {forums.length === 0 && !loading && !error ? (
-              <p className="text-sm text-[#93a1bd] py-8 text-center sm:col-span-2 lg:col-span-3">No forums yet.</p>
-            ) : forums.length === 0 && error ? (
-              <p className="text-sm text-[#93a1bd] py-8 text-center sm:col-span-2 lg:col-span-3">Couldn&rsquo;t load forums right now.</p>
-            ) : forums.length === 0 ? (
-              <p className="text-sm text-[#93a1bd] py-8 text-center sm:col-span-2 lg:col-span-3 animate-pulse">Loading forums…</p>
-            ) : null}
-          </div>
+          {forums.length === 0 && !loading && !error ? (
+            <p className="text-sm text-[#93a1bd] py-8 text-center">No forums yet.</p>
+          ) : forums.length === 0 && error ? (
+            <p className="text-sm text-[#93a1bd] py-8 text-center">Couldn&rsquo;t load forums right now.</p>
+          ) : forums.length === 0 ? (
+            <p className="text-sm text-[#93a1bd] py-8 text-center animate-pulse">Loading forums…</p>
+          ) : (
+            categories.map((c) => {
+              const inCat = forums.filter((f) => f.categoryId === c.id)
+              if (inCat.length === 0) return null
+              return (
+                <div key={c.id} className="mb-6">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#93a1bd] mb-2">
+                    {c.title || c.slug || 'Category'} <span className="font-normal normal-case tracking-normal">· {inCat.length} {inCat.length === 1 ? 'forum' : 'forums'}</span>
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {inCat.map((f) => <ForumCard key={f.id} f={f} />)}
+                  </div>
+                </div>
+              )
+            })
+          )}
+          {forums.length > 0 && (
+            (() => {
+              const uncategorized = forums.filter((f) => !f.categoryId || !categories.some((c) => c.id === f.categoryId))
+              if (uncategorized.length === 0) return null
+              return (
+                <div className="mb-2">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#93a1bd] mb-2">Uncategorized <span className="font-normal normal-case tracking-normal">· {uncategorized.length} {uncategorized.length === 1 ? 'forum' : 'forums'}</span></h3>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {uncategorized.map((f) => <ForumCard key={f.id} f={f} />)}
+                  </div>
+                </div>
+              )
+            })()
+          )}
         </section>
 
       </main>
@@ -195,6 +211,18 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }
       <h2 className="text-xl font-bold tracking-tight">{title}</h2>
       {subtitle && <p className="text-sm text-[#93a1bd] mt-0.5">{subtitle}</p>}
     </div>
+  )
+}
+
+function ForumCard({ f }: { f: { id: string; title: string; description: string; slug: string | null } }) {
+  return (
+    <Link
+      href={`/f/${encodeURIComponent(f.slug ?? f.id)}`}
+      className="group rounded-xl border border-[#22304e] bg-[#111a2e] p-4 hover:border-[#008CE7] transition fade-up"
+    >
+      <p className="font-semibold group-hover:text-[#4db3ff] transition">{f.title}</p>
+      <p className="mt-1 text-sm text-[#93a1bd] line-clamp-2">{f.description || 'No description.'}</p>
+    </Link>
   )
 }
 

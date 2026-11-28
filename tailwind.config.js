@@ -20,7 +20,7 @@ module.exports = {
           500: '#3aacff',
         },
         // Design tokens — use these instead of raw hex utilities going forward.
-        base: '#0b1220',        // page background
+        page: '#0b1220',        // page background
         surface: '#111a2e',     // cards / panels
         surface2: '#18233c',    // subtle fills / chips
         line: '#22304e',        // borders / dividers

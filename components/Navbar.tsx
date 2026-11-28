@@ -134,7 +134,6 @@ export function Navbar() {
                   onClick={() => setMenuOpen((o) => !o)}
                   aria-expanded={menuOpen}
                   {...(menuOpen ? { 'aria-controls': 'account-menu' } : {})}
-                  aria-label="Account menu"
                   className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg border border-[#22304e] hover:border-[#008CE7] transition shrink-0"
                 >
                   <Avatar name={session.username ?? session.identityId} id={session.identityId} />
